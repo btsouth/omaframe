@@ -52,7 +52,7 @@ while True: time.sleep(.05)
    QTest::addColumn<QRect>("target");QTest::addColumn<bool>("second");QTest::addColumn<bool>("possible");
    QTest::newRow("region")<<QRect(100,100,800,500)<<false<<true;
    QTest::newRow("full-single")<<QRect(0,0,1280,800)<<false<<false;
-   QTest::newRow("full-dual")<<QRect(0,0,1280,800)<<true<<true;
+   QTest::newRow("full-dual")<<QRect(0,0,1280,800)<<true<<false;
    QTest::newRow("near-full")<<QRect(0,0,1280,775)<<false<<false;
  }
  void placementAlwaysOutsideCapture() {

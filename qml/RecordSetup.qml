@@ -82,7 +82,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredHeight: safeText.implicitHeight+28
                     radius: theme.radius
-                    readonly property color tone: recorder.targetLabel==="Select an area or display" ? theme.text : recorder.safeStop ? theme.accent : theme.urgent
+                    readonly property color tone: recorder.targetLabel==="Select an area or display" ? theme.text : recorder.safeStop || recorder.barStop ? theme.accent : theme.urgent
                     color: theme.alpha(tone, 0.08)
                     border.width: 1
                     border.color: theme.alpha(tone, 0.35)
@@ -90,14 +90,14 @@ Window {
                         id: safeText
                         anchors.fill: parent; anchors.margins: 14
                         text: recorder.controlLocation
-                        color: recorder.targetLabel==="Select an area or display" ? theme.muted : recorder.safeStop ? theme.text : theme.urgent
+                        color: recorder.targetLabel==="Select an area or display" ? theme.muted : recorder.safeStop || recorder.barStop ? theme.text : theme.urgent
                         font.family: theme.fontFamily
                         wrapMode: Text.Wrap
                         font.pixelSize: 13
                     }
                 }
                 RecordToggle {
-                    visible: !recorder.safeStop && recorder.canStart
+                    visible: !recorder.safeStop && !recorder.barStop && recorder.canStart
                     text: "Use Alt+Print to stop this recording"
                     checked: setup.hotkeyOnly
                     onToggled: setup.hotkeyOnly=checked
@@ -111,7 +111,7 @@ Window {
                     StudioButton {
                         text: recorder.targetLabel==="Select an area or display" ? "Select recording area" : recorder.countdown>0 ? "Record in "+recorder.countdown+"s" : "Start recording"
                         primary: true
-                        enabled: recorder.state!=="loading" && !recorder.active && (recorder.targetLabel==="Select an area or display" || (recorder.canStart && (recorder.safeStop || setup.hotkeyOnly)))
+                        enabled: recorder.state!=="loading" && !recorder.active && (recorder.targetLabel==="Select an area or display" || (recorder.canStart && (recorder.safeStop || recorder.barStop || setup.hotkeyOnly)))
                         onClicked: recorder.targetLabel==="Select an area or display" ? recorder.chooseRegion() : recorder.start()
                     }
                 }

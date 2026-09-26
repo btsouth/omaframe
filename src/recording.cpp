@@ -37,13 +37,8 @@ Recording::Placement Recording::placeStop(const QList<Display> &displays,
       if (fits(d, point))
         return {d.name, QRect(point, size)};
   }
-  for (const auto &d : displays) {
-    if (d.name == capturedDisplay)
-      continue;
-    QPoint point(d.bounds.center().x() - size.width() / 2, d.bounds.y() + 40);
-    if (fits(d, point))
-      return {d.name, QRect(point, size)};
-  }
+  // A control on another display is easy to miss, so a recording that leaves
+  // no room on its own display is stopped from the bar or the hotkey instead.
   return {};
 }
 QStringList Recording::arguments(const QString &target, const QString &path,
@@ -115,6 +110,7 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
       m_clock.restart();
       m_tick.start();
       m_startupCheck.stop();
+      refreshBar();
       emit changed();
     } else if (m_clock.elapsed() > 12000) {
       m_status = "Recorder is still starting. You can stop safely.";
@@ -133,6 +129,12 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
           });
   connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
           this, &Recorder::validateResult);
+}
+void Recorder::refreshBar() const {
+  // The bar's recording icon only rechecks when asked.
+  if (m_barStop)
+    QProcess::startDetached("omarchy-shell",
+                            {"-q", "omarchy.indicators", "refresh"});
 }
 bool Recorder::active() const {
   return m_state == "countdown" || m_state == "starting" ||
@@ -199,13 +201,13 @@ bool Recorder::canStart() const {
 QString Recorder::controlLocation() const {
   if (m_capture.isEmpty())
     return "The Stop control will stay outside the recorded area.";
+  if (!safeStop() && m_barStop)
+    return "To stop, click the recording icon in the Omarchy bar or press "
+           "Alt+Print.";
   if (!safeStop())
     return "No room for a stop button outside this capture. Use Alt+Print to "
            "stop, or select a smaller area.";
-  return m_control.display == m_screen
-             ? "Stop button stays outside your selected area."
-             : "Stop button stays on the " + place(m_control.display) +
-                   ", outside the recording.";
+  return "Stop button stays outside your selected area.";
 }
 void Recorder::prepare() {
   if (active() || m_state == "loading")
@@ -480,6 +482,7 @@ void Recorder::stop() {
 void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
   m_startupCheck.stop();
   m_tick.stop();
+  refreshBar();
   emit hideRequested();
   if (code != 0 || exitStatus != QProcess::NormalExit) {
     fail("Recording failed. " + m_error.simplified().right(500) +

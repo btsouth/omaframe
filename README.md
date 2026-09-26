@@ -39,11 +39,11 @@ The command for a Print Screen binding is the absolute path to `build/omaframe -
 
 Choose **Video** on the capture bar or run `omaframe --record`. Select an area or display, toggle desktop audio and microphone independently, choose whether to show the cursor, and start with an optional countdown. Settings are remembered.
 
-A small timer and **Stop** button sit outside the recorded region. For a full-display recording, the control goes on another display. If no safe space exists, setup requires acknowledging the keyboard stop method. Bind `omaframe --record` to Alt+Print to open setup and stop an active recording; `omaframe --stop-recording` only stops a recording owned by the running app.
+A small timer and **Stop** button sit outside the recorded region on the same display. When there is no room for it, such as a full-display recording, there is no on-screen control: click the recording icon in the Omarchy bar or press the hotkey. Without the Omarchy shell, setup requires acknowledging the keyboard stop method. Bind `omaframe --record` to Alt+Print to open setup and stop an active recording; `omaframe --stop-recording` only stops a recording owned by the running app.
 
 Stopping saves the MP4 and opens it in the video editor for trimming. The recorder uses explicit audio source IDs, prefers an available Clean Desktop Microphone on first use, and does not normalize loudness. To retain this desktop's startup-pop suppression, the first 400 ms of audio are muted and fade in over 50 ms. Video frames are copied unchanged during that cleanup. Desktop and microphone audio currently share one mixed track.
 
-Webcam recording remains available through Omarchy's existing menu. There is no pause, automatic zoom, or capture exclusion for an on-screen control yet. Full-display recording on a single monitor therefore needs the hotkey.
+Webcam recording remains available through Omarchy's existing menu. There is no pause, automatic zoom, or capture exclusion for an on-screen control yet.
 
 ## Omarchy theme
 

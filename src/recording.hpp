@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QRect>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -43,6 +44,8 @@ class Recorder final : public QObject {
   Q_PROPERTY(QString targetLabel READ targetLabel NOTIFY changed)
   Q_PROPERTY(bool canStart READ canStart NOTIFY changed)
   Q_PROPERTY(bool safeStop READ safeStop NOTIFY changed)
+  /** The Omarchy bar's recording icon can stop a recording. */
+  Q_PROPERTY(bool barStop READ barStop CONSTANT)
   Q_PROPERTY(QString controlLocation READ controlLocation NOTIFY changed)
   Q_PROPERTY(QString savedPath READ savedPath NOTIFY changed)
 public:
@@ -67,6 +70,7 @@ public:
   QString targetLabel() const;
   bool canStart() const;
   bool safeStop() const { return !m_control.bounds.isEmpty(); }
+  bool barStop() const { return m_barStop; }
   QString controlLocation() const;
   QString savedPath() const { return m_path; }
   Recording::Placement control() const { return m_control; }
@@ -92,6 +96,7 @@ private:
   /** The display's name inside a sentence, e.g. "left display". */
   QString place(const QString &display) const;
   void launch();
+  void refreshBar() const;
   void fail(const QString &);
   void validateResult(int exitCode, QProcess::ExitStatus status);
   QString m_state = "idle", m_status, m_screen, m_target, m_path, m_error,
@@ -103,6 +108,8 @@ private:
   QProcess m_process;
   QTimer m_tick, m_countdownTick, m_startupCheck;
   QElapsedTimer m_clock;
+  const bool m_barStop =
+      !QStandardPaths::findExecutable("omarchy-shell").isEmpty();
   bool m_desktop = false, m_microphone = false, m_cursor = true, m_full = false;
   int m_mic = -1, m_countdown = 3, m_remaining = 0, m_generation = 0;
 };
