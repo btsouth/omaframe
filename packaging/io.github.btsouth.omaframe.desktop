@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=Omaframe
+Comment=A little finish. A better screenshot.
+Exec=omaframe %f
+Icon=omaframe
+Terminal=false
+Categories=Graphics;Photography;
+MimeType=image/png;image/jpeg;image/webp;image/bmp;video/mp4;video/webm;video/x-matroska;video/quicktime;
+StartupWMClass=io.github.btsouth.omaframe
+Actions=Capture;Record;Studio;
+
+[Desktop Action Capture]
+Name=Capture a region
+Exec=omaframe --capture
+
+[Desktop Action Studio]
+Name=Open editor and video tools
+Exec=omaframe --studio
+
+[Desktop Action Record]
+Name=Record your screen
+Exec=omaframe --record
