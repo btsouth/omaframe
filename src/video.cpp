@@ -12,6 +12,7 @@
 #include <QUuid>
 #include <QtConcurrent>
 #include <cmath>
+#include <sys/resource.h>
 
 Video::Video(QObject *parent) : QObject(parent) {
   m_directory =
@@ -20,6 +21,9 @@ Video::Video(QObject *parent) : QObject(parent) {
                                        QStandardPaths::MoviesLocation) +
                                        "/Omaframe")
           .toString();
+  // x264 uses every core; run it below normal priority so the desktop stays
+  // responsive during an export.
+  m_encoder.setChildProcessModifier([] { setpriority(PRIO_PROCESS, 0, 10); });
   connect(&m_encoder, &QProcess::readyReadStandardError, this, [this] {
     m_error = (m_error + QString::fromUtf8(m_encoder.readAllStandardError()))
                   .right(2400);
@@ -244,7 +248,7 @@ void Video::exportClip(double start, double end, bool mute) {
     args << "-map" << "0:a?" << "-c:a" << "aac" << "-b:a" << "192k";
   args << "-vf" << "scale=trunc(iw/2)*2:trunc(ih/2)*2" << "-c:v" << "libx264"
        << "-preset" << "fast" << "-crf" << "18" << "-pix_fmt" << "yuv420p"
-       << "-threads" << "2" << "-map_metadata" << "-1" << "-movflags"
+       << "-map_metadata" << "-1" << "-movflags"
        << "+faststart" << "-progress" << "pipe:1" << m_temporary;
   m_encoder.start("ffmpeg", args);
 }
