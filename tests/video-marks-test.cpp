@@ -174,6 +174,13 @@ private slots:
     QVERIFY(marks.hitAt(0.65, 0.65).contains("index"));
     marks.undo();
     QCOMPARE(marks.selectedAnnotation().value("start").toDouble(), 3.);
+    // Drawn on the last frame, a mark still lasts a tenth of a second, and a
+    // mark that runs to the end can be picked up there.
+    marks.setPlayhead(8);
+    marks.edit("box", 0.4, 0.1, 0.6, 0.3);
+    QCOMPARE(marks.selectedAnnotation().value("start").toDouble(), 7.9);
+    QVERIFY(marks.hitAt(0.4, 0.2).contains("index"));
+    QVERIFY(marks.hitAt(0.1, 0.2).contains("index"));
     // Screenshots ignore times.
     MarkDocument still;
     still.reset(frame);
@@ -245,6 +252,28 @@ private slots:
     QVERIFY(boxed(frameAt(video.savedPath(), 1.9, {320, 240})));
     QVERIFY(!boxed(frameAt(video.savedPath(), 2.4, {320, 240})));
     QVERIFY(white(frameAt(video.savedPath(), 1.0, {320, 240}), 120, 90));
+  }
+  void marksOnARotatedVideoLandOnTheUprightPicture() {
+    const QString rotated = temp.filePath("rotated.mp4");
+    QProcess ffmpeg;
+    ffmpeg.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-display_rotation",
+                            "90", "-i", plain, "-c", "copy", rotated});
+    QVERIFY(ffmpeg.waitForFinished(10000));
+    QCOMPARE(ffmpeg.exitCode(), 0);
+    Video video;
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("rotated-clips")));
+    video.open(QUrl::fromLocalFile(rotated));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QCOMPARE(video.frameSize(), QSize(240, 320));
+    video.marks()->edit("redact", 0.5, 0.25, 1, 0.5);
+    video.exportClip(0.5, 4, true);
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    const QImage frame = frameAt(video.savedPath(), 1, {240, 320});
+    QVERIFY(!frame.isNull());
+    QVERIFY(redacted(frame, 200, 120));
+    QVERIFY(white(frame, 60, 120));
+    QVERIFY(white(frame, 200, 250));
   }
   void exportedBlurIsSofterThanTheRecording() {
     Video video;

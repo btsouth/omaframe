@@ -52,13 +52,17 @@ void MarkDocument::timeNewMark(Frame::Edit &edit) const {
   // Hiding something covers the whole clip: a secret on screen for a moment
   // is easy to miss if the mark starts where it was drawn. Everything else
   // starts at the playhead. Both run to the end.
+  // A mark drawn on the last frame still lasts the shortest allowed time.
   const bool hides = edit.type == "blur" || edit.type == "redact";
-  edit.start = hides ? 0. : std::min(m_playhead, m_duration);
+  edit.start = hides ? 0. : std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1));
   edit.end = m_duration;
 }
 bool MarkDocument::showing(const Frame::Edit &edit) const {
-  return m_duration <= 0 ||
-         (m_playhead >= edit.start && (edit.end < 0 || m_playhead < edit.end));
+  if (m_duration <= 0)
+    return true;
+  // A mark that runs to the end of the clip is still there on its last frame.
+  const double end = edit.end < 0 ? m_duration : edit.end;
+  return m_playhead >= edit.start && (m_playhead < end || end >= m_duration);
 }
 QVariantList MarkDocument::annotations() const {
   QVariantList list;

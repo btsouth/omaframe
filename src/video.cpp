@@ -386,6 +386,14 @@ void Video::open(const QUrl &url) {
         h264 = stream.value("codec_name").toString() == "h264";
         r.frameSize = QSize(stream.value("width").toInt(),
                             stream.value("height").toInt());
+        // FFmpeg and the player turn frames upright, so marks are placed on
+        // the upright picture. A quarter turn swaps its width and height.
+        int rotation = stream.value("tags").toObject().value("rotate").toString().toInt();
+        for (const auto &side : stream.value("side_data_list").toArray())
+          if (side.toObject().contains("rotation"))
+            rotation = side.toObject().value("rotation").toInt();
+        if (qAbs(rotation) % 180 == 90)
+          r.frameSize.transpose();
         r.dimensions = QString("%1 × %2")
                            .arg(r.frameSize.width())
                            .arg(r.frameSize.height());

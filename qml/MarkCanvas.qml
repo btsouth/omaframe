@@ -14,6 +14,9 @@ Item {
     // The playhead on a video, in seconds. Marks not showing there are not
     // outlined. Negative for a screenshot.
     property real time: -1
+    // The length of the video, so a mark that runs to its end still shows on
+    // the last frame.
+    property real duration: 0
     readonly property bool typing: textEditor.active
     readonly property bool dragging: drawArea.pressed
     readonly property bool hovered: drawArea.containsMouse
@@ -21,7 +24,7 @@ Item {
     // A click with the select tool that hit no mark.
     signal emptyClicked(bool hadSelection)
     function showing(mark) {
-        return time < 0 || mark.start === undefined || (time >= mark.start && time < mark.end);
+        return time < 0 || mark.start === undefined || (time >= mark.start && (time < mark.end || mark.end >= duration));
     }
     function commitText() { textEditor.commit(); }
     function cancelText() { textEditor.cancel(); }
