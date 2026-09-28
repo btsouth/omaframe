@@ -250,3 +250,21 @@ downloaded `releases/latest/download/omaframe-x86_64.pkg.tar.zst`, installed
 0.2.1-1 with its dependencies, and `omaframe --version` reported 0.2.1.
 `pacman -U` directly on the URL is not offered because pacman requires a
 signature for remote packages and the package is unsigned.
+
+## Release v0.2.2, 2026-09-28
+
+A user installing 0.2.1 from the announcement hit `unable to satisfy
+dependency 'gpu-screen-recorder>=6.1.3'`. Omarchy's package channels serve
+different GPU Screen Recorder versions: stable and RC serve 6.1.0 from their
+`extra` snapshots (and 5.12.3 in the `omarchy` repo, which comes after
+`extra`), and only edge serves 6.1.3. The 6.1.3 floor was a conservative guess.
+6.1.0 supports every option Omaframe passes and writes the same first-frame
+file (`<output>.ts` with a `monotonic_microsec realtime_microsec` header), so
+0.2.2 requires `gpu-screen-recorder>=6.1.0` in the package and at runtime. The
+recording suite now accepts 6.1.0 and refuses 6.0.9.
+
+In a fresh `archlinux:base` container pointed at `stable-mirror.omarchy.org`
+with the stable `omarchy` repo added, the README command installed Omaframe
+0.2.2-1 with gpu-screen-recorder 6.1.0-1, and `omaframe --version` reported
+0.2.2. A real GPU recording with 6.1.0 has not been made; 6.1.3 was the version
+used for the hardware checks.
