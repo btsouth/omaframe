@@ -1488,6 +1488,10 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                   auto result = watcher->result();
                   watcher->deleteLater();
                   if (!result.screens.error.isEmpty()) {
+                    // Report it where the user is looking, not on the primary
+                    // display, which may be off or out of sight.
+                    if (!result.pointer.isEmpty())
+                      m_captureMonitor = result.pointer;
                     m_busy = false;
                     m_quickState = "capture-error";
                     m_status = "Capture failed: " + result.screens.error;
@@ -1506,7 +1510,10 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                   if (region || (repeat && repeated.isNull())) {
                     m_frozen = result.screens.images;
                     m_windowTargets = result.targets;
-                    m_pointerMonitor = result.pointer;
+                    // F can only answer for a display that was frozen.
+                    m_pointerMonitor = m_frozen.contains(result.pointer)
+                                           ? result.pointer
+                                           : QString();
                     for (auto it = m_frozen.cbegin(); it != m_frozen.cend();
                          ++it)
                       m_store->put("capture/" + it.key(), it.value());
@@ -1563,6 +1570,7 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
             };
             const auto monitors = query("monitors");
             const auto clients = query("clients");
+            requested = WindowTargets::awake(monitors, requested);
             result.targets =
                 WindowTargets::fromHyprland(monitors, clients, requested);
             // The display under the pointer answers F before the pointer moves.
