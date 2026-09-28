@@ -19,6 +19,10 @@ everything it needs:
 curl -fLo /tmp/omaframe.pkg.tar.zst https://github.com/btsouth/omaframe/releases/latest/download/omaframe-x86_64.pkg.tar.zst && sudo pacman -U /tmp/omaframe.pkg.tar.zst
 ```
 
+If pacman says it cannot satisfy a dependency, your package lists are older
+than GPU Screen Recorder 6.1.0. Run `omarchy-update` (or `sudo pacman -Syu` on
+plain Arch) and then the command again.
+
 Open Omaframe from the launcher and click **Use Print and Alt+Print**. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
