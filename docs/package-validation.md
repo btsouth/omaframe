@@ -236,3 +236,17 @@ warnings. The assets were downloaded back from the release and matched
 `SHA256SUMS`. The published `PKGBUILD` alone downloaded the source archive from
 the release, passed its checksum and built the package. The release binary is
 installed as `~/.local/bin/omaframe`.
+
+## Release v0.2.1, 2026-09-28
+
+Published as the latest full release, with the opaque-window fix and a stable
+asset name for a one-line install. Package SHA-256
+`1e1d8abda876672891a1f1a93e8082e54c1ecb5860453002c80944761034abd9` (also
+attached as `omaframe-x86_64.pkg.tar.zst`), source archive
+`58f9b2c9067acd4e49054df06a1473890370b67205332572f08efa4474da50fe`, binary
+`6a35a33b886bf4bcc7e8e7422c08b32d992ff96fa97ef464f0edc66fe24d52c3`. All five
+CTest suites passed. In a fresh `archlinux:base` container the README command
+downloaded `releases/latest/download/omaframe-x86_64.pkg.tar.zst`, installed
+0.2.1-1 with its dependencies, and `omaframe --version` reported 0.2.1.
+`pacman -U` directly on the URL is not offered because pacman requires a
+signature for remote packages and the package is unsigned.
