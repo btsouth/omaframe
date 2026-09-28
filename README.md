@@ -3,22 +3,23 @@
 Screenshots and screen recordings for Omarchy and Arch/Hyprland. Qt 6, C++20,
 QML. Local files, no accounts, no uploads, no watermark.
 
-This is a working **0.2 preview**. Recording uses GPU Screen Recorder with
+This is version 0.2. Recording uses GPU Screen Recorder with
 Omaframe's own capture bar, Stop control and review.
 
 ## Install
 
-Download `omaframe-0.2.0-1-x86_64.pkg.tar.zst` from the
-[latest release](https://github.com/btsouth/omaframe/releases) and install it
-with its dependencies:
+On Omarchy or Arch, one command installs the latest release and everything it
+needs:
 
 ```sh
-sudo pacman -U omaframe-0.2.0-1-x86_64.pkg.tar.zst
+curl -fLo /tmp/omaframe.pkg.tar.zst https://github.com/btsouth/omaframe/releases/latest/download/omaframe-x86_64.pkg.tar.zst && sudo pacman -U /tmp/omaframe.pkg.tar.zst
 ```
 
-Or build it yourself: download `PKGBUILD` from the same release and run
-`makepkg -si` next to it. Then open Omaframe from the launcher and choose
-**Use Print and Alt+Print**.
+Then open Omaframe from the launcher and choose **Use Print and Alt+Print**.
+
+To build it yourself instead, download `PKGBUILD` from the
+[latest release](https://github.com/btsouth/omaframe/releases/latest) and run
+`makepkg -si` next to it.
 
 To uninstall, run `sudo pacman -R omaframe` and delete the block between
 `-- omaframe:shortcuts:start` and `-- omaframe:shortcuts:end` in
