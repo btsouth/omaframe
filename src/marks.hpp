@@ -39,6 +39,8 @@ public:
   /** The edits to preview: all of them except a label being typed. */
   QVector<Frame::Edit> visibleEdits() const;
   int selected() const { return m_selected; }
+  /** The label being typed, which the preview leaves out, or -1. */
+  int hiddenIndex() const { return m_hiddenEdit; }
 
   bool canUndo() const { return !m_undoStates.isEmpty(); }
   bool canRedo() const { return !m_redoStates.isEmpty(); }

@@ -8,7 +8,8 @@ import QtMultimedia
 // filmstrip, trim handles, removed parts and playhead live together.
 // Clicking the filmstrip moves the playhead. Dragging across it selects a
 // part, which can then be removed. While paused, G and R draw a blur or a
-// redaction over the video. Nothing here changes the source file.
+// redaction over the video, and A, B, T and N an arrow, a box, a label or a
+// numbered step. Nothing here changes the source file.
 Item {
     id: pane
     property bool shortcutsAllowed: true
@@ -30,8 +31,9 @@ Item {
     readonly property bool editable: loaded && !video.busy
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
     readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations])
-    // The mark tool: select, blur or redact.
+    // The mark tool: select, blur, redact, arrow, box, text or step.
     property string tool: "select"
+    readonly property bool typing: markCanvas.typing
     readonly property var selectedMark: video.marks.selectedAnnotation
     readonly property bool markSelected: selectedMark.type !== undefined
     readonly property bool hasMarks: video.marks.annotations.length > 0
@@ -125,6 +127,12 @@ Item {
             restore(next);
         }
         redoStack = redoStack.slice(0, -1);
+    }
+    function commitText() {
+        markCanvas.commitText();
+    }
+    function markName(type) {
+        return ({ redact: "Redaction", blur: "Blur", arrow: "Arrow", box: "Box", text: "Label", step: "Step" })[type] || "Mark";
     }
     function useTool(key) {
         if (!editable)
@@ -376,7 +384,7 @@ Item {
             pane.clearSelection();
         }
     }
-    readonly property bool keys: visible && editable && shortcutsAllowed
+    readonly property bool keys: visible && editable && shortcutsAllowed && !typing
     Shortcut { sequence: "Space"; enabled: pane.keys; onActivated: pane.togglePlay() }
     Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setIn() }
     Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setOut() }
@@ -384,6 +392,10 @@ Item {
     Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && (pane.hasSelection || pane.markSelected); onActivated: pane.deleteSelected() }
     Shortcut { sequence: "G"; enabled: pane.keys; onActivated: pane.useTool("blur") }
     Shortcut { sequence: "R"; enabled: pane.keys; onActivated: pane.useTool("redact") }
+    Shortcut { sequence: "A"; enabled: pane.keys; onActivated: pane.useTool("arrow") }
+    Shortcut { sequence: "B"; enabled: pane.keys; onActivated: pane.useTool("box") }
+    Shortcut { sequence: "T"; enabled: pane.keys; onActivated: pane.useTool("text") }
+    Shortcut { sequence: "N"; enabled: pane.keys; onActivated: pane.useTool("step") }
     Shortcut { sequence: "V"; enabled: pane.keys; onActivated: pane.tool = "select" }
     // Arrow keys move a selected mark, like the screenshot editor, and
     // otherwise step through time.
@@ -597,6 +609,23 @@ Item {
                             blurMax: 64
                             blur: 1
                         }
+                    }
+                }
+                // Arrows, boxes, labels and steps, drawn by the same renderer
+                // as the saved video.
+                Repeater {
+                    model: video.overlays
+                    Image {
+                        required property var modelData
+                        x: modelData.x * picture.width
+                        y: modelData.y * picture.height
+                        width: modelData.w * picture.width
+                        height: modelData.h * picture.height
+                        visible: pane.head >= modelData.start && pane.head < modelData.end
+                        source: modelData.source
+                        cache: false
+                        smooth: true
+                        mipmap: true
                     }
                 }
                 MarkCanvas {
@@ -827,6 +856,23 @@ Item {
                 hint: "Drag over something private to cover it in the saved video · R"
                 onClicked: pane.tool === "redact" ? pane.tool = "select" : pane.useTool("redact")
             }
+            Repeater {
+                model: [
+                    { key: "arrow", hint: "Arrow · A" }, { key: "box", hint: "Box · B" },
+                    { key: "text", hint: "Label · T" }, { key: "step", hint: "Numbered step · N" }
+                ]
+                StudioButton {
+                    required property var modelData
+                    glyph: modelData.key
+                    quiet: pane.tool !== modelData.key
+                    selected: pane.tool === modelData.key
+                    implicitWidth: 36
+                    implicitHeight: 36
+                    enabled: pane.editable
+                    hint: modelData.hint
+                    onClicked: pane.tool === modelData.key ? pane.tool = "select" : pane.useTool(modelData.key)
+                }
+            }
         }
 
         // One fixed-height bar that describes the selection, so choosing a
@@ -839,15 +885,21 @@ Item {
             Text {
                 visible: pane.barMode === "tool"
                 Layout.fillWidth: true
-                text: pane.tool === "blur" ? "Drag over what to blur. It stays blurred for the whole clip; I and O change that. Use Redact for anything private."
-                    : "Drag over what to cover. It is covered for the whole clip; I and O change that."
+                text: ({
+                        blur: "Drag over what to blur. It stays blurred for the whole clip; I and O change that. Use Redact for anything private.",
+                        redact: "Drag over what to cover. It is covered for the whole clip; I and O change that.",
+                        arrow: "Drag from the tail to the tip. It shows from here to the end of the clip.",
+                        box: "Drag to draw a box. It shows from here to the end of the clip.",
+                        text: "Click where the label should go, then type. It shows from here to the end of the clip.",
+                        step: "Click to place the next number. It shows from here to the end of the clip."
+                    })[pane.tool] || ""
                 color: theme.muted
                 font.pixelSize: 12
                 elide: Text.ElideRight
             }
             Caption {
                 visible: pane.barMode === "mark"
-                text: pane.selectedMark.type === "redact" ? "REDACTION" : "BLUR"
+                text: pane.markName(pane.selectedMark.type).toUpperCase()
                 color: theme.selectedText
             }
             TimeField {
@@ -877,7 +929,11 @@ Item {
             Text {
                 visible: pane.barMode === "mark"
                 Layout.fillWidth: true
-                text: pane.selectedMark.start <= 0.0005 && pane.selectedMark.end >= video.duration - 0.0005 ? "Covers the whole clip. I and O set where it starts and ends." : "(" + ((pane.selectedMark.end || 0) - (pane.selectedMark.start || 0)).toFixed(1) + " s)"
+                readonly property bool toEnd: pane.selectedMark.end >= video.duration - 0.0005
+                readonly property bool hides: pane.selectedMark.type === "blur" || pane.selectedMark.type === "redact"
+                text: hides && toEnd && pane.selectedMark.start <= 0.0005 ? "Covers the whole clip. I and O set where it starts and ends."
+                    : !hides && toEnd ? "Shows until the end. Press O to end it here."
+                    : "(" + ((pane.selectedMark.end || 0) - (pane.selectedMark.start || 0)).toFixed(1) + " s)"
                 color: theme.faint
                 font.pixelSize: 11
                 elide: Text.ElideRight
@@ -1260,7 +1316,7 @@ Item {
                         border.width: 1
                         border.color: chosen ? theme.accent : theme.alpha(theme.background, 0.8)
                         Accessible.role: Accessible.Button
-                        Accessible.name: (modelData.type === "redact" ? "Redaction" : "Blur") + " from " + pane.time(modelData.start) + " to " + pane.time(modelData.end)
+                        Accessible.name: pane.markName(modelData.type) + " from " + pane.time(modelData.start) + " to " + pane.time(modelData.end)
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor

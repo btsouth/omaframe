@@ -85,7 +85,8 @@ private slots:
 
   void noMarksGiveNoFilters() {
     QVERIFY(videoMarkFilters({}, {320, 240}, 0, "[0:v:0]", "[out]").isEmpty());
-    // Only blur and redaction are burned in so far.
+    // Arrows and the like come in as pictures, so without one there is
+    // nothing to lay over the video.
     QVERIFY(videoMarkFilters({mark("arrow", 0, 4)}, {320, 240}, 0, "[0:v:0]",
                              "[out]").isEmpty());
     QVERIFY(videoMarkFilters({mark("redact", 0, 4)}, {}, 0, "[0:v:0]", "[out]")
@@ -121,6 +122,36 @@ private slots:
     QVERIFY(filters[3].endsWith("enable='between(t,0.750,2.750)'[out]"));
   }
 
+  void picturesGoOverHiddenAreas() {
+    VideoOverlay overlay;
+    overlay.input = 1;
+    overlay.area = QRect(40, 30, 50, 20);
+    overlay.start = 2;
+    overlay.end = -1;
+    const auto filters = videoMarkFilters({mark("arrow", 0, 4), mark("redact", 0, 4)},
+                                          {320, 240}, 0.5, "[0:v:0]", "[out]",
+                                          {overlay});
+    QCOMPARE(filters.size(), 2);
+    QVERIFY(filters[0].startsWith("[0:v:0]drawbox="));
+    QCOMPARE(filters[1], QString("[mark0][1:v]overlay=40:30:enable='gte(t,1.500)'[out]"));
+  }
+  void aMarkDrawnAloneMatchesTheScreenshot() {
+    const QSize size(320, 240);
+    Frame::Edit first{"step", {0.2, 0.2}, {0.2, 0.2}};
+    Frame::Edit second{"step", {0.6, 0.5}, {0.6, 0.5}};
+    const QVector<Frame::Edit> edits{first, mark("blur", 0, 4), second};
+    QRect area;
+    const QImage alone = renderVideoMark(edits, 2, size, &area);
+    QVERIFY(!alone.isNull());
+    QVERIFY(QRect(QPoint(), size).contains(area));
+    QVERIFY(area.contains(QPoint(192, 120)));
+    // The second step still shows 2, as it would on a screenshot.
+    QImage clear(size, QImage::Format_ARGB32_Premultiplied);
+    clear.fill(Qt::transparent);
+    const QImage together = Frame::applyEdits(clear, {first, second}, false);
+    QCOMPARE(alone, together.copy(area));
+    QVERIFY(renderVideoMark(edits, 1, size, &area).isNull());
+  }
   void newMarksOnAVideoGetTimes() {
     MarkDocument marks;
     QImage frame(320, 240, QImage::Format_ARGB32_Premultiplied);
@@ -186,6 +217,34 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
     QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
     QVERIFY(redacted(frameAt(video.savedPath(), 1.5, {320, 240}), 120, 90));
+  }
+  void exportLaysPicturesOverTheVideo() {
+    Video video;
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("box")));
+    video.open(QUrl::fromLocalFile(plain));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.marks()->setPlayhead(1);
+    video.marks()->edit("box", 0.25, 0.25, 0.5, 0.5);
+    video.marks()->setSelectedTimes(1, 3);
+    QCOMPARE(video.overlays().size(), 1);
+    video.exportEdited(0.5, 4, true, {QVariantMap{{"start", 2.5}, {"end", 2.9}}});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    // The box's thin left edge runs down near x = 80, in the mark's colour.
+    const auto boxed = [](const QImage &frame) {
+      for (int x = 76; x <= 84; ++x) {
+        const QColor c = frame.pixelColor(x, 90);
+        if (c.red() > 170 && c.green() < 150)
+          return true;
+      }
+      return false;
+    };
+    QVERIFY(!boxed(frameAt(video.savedPath(), 0.2, {320, 240})));
+    QVERIFY(boxed(frameAt(video.savedPath(), 1.0, {320, 240})));
+    // 2.5 to 2.9 was cut, so 3.0 in the recording is 2.1 in the clip.
+    QVERIFY(boxed(frameAt(video.savedPath(), 1.9, {320, 240})));
+    QVERIFY(!boxed(frameAt(video.savedPath(), 2.4, {320, 240})));
+    QVERIFY(white(frameAt(video.savedPath(), 1.0, {320, 240}), 120, 90));
   }
   void exportedBlurIsSofterThanTheRecording() {
     Video video;

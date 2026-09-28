@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: plan. Phases 0 and 1 are built on the `marks-document` branch; the rest is not started.
+Status: plan. Phases 0 to 2 are built on the `marks-document` branch; the rest is not started.
 
 ## Goal
 
@@ -86,12 +86,12 @@ Put the filter-graph builder in a free function (`videoMarkFilters(edits, size)`
 
 ## Phase 2: other marks on video
 
-Arrow, line, box, oval, highlight, pen, steps and text.
+Arrow, box, text and steps, as icon buttons after Blur and Redact with the keys A, B, T and N. Line, oval, highlight and pen stay on screenshots: O already sets the end of a clip in review, and four tools cover pointing at something in a recording. Marks use the screenshot defaults; there are no color or size controls on video.
 
 - Default range: from the playhead to the end of the clip. Most marks point at something that stays on screen, and one rule for every mark is easier to learn than a different default per tool. To end a mark earlier, select it and press O at the moment it should disappear, or drag the end of its bar under the timeline. There is no duration field or "until end" toggle.
 - While a mark is selected and its range has not been changed, the status line says "Shows until the end. Press O to end it here." This is the only place the shorter option is explained, and it only appears when it applies.
-- Export: group the marks by identical time range. For each group, render the marks onto a transparent image the size of the video with `Frame::applyEdits` and save a PNG in the export's temp directory. Add each PNG as an input and `overlay` it with that group's `enable` range. Blur and redact stay as filters from phase 1, and they are applied before the PNG overlays, so an arrow drawn over a blurred area stays sharp.
-- Preview: the same transparent render, shown as an `Image` over the video while the playhead is in range.
+- Export: each mark is drawn alone with `Frame::applyEdits` on a clear frame, cut down to the pixels it covers, and saved as a PNG in a temporary folder. Each PNG is an FFmpeg input, laid over the video with `overlay` at its place and with its own `enable` range. Blur and redact stay as filters from phase 1 and come first, so an arrow drawn over a blurred area stays sharp. One picture per mark instead of one per time range keeps the preview and the export the same pictures.
+- Preview: the same pictures, served to QML through the `videomarks` image provider and shown while the playhead is in range.
 - Step numbers count every step mark in the clip, not only the visible ones, so the numbers match what was drawn.
 
 No keyframes, no motion, no fade in or out, and marks do not follow moving content. Say so in the README next to the existing "There is no pause, webcam overlay..." line, and remove "annotation on video" from it.

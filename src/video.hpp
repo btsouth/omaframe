@@ -7,13 +7,33 @@
 #include <QVariantList>
 #include <memory>
 
-/** FFmpeg filters that burn blur and redaction marks into video frames of
- *  `size`, reading the stream `input` and writing `output`. `offset` is
+class ImageStore;
+
+/** Marks that hide what is under them. The rest (arrows, boxes, labels and
+ *  steps) are pictures laid over the video. */
+bool hidesVideo(const Frame::Edit &edit);
+bool pointsInVideo(const Frame::Edit &edit);
+/** A picture of one pointing mark laid over the video: which FFmpeg input it
+ *  is, where it goes in the frame, and when it shows. */
+struct VideoOverlay {
+  int input = 0;
+  QRect area;
+  double start = 0, end = -1;
+};
+/** Mark `index` drawn alone on a clear frame of `size`, cut down to the
+ *  pixels it covers. `area` gets where they go. A step keeps its number in
+ *  the clip. Null when there is nothing to draw. */
+QImage renderVideoMark(const QVector<Frame::Edit> &edits, int index, QSize size,
+                       QRect *area);
+/** FFmpeg filters that burn marks into video frames of `size`, reading the
+ *  stream `input` and writing `output`: blur and redaction first, then the
+ *  `overlays`, so an arrow over a blurred area stays sharp. `offset` is
  *  subtracted from the marks' times, for input that starts that many seconds
  *  into the source. Empty when no mark shows in the input. */
 QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
                              double offset, const QString &input,
-                             const QString &output);
+                             const QString &output,
+                             const QVector<VideoOverlay> &overlays = {});
 
 class Video : public QObject {
   Q_OBJECT
@@ -37,6 +57,9 @@ class Video : public QObject {
   Q_PROPERTY(MarkDocument *marks READ marks CONSTANT)
   /** The video's frame size in pixels. */
   Q_PROPERTY(QSize frameSize READ frameSize NOTIFY changed)
+  /** The pointing marks as pictures for the preview: index, start, end, the
+   *  area x, y, w, h as fractions of the frame, and an image source. */
+  Q_PROPERTY(QVariantList overlays READ overlays NOTIFY overlaysChanged)
 public:
   static constexpr int ThumbnailCount = 16;
   explicit Video(QObject *parent = nullptr);
@@ -57,6 +80,9 @@ public:
   QString savedSummary() const { return m_savedSummary; }
   MarkDocument *marks() { return &m_marks; }
   QSize frameSize() const { return m_frameSize; }
+  QVariantList overlays() const { return m_overlays; }
+  /** Where the preview pictures of the marks are kept for QML. */
+  void setImageStore(ImageStore *store) { m_store = store; }
   Q_INVOKABLE void open(const QUrl &url);
   Q_INVOKABLE void exportClip(double start, double end, bool mute);
   Q_INVOKABLE void exportEdited(double start, double end, bool mute,
@@ -77,13 +103,23 @@ signals:
   void opening();
   void exported(const QUrl &file);
   void originalAccepted(const QUrl &file);
+  void overlaysChanged();
   void opened();
 
 private:
   void makeThumbnails();
+  void renderOverlays();
+  /** Writes each pointing mark as a PNG for FFmpeg, adding an input to
+   *  `inputs` and its place to `overlays` for each. False when one could not
+   *  be written. */
+  bool writeOverlays(QStringList &inputs, QVector<VideoOverlay> &overlays);
   QUrl m_source;
   MarkDocument m_marks;
   QSize m_frameSize;
+  ImageStore *m_store = nullptr;
+  QVariantList m_overlays;
+  int m_overlayRevision = 0;
+  std::unique_ptr<QTemporaryDir> m_overlayDir;
   QStringList m_thumbnails;
   std::unique_ptr<QTemporaryDir> m_thumbnailDir;
   int m_generation = 0;

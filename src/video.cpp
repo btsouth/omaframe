@@ -1,4 +1,5 @@
 #include "video.hpp"
+#include "studio.hpp"
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -38,19 +39,78 @@ static bool decodesVideoFrame(const QString &path, const QStringList &seek = {})
 
 static QString seconds(double value) { return QString::number(value, 'f', 3); }
 
+bool hidesVideo(const Frame::Edit &edit) {
+  return edit.type == "blur" || edit.type == "redact";
+}
+bool pointsInVideo(const Frame::Edit &edit) {
+  return !hidesVideo(edit) && edit.type != "crop";
+}
+
+QImage renderVideoMark(const QVector<Frame::Edit> &edits, int index, QSize size,
+                       QRect *area) {
+  if (index < 0 || index >= edits.size() || size.isEmpty() ||
+      !pointsInVideo(edits[index]))
+    return {};
+  Frame::Edit edit = edits[index];
+  if (edit.type == "step") {
+    edit.number = 0;
+    for (int i = 0; i <= index; ++i)
+      edit.number += edits[i].type == "step";
+  }
+  QImage clear(size, QImage::Format_ARGB32_Premultiplied);
+  clear.fill(Qt::transparent);
+  const QImage drawn = Frame::applyEdits(clear, {edit}, false);
+  // Look for drawn pixels near the mark only: arrow heads, outlines and
+  // label boxes reach a little past its points, never far.
+  const QRectF bounds = Frame::annotationBounds(edit, clear);
+  const int margin = std::max(size.width(), size.height()) / 20 + 16;
+  const QRect search =
+      QRect(QPoint(int(bounds.left() * size.width()), int(bounds.top() * size.height())),
+            QPoint(int(bounds.right() * size.width()), int(bounds.bottom() * size.height())))
+          .adjusted(-margin, -margin, margin, margin)
+          .intersected(drawn.rect());
+  int left = search.right() + 1, right = -1, top = search.bottom() + 1, bottom = -1;
+  for (int y = search.top(); y <= search.bottom(); ++y) {
+    const QRgb *row = reinterpret_cast<const QRgb *>(drawn.constScanLine(y));
+    for (int x = search.left(); x <= search.right(); ++x)
+      if (qAlpha(row[x])) {
+        left = std::min(left, x);
+        right = std::max(right, x);
+        top = std::min(top, y);
+        bottom = std::max(bottom, y);
+      }
+  }
+  if (right < 0)
+    return {};
+  *area = QRect(QPoint(left, top), QPoint(right, bottom));
+  return drawn.copy(*area);
+}
+
+// The part of a filter that turns it on while a mark shows, with its times
+// moved back by `offset`. False when the mark ends before the input starts.
+static bool markTiming(double start, double end, double offset, QString *enable) {
+  const bool untilEnd = end < 0;
+  start = std::max(0., start - offset);
+  end -= offset;
+  if (!untilEnd && end <= start)
+    return false;
+  *enable = untilEnd ? QString(":enable='gte(t,%1)'").arg(seconds(start))
+                     : QString(":enable='between(t,%1,%2)'").arg(seconds(start), seconds(end));
+  return true;
+}
+
 QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
                              double offset, const QString &input,
-                             const QString &output) {
+                             const QString &output,
+                             const QVector<VideoOverlay> &overlays) {
+  if (size.isEmpty())
+    return {};
   QStringList chains;
   QString current = input;
   int index = 0;
   for (const auto &edit : edits) {
-    if ((edit.type != "blur" && edit.type != "redact") || size.isEmpty())
-      continue;
-    const bool untilEnd = edit.end < 0;
-    const double start = std::max(0., edit.start - offset);
-    const double end = edit.end - offset;
-    if (!untilEnd && end <= start)
+    QString enable;
+    if (!hidesVideo(edit) || !markTiming(edit.start, edit.end, offset, &enable))
       continue;
     // Even edges line up with the half-size colour planes of yuv420p, so the
     // covered area never leaves a fringe of the original colour.
@@ -65,9 +125,6 @@ QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
     const int width = right - left, height = bottom - top;
     if (width < 2 || height < 2)
       continue;
-    const QString enable =
-        untilEnd ? QString(":enable='gte(t,%1)'").arg(seconds(start))
-                : QString(":enable='between(t,%1,%2)'").arg(seconds(start), seconds(end));
     const QString next = QString("[mark%1]").arg(index);
     const QString rect = QString("%1:%2:%3:%4").arg(width).arg(height).arg(left).arg(top);
     if (edit.type == "redact") {
@@ -89,6 +146,17 @@ QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
     current = next;
     ++index;
   }
+  for (const auto &overlay : overlays) {
+    QString enable;
+    if (!markTiming(overlay.start, overlay.end, offset, &enable))
+      continue;
+    const QString next = QString("[mark%1]").arg(index);
+    chains << QString("%1[%2:v]overlay=%3:%4%5%6")
+                  .arg(current).arg(overlay.input).arg(overlay.area.x())
+                  .arg(overlay.area.y()).arg(enable, next);
+    current = next;
+    ++index;
+  }
   if (chains.isEmpty())
     return {};
   chains.last().chop(current.size());
@@ -102,6 +170,7 @@ Video::Video(QObject *parent) : QObject(parent) {
     m_status = text;
     emit changed();
   });
+  connect(&m_marks, &MarkDocument::edited, this, &Video::renderOverlays);
   m_directory =
       QSettings()
           .value("videoDirectory", QStandardPaths::writableLocation(
@@ -277,6 +346,7 @@ void Video::open(const QUrl &url) {
             m_marks.reset(frame);
             m_marks.setDuration(m_duration);
             m_marks.setPlayhead(0);
+            renderOverlays();
             m_audioTracks = r.audioTracks;
             m_copyCompatible = r.copyCompatible;
             m_saved.clear();
@@ -413,6 +483,52 @@ void Video::makeThumbnails() {
     return result;
   }));
 }
+void Video::renderOverlays() {
+  ++m_overlayRevision;
+  QVariantList list;
+  const auto &edits = m_marks.edits();
+  for (int i = 0; i < edits.size(); ++i) {
+    QRect area;
+    const QImage image = i == m_marks.hiddenIndex()
+                             ? QImage()
+                             : renderVideoMark(edits, i, m_frameSize, &area);
+    if (image.isNull())
+      continue;
+    const QString name = QString("mark%1").arg(i);
+    if (m_store)
+      m_store->put(name, image);
+    const double width = m_frameSize.width(), height = m_frameSize.height();
+    list.append(QVariantMap{
+        {"index", i},
+        {"start", edits[i].start},
+        {"end", edits[i].end < 0 ? m_duration : edits[i].end},
+        {"x", area.x() / width},
+        {"y", area.y() / height},
+        {"w", area.width() / width},
+        {"h", area.height() / height},
+        {"source", QString("image://videomarks/%1?%2").arg(name).arg(m_overlayRevision)}});
+  }
+  m_overlays = list;
+  emit overlaysChanged();
+}
+bool Video::writeOverlays(QStringList &inputs, QVector<VideoOverlay> &overlays) {
+  m_overlayDir.reset();
+  const auto &edits = m_marks.edits();
+  for (int i = 0; i < edits.size(); ++i) {
+    QRect area;
+    const QImage image = renderVideoMark(edits, i, m_frameSize, &area);
+    if (image.isNull())
+      continue;
+    if (!m_overlayDir)
+      m_overlayDir = std::make_unique<QTemporaryDir>();
+    const QString path = m_overlayDir->filePath(QString("mark%1.png").arg(i));
+    if (!m_overlayDir->isValid() || !image.save(path, "PNG"))
+      return false;
+    inputs << "-i" << path;
+    overlays.append({int(overlays.size()) + 1, area, edits[i].start, edits[i].end});
+  }
+  return true;
+}
 void Video::exportClip(double start, double end, bool mute) {
   exportEdited(start, end, mute, {});
 }
@@ -470,6 +586,16 @@ void Video::exportEdited(double start, double end, bool mute,
     emit changed();
     return;
   }
+  // Arrows, boxes, labels and steps go in as pictures, one input each after
+  // the recording.
+  QStringList overlayInputs;
+  QVector<VideoOverlay> overlays;
+  if (!writeOverlays(overlayInputs, overlays)) {
+    m_status = "Could not prepare the marks for the video. Check the free space "
+               "in the temporary folder.";
+    emit changed();
+    return;
+  }
   // Name the clip after its recording, so the two sit together.
   const QString base = QFileInfo(m_source.toLocalFile()).completeBaseName();
   m_final = m_directory + "/" + base + "-edited.mp4";
@@ -493,7 +619,8 @@ void Video::exportEdited(double start, double end, bool mute,
   // always times in the recording.
   const QVector<Frame::Edit> marks = m_marks.edits();
   const bool marked =
-      !videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]").isEmpty();
+      !videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]", overlays)
+           .isEmpty();
   // A clip beginning at the first frame can be shortened at the end without
   // re-encoding. Start trims, middle cuts and marks need new frames.
   const bool streamCopy =
@@ -519,7 +646,8 @@ void Video::exportEdited(double start, double end, bool mute,
     QStringList filters;
     QString videoInputs;
     if (marked) {
-      filters << videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]");
+      filters << videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]",
+                                  overlays);
       QString copies;
       for (int i = 0; i < kept.size(); ++i)
         copies += QString("[part%1]").arg(i);
@@ -553,8 +681,10 @@ void Video::exportEdited(double start, double end, bool mute,
       }
     }
     QStringList args{"-hide_banner", "-loglevel", "error", "-nostdin", "-n",
-                     "-i", m_source.toLocalFile(), "-filter_complex",
-                     filters.join(';'), "-map", "[v]"};
+                     "-i", m_source.toLocalFile()};
+    if (marked)
+      args << overlayInputs;
+    args << "-filter_complex" << filters.join(';') << "-map" << "[v]";
     if (mute)
       args << "-an";
     else {
@@ -578,13 +708,16 @@ void Video::exportEdited(double start, double end, bool mute,
                    "-ss",
                    QString::number(start, 'f', 3),
                    "-i",
-                   m_source.toLocalFile(),
-                   "-t",
-                   QString::number(m_exportDuration, 'f', 3)};
+                   m_source.toLocalFile()};
   // Seeking the input makes its first frame time zero, so the marks move
   // back by the same amount.
-  QStringList markFilters =
-      videoMarkFilters(marks, m_frameSize, start, "[0:v:0]", "[marked]");
+  QStringList markFilters = videoMarkFilters(marks, m_frameSize, start,
+                                             "[0:v:0]", "[marked]", overlays);
+  // The pictures come after the recording and its seek, and before -t, which
+  // limits the output to the clip.
+  if (!markFilters.isEmpty())
+    args << overlayInputs;
+  args << "-t" << QString::number(m_exportDuration, 'f', 3);
   if (markFilters.isEmpty()) {
     args << "-map" << "0:v:0";
   } else {

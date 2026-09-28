@@ -21,6 +21,8 @@ struct Edit {
    *  them. A negative end means until the end of the clip. */
   double start = 0;
   double end = -1;
+  /** The number a step shows. 0 counts the steps in the list, in order. */
+  int number = 0;
 };
 struct Options {
   int style = 0;

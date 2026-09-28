@@ -269,7 +269,7 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
       p.drawText(
           QRectF(a - QPointF(unit * 5 * markSize, unit * 5 * markSize),
                  QSizeF(unit * 10 * markSize, unit * 10 * markSize)),
-          Qt::AlignCenter, QString::number(step));
+          Qt::AlignCenter, QString::number(edit.number > 0 ? edit.number : step));
     } else if (edit.type == "text") {
       QFont font("sans-serif");
       font.setPixelSize(textPixelSize(edit, img));

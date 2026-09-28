@@ -51,9 +51,10 @@ video. When you stop, trim the ends or cut out a slow part, then **Copy and
 close**. The video is on your clipboard.
 
 If something private showed up while you recorded, press G to blur it or R to
-cover it, and drag over it. It stays hidden for the whole clip. To hide it for
-only part of the clip, select it and press I and O where it should start and
-stop.
+cover it, and drag over it. It stays hidden for the whole clip. To point
+something out, pause where it happens and press A for an arrow, B for a box, T
+for a label or N for a numbered step. Those show from there to the end. Select
+any mark and press I and O to set where it starts and stops.
 
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 
@@ -73,7 +74,7 @@ stop.
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
-| Reviewing a video | G / R | Blur / redact an area. With one selected, I / O set when it shows |
+| Reviewing a video | G R A B T N | Blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
 | In the window | Ctrl+C or Ctrl+S | Copy and save |
 
 ## Good to know
@@ -101,8 +102,8 @@ the middle of a screenshot, its review opens once the screenshot is done.
 
 Omaframe follows your Omarchy theme and updates when you switch themes.
 
-There is no pause, webcam overlay or zoom yet. Blur and redaction on video stay
-in place: they do not follow something that moves or scrolls.
+There is no pause, webcam overlay or zoom yet. Marks on a video stay in place:
+they do not follow something that moves or scrolls.
 
 ## Uninstall
 
