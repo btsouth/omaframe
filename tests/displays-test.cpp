@@ -1,4 +1,6 @@
 #include "displays.hpp"
+#include "window-targets.hpp"
+#include <QJsonDocument>
 #include <QTest>
 
 class DisplaysTest : public QObject {
@@ -33,6 +35,46 @@ private slots:
     QCOMPARE(single[0].place, QString("built-in display"));
     QCOMPARE(Displays::describe({{"A", "Unknown", "Unknown", {0, 0, 10, 10}, {}}})[0].label,
              QString("A"));
+  }
+  void visibleWindowsAreClippedToTheirDisplay() {
+    const auto monitors = QJsonDocument::fromJson(R"([
+      {"id":0,"name":"LEFT","x":0,"y":0,"width":1504,"height":1003,"activeWorkspace":{"id":1}},
+      {"id":1,"name":"RIGHT","x":1504,"y":0,"width":1920,"height":1080,"activeWorkspace":{"id":2}}
+    ])").array();
+    const auto clients = QJsonDocument::fromJson(R"([
+      {"monitor":0,"at":[1000,100],"size":[800,600],"mapped":true,"visible":true,"hidden":false,"workspace":{"id":1},"focusHistoryID":1},
+      {"monitor":0,"at":[100,100],"size":[300,300],"mapped":true,"visible":true,"hidden":false,"workspace":{"id":3},"focusHistoryID":0},
+      {"monitor":1,"at":[1600,120],"size":[300,300],"mapped":true,"visible":true,"hidden":false,"workspace":{"id":2},"focusHistoryID":0}
+    ])").array();
+    const auto targets = WindowTargets::fromHyprland(monitors, clients, {"LEFT", "RIGHT"});
+    QCOMPARE(targets.size(), 2);
+    const auto right = targets[0].toMap();
+    QCOMPARE(right.value("monitor").toString(), QString("RIGHT"));
+    const auto left = targets[1].toMap();
+    QCOMPARE(left.value("monitor").toString(), QString("LEFT"));
+    QCOMPARE(left.value("x").toDouble(), 1000.0 / 1504.0);
+    QCOMPARE(left.value("w").toDouble(), 504.0 / 1504.0);
+  }
+  void fractionalScaleUsesLogicalWindowCoordinates() {
+    const auto monitors = QJsonDocument::fromJson(R"([
+      {"id":0,"name":"RIGHT","x":2048,"y":0,"width":1920,"height":1080,"scale":1.25,"activeWorkspace":{"id":2}},
+      {"id":1,"name":"LEFT","x":0,"y":0,"width":2560,"height":1440,"scale":1.25,"activeWorkspace":{"id":1}}
+    ])").array();
+    const auto clients = QJsonDocument::fromJson(R"([
+      {"monitor":1,"at":[7,31],"size":[2034,1114],"mapped":true,"visible":true,"hidden":false,"workspace":{"id":1},"focusHistoryID":0},
+      {"monitor":0,"at":[2055,31],"size":[1522,826],"mapped":true,"visible":true,"hidden":false,"workspace":{"id":2},"focusHistoryID":1}
+    ])").array();
+    const auto targets = WindowTargets::fromHyprland(monitors, clients, {"LEFT", "RIGHT"});
+    QCOMPARE(targets.size(), 2);
+    const auto left = targets[0].toMap();
+    QCOMPARE(left.value("monitor").toString(), QString("LEFT"));
+    QCOMPARE(left.value("x").toDouble(), 7.0 / 2048.0);
+    QCOMPARE(left.value("y").toDouble(), 31.0 / 1152.0);
+    QCOMPARE(left.value("w").toDouble(), 2034.0 / 2048.0);
+    QCOMPARE(left.value("h").toDouble(), 1114.0 / 1152.0);
+    const auto right = targets[1].toMap();
+    QCOMPARE(right.value("x").toDouble(), 7.0 / 1536.0);
+    QCOMPARE(right.value("w").toDouble(), 1522.0 / 1536.0);
   }
 };
 QTEST_APPLESS_MAIN(DisplaysTest)

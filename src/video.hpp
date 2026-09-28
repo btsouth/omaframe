@@ -3,6 +3,7 @@
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QUrl>
+#include <QVariantList>
 #include <memory>
 
 class Video : public QObject {
@@ -20,6 +21,9 @@ class Video : public QObject {
   Q_PROPERTY(int audioTracks READ audioTracks NOTIFY changed)
   /** Evenly spaced frames for the timeline, as file URLs; empty until ready. */
   Q_PROPERTY(QStringList thumbnails READ thumbnails NOTIFY changed)
+  /** The saved clip's file name and a short "9.0 s · 8.1 MB" summary. */
+  Q_PROPERTY(QString savedName READ savedName NOTIFY changed)
+  Q_PROPERTY(QString savedSummary READ savedSummary NOTIFY changed)
 public:
   static constexpr int ThumbnailCount = 16;
   explicit Video(QObject *parent = nullptr);
@@ -36,15 +40,29 @@ public:
   double progress() const { return m_progress; }
   int audioTracks() const { return m_audioTracks; }
   QStringList thumbnails() const { return m_thumbnails; }
+  QString savedName() const;
+  QString savedSummary() const { return m_savedSummary; }
   Q_INVOKABLE void open(const QUrl &url);
   Q_INVOKABLE void exportClip(double start, double end, bool mute);
+  Q_INVOKABLE void exportEdited(double start, double end, bool mute,
+                               const QVariantList &removedRanges);
+  Q_INVOKABLE void keepOriginal();
+  /** Ends recording review; the recording and any edit are already saved. */
+  Q_INVOKABLE void finish();
+  /** Puts the saved clip, or the open recording when nothing was saved, on
+   *  the clipboard as a file for pasting into chats and file managers. */
+  Q_INVOKABLE bool copyFile();
   Q_INVOKABLE void cancel();
   Q_INVOKABLE void revealSaved();
+  Q_INVOKABLE void revealSource();
   Q_INVOKABLE void setOutputDirectory(const QUrl &url);
 signals:
   void changed();
   void loaded();
   void opening();
+  void exported(const QUrl &file);
+  void originalAccepted(const QUrl &file);
+  void opened();
 
 private:
   void makeThumbnails();
@@ -57,6 +75,9 @@ private:
                                 m_error;
   double m_duration = 0, m_progress = 0, m_exportDuration = 0;
   bool m_busy = false, m_cancelled = false, m_exporting = false;
+  bool m_copyCompatible = false;
+  bool m_muteExport = false;
+  QString m_savedSummary;
   int m_audioTracks = 0;
   QProcess m_encoder;
   QByteArray m_progressBuffer;

@@ -4,16 +4,36 @@ import QtQuick.Layouts
 import QtMultimedia
 
 // The clip editor: one stage, one transport row, and one timeline where the
-// filmstrip, trim handles and playhead live together.
+// filmstrip, trim handles, removed parts and playhead live together.
+// Clicking the filmstrip moves the playhead. Dragging across it selects a
+// part, which can then be removed. Nothing here changes the source file.
 Item {
     id: pane
     property bool shortcutsAllowed: true
+    property bool savedCurrent: false
     property bool muted: false
     property real clipStart: 0
     property real clipEnd: 0
+    property var cuts: []
+    property var undoStack: []
+    property var redoStack: []
+    property bool hasSelection: false
+    property real selStart: 0
+    property real selEnd: 0
+    property int selectedCut: -1
+    property string notice: ""
+    // Taken when a trim handle is grabbed; pushed on the first real change.
+    property var pendingUndo: null
     readonly property bool loaded: video.source.toString().length > 0
     readonly property bool editable: loaded && !video.busy
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
+    readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)])])
+    readonly property real outputDuration: {
+        let remaining = clipEnd - clipStart;
+        for (const cut of cuts)
+            remaining -= Math.max(0, Math.min(clipEnd, cut.end) - Math.max(clipStart, cut.start));
+        return Math.max(0, remaining);
+    }
     // The playhead in seconds, advanced every frame between the player's
     // coarser position updates so it glides instead of stepping.
     property real head: 0
@@ -28,7 +48,14 @@ Item {
         player.pause();
     }
     function seek(seconds) {
-        player.position = Math.max(0, Math.min(video.duration, seconds)) * 1000;
+        let target = Math.max(0, Math.min(video.duration, seconds));
+        for (const cut of cuts) {
+            if (target >= cut.start && target < cut.end) {
+                target = cut.end;
+                break;
+            }
+        }
+        player.position = Math.min(video.duration, target) * 1000;
     }
     function togglePlay() {
         if (!editable)
@@ -41,19 +68,177 @@ Item {
             player.play();
         }
     }
-    function setStart(seconds) {
+    // Every change to the edit (trim, removed parts, sound) can be undone.
+    function snapshot() {
+        return { clipStart: clipStart, clipEnd: clipEnd, muted: muted, cuts: cuts.slice() };
+    }
+    function pushUndo() {
+        undoStack = undoStack.concat([snapshot()]);
+        redoStack = [];
+    }
+    function restore(state) {
+        clipStart = state.clipStart;
+        clipEnd = state.clipEnd;
+        muted = state.muted;
+        cuts = state.cuts;
+        clearSelection();
+    }
+    function undo() {
+        if (undoStack.length === 0)
+            return;
+        redoStack = redoStack.concat([snapshot()]);
+        restore(undoStack[undoStack.length - 1]);
+        undoStack = undoStack.slice(0, -1);
+    }
+    function redo() {
+        if (redoStack.length === 0)
+            return;
+        undoStack = undoStack.concat([snapshot()]);
+        restore(redoStack[redoStack.length - 1]);
+        redoStack = redoStack.slice(0, -1);
+    }
+    function takePendingUndo() {
+        if (!pendingUndo)
+            return;
+        undoStack = undoStack.concat([pendingUndo]);
+        redoStack = [];
+        pendingUndo = null;
+    }
+    function setStart(seconds, record) {
+        const next = Math.max(0, Math.min(clipEnd - 0.1, seconds));
+        if (Math.abs(next - clipStart) < 0.0005)
+            return;
+        if (record)
+            pushUndo();
+        else
+            takePendingUndo();
         player.pause();
-        clipStart = Math.max(0, Math.min(clipEnd - 0.1, seconds));
+        clipStart = next;
         seek(clipStart);
     }
-    function setEnd(seconds) {
+    function setEnd(seconds, record) {
+        const next = Math.min(video.duration, Math.max(clipStart + 0.1, seconds));
+        if (Math.abs(next - clipEnd) < 0.0005)
+            return;
+        if (record)
+            pushUndo();
+        else
+            takePendingUndo();
         player.pause();
-        clipEnd = Math.min(video.duration, Math.max(clipStart + 0.1, seconds));
+        clipEnd = next;
         seek(Math.max(clipStart, clipEnd - 0.1));
+    }
+    function toggleSound() {
+        pushUndo();
+        muted = !muted;
     }
     function nudge(seconds) {
         player.pause();
         seek(player.position / 1000 + seconds);
+    }
+    function clearSelection() {
+        hasSelection = false;
+        selectedCut = -1;
+        notice = "";
+    }
+    function select(from, to) {
+        selStart = Math.max(clipStart, Math.min(from, to));
+        selEnd = Math.min(clipEnd, Math.max(from, to));
+        hasSelection = selEnd - selStart >= 0.1;
+        selectedCut = -1;
+        notice = "";
+    }
+    function setSelectionStart(seconds) {
+        select(Math.min(seconds, selEnd - 0.1), selEnd);
+    }
+    function setSelectionEnd(seconds) {
+        select(selStart, Math.max(seconds, selStart + 0.1));
+    }
+    // Removed parts are merged when they touch, so the list stays simple.
+    function withCut(list, start, end) {
+        let merged = { start: start, end: end };
+        const kept = [];
+        for (const cut of list) {
+            if (cut.end < merged.start - 0.0005 || cut.start > merged.end + 0.0005)
+                kept.push(cut);
+            else
+                merged = { start: Math.min(cut.start, merged.start), end: Math.max(cut.end, merged.end) };
+        }
+        kept.push(merged);
+        kept.sort((a, b) => a.start - b.start);
+        return kept;
+    }
+    function keptAfter(list) {
+        let remaining = clipEnd - clipStart;
+        for (const cut of list)
+            remaining -= Math.max(0, Math.min(clipEnd, cut.end) - Math.max(clipStart, cut.start));
+        return remaining;
+    }
+    function removeSelection() {
+        if (!editable || !hasSelection)
+            return;
+        const updated = withCut(cuts, selStart, selEnd);
+        if (keptAfter(updated) + 0.000001 < 0.1) {
+            notice = "Keep at least a tenth of a second of the clip.";
+            return;
+        }
+        pushUndo();
+        cuts = updated;
+        const end = selEnd;
+        clearSelection();
+        seek(end);
+    }
+    function selectCut(index) {
+        hasSelection = false;
+        selectedCut = index;
+        notice = "";
+        player.pause();
+        seek(Math.max(clipStart, cuts[index].start - 0.05));
+    }
+    function restoreCut(index) {
+        if (index < 0 || index >= cuts.length)
+            return;
+        pushUndo();
+        const updated = cuts.slice();
+        updated.splice(index, 1);
+        cuts = updated;
+        clearSelection();
+    }
+    function setCutTimes(index, start, end) {
+        if (index < 0 || index >= cuts.length)
+            return;
+        start = Math.max(clipStart, Math.min(start, end - 0.1));
+        end = Math.min(clipEnd, Math.max(end, start + 0.1));
+        const others = cuts.slice();
+        others.splice(index, 1);
+        const updated = withCut(others, start, end);
+        if (keptAfter(updated) + 0.000001 < 0.1) {
+            notice = "Keep at least a tenth of a second of the clip.";
+            return;
+        }
+        pushUndo();
+        cuts = updated;
+        for (let i = 0; i < cuts.length; ++i)
+            if (cuts[i].start <= start + 0.0005 && cuts[i].end >= end - 0.0005)
+                selectedCut = i;
+    }
+    function cutAt(seconds) {
+        for (let i = 0; i < cuts.length; ++i)
+            if (seconds >= cuts[i].start && seconds <= cuts[i].end)
+                return i;
+        return -1;
+    }
+    function skipRemoved(seconds) {
+        for (const cut of cuts) {
+            if (seconds >= cut.start && seconds < cut.end) {
+                player.position = cut.end * 1000;
+                head = cut.end;
+                anchorTime = cut.end;
+                anchorClock = Date.now();
+                return true;
+            }
+        }
+        return false;
     }
 
     onVisibleChanged: if (!visible)
@@ -66,6 +251,8 @@ Item {
             muted: pane.muted
         }
         onPositionChanged: {
+            if (playbackState === MediaPlayer.PlayingState && pane.skipRemoved(position / 1000))
+                return;
             if (playbackState === MediaPlayer.PlayingState && position >= pane.clipEnd * 1000) {
                 pause();
                 position = pane.clipStart * 1000;
@@ -83,7 +270,11 @@ Item {
     }
     FrameAnimation {
         running: pane.playing && pane.visible
-        onTriggered: pane.head = Math.min(pane.clipEnd, pane.anchorTime + (Date.now() - pane.anchorClock) / 1000)
+        onTriggered: {
+            const next = Math.min(pane.clipEnd, pane.anchorTime + (Date.now() - pane.anchorClock) / 1000);
+            if (!pane.skipRemoved(next))
+                pane.head = next;
+        }
     }
     Connections {
         target: video
@@ -93,18 +284,27 @@ Item {
             player.pause();
             player.position = 0;
             pane.head = 0;
+            pane.cuts = [];
+            pane.muted = false;
+            pane.undoStack = [];
+            pane.redoStack = [];
+            pane.clearSelection();
         }
     }
     readonly property bool keys: visible && editable && shortcutsAllowed
     Shortcut { sequence: "Space"; enabled: pane.keys; onActivated: pane.togglePlay() }
-    Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setStart(player.position / 1000) }
-    Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setEnd(player.position / 1000) }
+    Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setStart(player.position / 1000, true) }
+    Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setEnd(player.position / 1000, true) }
+    Shortcut { sequence: "Escape"; enabled: pane.keys && (pane.hasSelection || pane.selectedCut >= 0); onActivated: pane.clearSelection() }
+    Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && pane.hasSelection; onActivated: pane.removeSelection() }
     Shortcut { sequence: "Left"; enabled: pane.keys; onActivated: pane.nudge(-0.1) }
     Shortcut { sequence: "Right"; enabled: pane.keys; onActivated: pane.nudge(0.1) }
     Shortcut { sequence: "Shift+Left"; enabled: pane.keys; onActivated: pane.nudge(-1) }
     Shortcut { sequence: "Shift+Right"; enabled: pane.keys; onActivated: pane.nudge(1) }
     Shortcut { sequence: "Home"; enabled: pane.keys; onActivated: { player.pause(); pane.seek(pane.clipStart); } }
     Shortcut { sequence: "End"; enabled: pane.keys; onActivated: { player.pause(); pane.seek(Math.max(pane.clipStart, pane.clipEnd - 0.1)); } }
+    Shortcut { sequence: "Ctrl+Z"; enabled: pane.keys && pane.undoStack.length > 0; onActivated: pane.undo() }
+    Shortcut { sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]; enabled: pane.keys && pane.redoStack.length > 0; onActivated: pane.redo() }
 
     // Inline components do not see this file's ids; they get what they need
     // through properties.
@@ -155,6 +355,7 @@ Item {
         property real edge
         property string label
         signal dragged(real edge)
+        signal grabbed()
         height: lane.height
         y: lane.y
         radius: theme.radius
@@ -178,7 +379,10 @@ Item {
             hoverEnabled: true
             preventStealing: true
             cursorShape: Qt.SizeHorCursor
-            onPressed: mouse => offset = handle.edge - mapToItem(handle.lane, mouse.x, 0).x
+            onPressed: mouse => {
+                offset = handle.edge - mapToItem(handle.lane, mouse.x, 0).x;
+                handle.grabbed();
+            }
             onPositionChanged: mouse => {
                 if (pressed)
                     handle.dragged(mapToItem(handle.lane, mouse.x, 0).x + offset);
@@ -193,27 +397,43 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 28
-        anchors.rightMargin: 28
-        anchors.topMargin: 20
-        anchors.bottomMargin: 16
+        anchors.leftMargin: 22
+        anchors.rightMargin: 22
+        anchors.topMargin: 16
+        anchors.bottomMargin: 14
         spacing: 0
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.bottomMargin: 14
-            spacing: 16
+            Layout.bottomMargin: 12
+            spacing: 14
             Text {
-                text: pane.loaded ? video.name : "No recording open"
-                font.pixelSize: 15
+                text: pane.loaded ? video.name : "No video open"
+                font.pixelSize: 14
                 font.weight: Font.Medium
                 color: theme.text
                 elide: Text.ElideMiddle
                 Layout.fillWidth: true
             }
+            Rectangle {
+                visible: pane.savedCurrent
+                implicitWidth: savedRow.implicitWidth + 18
+                implicitHeight: 26
+                radius: theme.radius
+                color: theme.alpha(theme.accent, 0.14)
+                border.width: 1
+                border.color: theme.alpha(theme.accent, 0.5)
+                RowLayout {
+                    id: savedRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Glyph { name: "check"; ink: theme.selectedText; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
+                    Text { text: "Saved " + video.savedName + (video.savedSummary.length ? " · " + video.savedSummary : ""); color: theme.selectedText; font.pixelSize: 11 }
+                }
+            }
             Text {
-                visible: pane.loaded
-                text: [video.dimensions, pane.time(video.duration), video.audioTracks === 0 ? "No audio" : video.audioTracks === 1 ? "Audio" : video.audioTracks + " audio tracks"].join("   ·   ")
+                visible: pane.loaded && !pane.savedCurrent
+                text: [video.dimensions, pane.time(video.duration), video.audioTracks === 0 ? "No sound" : video.audioTracks === 1 ? "Sound" : video.audioTracks + " sound tracks"].join("   ·   ")
                 font.pixelSize: 11
                 color: theme.muted
             }
@@ -267,7 +487,7 @@ Item {
                 spacing: 8
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Open a recording to trim it."
+                    text: "Open a video to trim it."
                     color: theme.text
                     font.pixelSize: 15
                 }
@@ -309,7 +529,7 @@ Item {
                     spacing: 14
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "Exporting clip"
+                        text: video.status.startsWith("Checking") ? "Checking the new video" : "Saving the edited video"
                         color: theme.text
                         font.pixelSize: 15
                         font.weight: Font.Medium
@@ -331,7 +551,7 @@ Item {
                     }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: Math.round(video.progress * 100) + "%   ·   " + pane.time(pane.clipEnd - pane.clipStart) + " clip"
+                        text: Math.round(video.progress * 100) + "%   ·   " + pane.time(pane.outputDuration) + " long"
                         color: theme.muted
                         font.pixelSize: 11
                     }
@@ -348,8 +568,8 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: 16
-            spacing: 12
+            Layout.topMargin: 14
+            spacing: 10
             StudioButton {
                 glyph: pane.playing ? "pause" : "play"
                 primary: true
@@ -380,54 +600,153 @@ Item {
                 Layout.fillWidth: true
             }
             Caption {
-                text: "IN"
+                text: "START"
             }
             TimeField {
                 display: pane.time(pane.clipStart)
                 enabled: pane.editable
-                onCommitted: seconds => pane.setStart(seconds)
+                onCommitted: seconds => pane.setStart(seconds, true)
                 ToolTip.visible: hovered && !activeFocus
                 ToolTip.delay: 600
-                ToolTip.text: "Clip start · I sets it at the playhead"
+                ToolTip.text: "Where the video begins · I sets it at the playhead"
             }
             Caption {
-                Layout.leftMargin: 6
-                text: "OUT"
+                Layout.leftMargin: 4
+                text: "END"
             }
             TimeField {
                 display: pane.time(pane.clipEnd)
                 enabled: pane.editable
-                onCommitted: seconds => pane.setEnd(seconds)
+                onCommitted: seconds => pane.setEnd(seconds, true)
                 ToolTip.visible: hovered && !activeFocus
                 ToolTip.delay: 600
-                ToolTip.text: "Clip end · O sets it at the playhead"
+                ToolTip.text: "Where the video ends · O sets it at the playhead"
             }
             Divider {
-                Layout.leftMargin: 6
-                Layout.rightMargin: 6
+                Layout.leftMargin: 4
+                Layout.rightMargin: 4
             }
             Caption {
-                text: "CLIP"
+                text: "LENGTH"
             }
             Text {
-                text: pane.time(pane.clipEnd - pane.clipStart)
+                text: pane.time(pane.outputDuration)
                 color: theme.selectedText
                 font.pixelSize: 13
                 font.weight: Font.Medium
             }
             Divider {
-                Layout.leftMargin: 6
+                Layout.leftMargin: 4
                 Layout.rightMargin: 2
             }
             StudioButton {
                 readonly property bool silent: pane.muted || video.audioTracks === 0
-                text: silent ? "No audio" : "Audio"
+                text: video.audioTracks === 0 ? "No sound" : pane.muted ? "Sound off" : "Sound on"
                 glyph: silent ? "mute" : "volume"
                 quiet: true
                 implicitHeight: 36
                 enabled: pane.editable && video.audioTracks > 0
-                hint: pane.muted ? "Audio will be removed from the clip. Click to keep it." : "Audio is kept in the clip. Click to remove it."
-                onClicked: pane.muted = !pane.muted
+                hint: pane.muted ? "The saved video will be silent. Click to keep the sound." : "Click to save the video without sound"
+                onClicked: pane.toggleSound()
+            }
+        }
+
+        // One fixed-height bar that describes the selection, so choosing a
+        // part never shifts the timeline.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 10
+            Layout.preferredHeight: 36
+            spacing: 8
+            Text {
+                visible: !pane.hasSelection && pane.selectedCut < 0
+                Layout.fillWidth: true
+                text: pane.notice.length ? pane.notice
+                    : pane.cuts.length ? pane.cuts.length + (pane.cuts.length === 1 ? " part removed. Click it on the filmstrip to change or restore it." : " parts removed. Click one on the filmstrip to change or restore it.")
+                    : "Drag the ends of the filmstrip to trim. Drag across it to select a part to remove."
+                color: pane.notice.length ? theme.urgent : theme.muted
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
+            Caption {
+                visible: pane.hasSelection || pane.selectedCut >= 0
+                text: pane.hasSelection ? "SELECTED" : "REMOVED PART"
+                color: pane.hasSelection ? theme.selectedText : theme.urgent
+            }
+            TimeField {
+                visible: pane.hasSelection || pane.selectedCut >= 0
+                display: pane.time(pane.hasSelection ? pane.selStart : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].start : 0)
+                enabled: pane.editable
+                onCommitted: seconds => pane.hasSelection ? pane.setSelectionStart(seconds) : pane.setCutTimes(pane.selectedCut, seconds, pane.cuts[pane.selectedCut].end)
+            }
+            Text {
+                visible: pane.hasSelection || pane.selectedCut >= 0
+                text: "to"
+                color: theme.muted
+                font.pixelSize: 12
+            }
+            TimeField {
+                visible: pane.hasSelection || pane.selectedCut >= 0
+                display: pane.time(pane.hasSelection ? pane.selEnd : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].end : 0)
+                enabled: pane.editable
+                onCommitted: seconds => pane.hasSelection ? pane.setSelectionEnd(seconds) : pane.setCutTimes(pane.selectedCut, pane.cuts[pane.selectedCut].start, seconds)
+            }
+            Text {
+                visible: pane.hasSelection || pane.selectedCut >= 0
+                text: "(" + ((pane.hasSelection ? pane.selEnd - pane.selStart : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].end - pane.cuts[pane.selectedCut].start : 0)).toFixed(1) + " s)"
+                color: theme.faint
+                font.pixelSize: 11
+            }
+            StudioButton {
+                visible: pane.hasSelection
+                text: "Remove this part"
+                glyph: "cut"
+                implicitHeight: 32
+                enabled: pane.editable
+                hint: "The rest joins together in the saved video · Delete"
+                onClicked: pane.removeSelection()
+            }
+            StudioButton {
+                visible: pane.selectedCut >= 0
+                text: "Restore"
+                glyph: "undo"
+                implicitHeight: 32
+                enabled: pane.editable
+                hint: "Put this part back in the video"
+                onClicked: pane.restoreCut(pane.selectedCut)
+            }
+            StudioButton {
+                visible: pane.hasSelection || pane.selectedCut >= 0
+                glyph: "close"
+                quiet: true
+                implicitHeight: 32
+                hint: "Clear the selection · Esc"
+                onClicked: pane.clearSelection()
+            }
+            Text {
+                visible: pane.notice.length > 0 && (pane.hasSelection || pane.selectedCut >= 0)
+                Layout.fillWidth: true
+                text: pane.notice
+                color: theme.urgent
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            Item { Layout.fillWidth: pane.hasSelection || pane.selectedCut >= 0 }
+            StudioButton {
+                glyph: "undo"
+                quiet: true
+                implicitHeight: 32
+                enabled: pane.editable && pane.undoStack.length > 0
+                hint: "Undo · Ctrl+Z"
+                onClicked: pane.undo()
+            }
+            StudioButton {
+                glyph: "redo"
+                quiet: true
+                implicitHeight: 32
+                enabled: pane.editable && pane.redoStack.length > 0
+                hint: "Redo · Ctrl+Shift+Z"
+                onClicked: pane.redo()
             }
         }
 
@@ -435,8 +754,8 @@ Item {
             id: timeline
             readonly property real gutter: 12
             Layout.fillWidth: true
-            Layout.topMargin: 14
-            Layout.preferredHeight: track.y + track.height + 24
+            Layout.topMargin: 8
+            Layout.preferredHeight: track.y + track.height + 26
             enabled: pane.editable
             opacity: pane.loaded ? 1 : 0.35
 
@@ -445,7 +764,7 @@ Item {
                 x: timeline.gutter
                 y: 8
                 width: timeline.width - 2 * timeline.gutter
-                height: 56
+                height: 58
                 function xFor(seconds) {
                     return video.duration > 0 ? seconds / video.duration * width : 0;
                 }
@@ -482,30 +801,129 @@ Item {
                 MouseArea {
                     id: scrub
                     anchors.fill: parent
-                    anchors.topMargin: -8
                     hoverEnabled: true
                     preventStealing: true
-                    cursorShape: Qt.PointingHandCursor
-                    function go(x) {
+                    cursorShape: Qt.IBeamCursor
+                    property real anchor: 0
+                    property real pressX: 0
+                    property bool dragging: false
+                    onPressed: mouse => {
                         player.pause();
-                        pane.seek(track.secondsAt(x));
+                        pressX = mouse.x;
+                        dragging = false;
+                        anchor = track.secondsAt(mouse.x);
                     }
-                    onPressed: mouse => go(mouse.x)
                     onPositionChanged: mouse => {
-                        if (pressed)
-                            go(mouse.x);
+                        if (!pressed)
+                            return;
+                        if (!dragging && Math.abs(mouse.x - pressX) > 4)
+                            dragging = true;
+                        if (dragging) {
+                            const at = track.secondsAt(mouse.x);
+                            pane.select(anchor, at);
+                            player.position = Math.max(pane.clipStart, Math.min(pane.clipEnd, at)) * 1000;
+                        }
+                    }
+                    onReleased: mouse => {
+                        if (dragging) {
+                            if (!pane.hasSelection)
+                                pane.notice = "Drag across at least a tenth of a second.";
+                            return;
+                        }
+                        const at = track.secondsAt(mouse.x);
+                        const cut = pane.cutAt(at);
+                        if (cut >= 0)
+                            pane.selectCut(cut);
+                        else {
+                            pane.clearSelection();
+                            pane.seek(at);
+                        }
                     }
                 }
                 Rectangle {
                     width: track.xFor(pane.clipStart)
                     height: parent.height
-                    color: theme.alpha(theme.background, 0.72)
+                    color: theme.alpha(theme.background, 0.74)
                 }
                 Rectangle {
                     x: track.xFor(pane.clipEnd)
                     width: parent.width - x
                     height: parent.height
-                    color: theme.alpha(theme.background, 0.72)
+                    color: theme.alpha(theme.background, 0.74)
+                }
+                Repeater {
+                    model: pane.cuts.length
+                    Rectangle {
+                        required property int index
+                        x: track.xFor(pane.cuts[index].start)
+                        width: Math.max(2, track.xFor(pane.cuts[index].end) - x)
+                        height: track.height
+                        color: theme.alpha(theme.background, 0.62)
+                        border.width: pane.selectedCut === index ? 2 : 1
+                        border.color: theme.urgent
+                        clip: true
+                        Canvas {
+                            anchors.fill: parent
+                            onWidthChanged: requestPaint()
+                            onPaint: {
+                                const c = getContext("2d");
+                                c.reset();
+                                c.strokeStyle = theme.alpha(theme.urgent, 0.55);
+                                c.lineWidth = 2;
+                                for (let x = -height; x < width; x += 10) {
+                                    c.beginPath();
+                                    c.moveTo(x, height);
+                                    c.lineTo(x + height, 0);
+                                    c.stroke();
+                                }
+                            }
+                        }
+                        Rectangle {
+                            anchors.centerIn: parent
+                            visible: parent.width > 80
+                            width: removedLabel.implicitWidth + 12
+                            height: 18
+                            radius: theme.radius
+                            color: theme.alpha(theme.background, 0.9)
+                            border.width: 1
+                            border.color: theme.urgent
+                            Text {
+                                id: removedLabel
+                                anchors.centerIn: parent
+                                text: "REMOVED"
+                                color: theme.urgent
+                                font.family: theme.fontFamily
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    visible: pane.hasSelection
+                    x: track.xFor(pane.selStart)
+                    width: Math.max(2, track.xFor(pane.selEnd) - x)
+                    height: track.height
+                    color: theme.alpha(theme.background, 0.45)
+                    border.width: 3
+                    border.color: theme.accent
+                    Rectangle {
+                        anchors.centerIn: parent
+                        visible: parent.width > 80
+                        width: selectedLabel.implicitWidth + 12
+                        height: 18
+                        radius: theme.radius
+                        color: theme.accent
+                        Text {
+                            id: selectedLabel
+                            anchors.centerIn: parent
+                            text: "SELECTED"
+                            color: theme.onAccent
+                            font.family: theme.fontFamily
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+                        }
+                    }
                 }
                 Rectangle {
                     x: track.xFor(pane.clipStart)
@@ -545,33 +963,43 @@ Item {
 
             TrimHandle {
                 lane: track
-                label: "Clip start"
+                label: "Video start"
                 edge: track.xFor(pane.clipStart)
                 x: track.x + edge - width
                 width: timeline.gutter
-                onDragged: edge => pane.setStart(Math.round(track.secondsAt(edge) * 10) / 10)
+                onGrabbed: pane.pendingUndo = pane.snapshot()
+                onDragged: edge => pane.setStart(Math.round(track.secondsAt(edge) * 10) / 10, false)
             }
             TrimHandle {
                 lane: track
-                label: "Clip end"
+                label: "Video end"
                 edge: track.xFor(pane.clipEnd)
                 x: track.x + edge
                 width: timeline.gutter
-                onDragged: edge => pane.setEnd(Math.round(track.secondsAt(edge) * 10) / 10)
+                onGrabbed: pane.pendingUndo = pane.snapshot()
+                onDragged: edge => pane.setEnd(Math.round(track.secondsAt(edge) * 10) / 10, false)
             }
 
+            // The time ruler doubles as a scrub strip.
             Item {
                 id: ruler
                 x: track.x
-                y: track.y + track.height + 6
+                y: track.y + track.height + 4
                 width: track.width
-                height: 16
+                height: 20
                 readonly property real step: {
                     const fit = Math.max(1, width / 84);
                     for (const s of [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800])
                         if (video.duration / s <= fit)
                             return s;
                     return 3600;
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeHorCursor
+                    preventStealing: true
+                    onPressed: mouse => { player.pause(); pane.seek(track.secondsAt(mouse.x)); }
+                    onPositionChanged: mouse => { if (pressed) pane.seek(track.secondsAt(mouse.x)); }
                 }
                 Repeater {
                     model: video.duration > 0 ? Math.floor(video.duration / ruler.step) + 1 : 0

@@ -6,6 +6,19 @@ import QtQuick.Layouts
 Window {
     id: chooser
     visible: false
+    palette.window: theme.alpha(theme.background, 1)
+    palette.windowText: theme.text
+    palette.base: theme.well
+    palette.text: theme.text
+    palette.button: theme.controlFill
+    palette.buttonText: theme.text
+    palette.toolTipBase: theme.alpha(theme.background, 1)
+    palette.toolTipText: theme.text
+    palette.highlight: theme.accent
+    palette.highlightedText: theme.onAccent
+    palette.placeholderText: theme.faint
+    palette.mid: theme.controlBorder
+    palette.dark: theme.frame
     color: "transparent"
     flags: Qt.FramelessWindowHint
     title: "Omaframe finishes"
@@ -54,8 +67,8 @@ Window {
                     ColumnLayout {
                         spacing: 3
                         Layout.fillWidth: true
-                        Text {text: chooser.captureError ? "Capture needs attention" : chooser.accepting ? "Finishing your screenshot…" : "Choose a finish"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 20; font.weight: Font.Medium}
-                        Text {text: chooser.captureError ? "Your clipboard is unchanged." : studio.dimensions + "   ·   Click a card or press 1–9"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12}
+                    Text {text: chooser.captureError ? "Capture needs attention" : chooser.accepting ? "Finishing your screenshot…" : studio.recoveryAction.length ? "Screenshot saved" : "Choose a finish"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 20; font.weight: Font.Medium}
+                    Text {text: chooser.captureError ? "Your clipboard is unchanged." : studio.recoveryAction.length ? "Retry the unfinished step, or choose another finish." : studio.dimensions + "   ·   Click a card or press 1–9. Press E to mark it up first."; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12}
                     }
                     Item {Layout.fillWidth: true}
                     StudioButton {text: "Edit"; glyph: "crop"; enabled: chooser.ready; hint: "Crop, annotate, redact · E"; onClicked: studio.openEditor()}
@@ -80,7 +93,7 @@ Window {
                             Layout.preferredHeight: 170
                             hoverEnabled: true
                             enabled: chooser.ready
-                            Accessible.name: (index+1) + ". " + studio.styles[index] + ". Copy and save."
+                            Accessible.name: (index+1) + ". " + studio.styles[index] + ". " + (studio.recoveryAction.length && studio.style === index ? studio.recoveryAction : "Copy and save") + "."
                             onClicked: chooser.choose(index)
                             // Numbers/E/Esc still work when a card holds focus.
                             Keys.forwardTo: [keyboard]
@@ -125,8 +138,9 @@ Window {
                 Item {visible: chooser.captureError; Layout.fillHeight: true}
                 RowLayout {
                     Layout.fillWidth: true
-                    Text {text: chooser.accepting ? "Saving and copying. One moment…" : "Copies + saves automatically"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true}
+                    Text {text: chooser.accepting ? "Saving and copying. One moment…" : studio.recoveryAction.length ? "The finished PNG is already saved" : "A finish is copied and saved to " + studio.outputDirectory.replace(/^\/home\/[^/]+/, "~"); color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideMiddle}
                     Text {text: "↵  Last finish"; visible: !chooser.captureError; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 11; Layout.rightMargin: 12}
+                    StudioButton {visible: studio.recoveryAction.length > 0; text: studio.recoveryAction; glyph: "copy"; primary: true; enabled: !studio.busy; implicitHeight: 32; onClicked: studio.retryOutput()}
                     StudioButton {text: chooser.captureError ? "Try capture again" : "Retake"; glyph: "capture"; quiet: !chooser.captureError; enabled: !studio.busy; hint: "Select a new region · R"; implicitHeight: 32; onClicked: studio.capture(true)}
                 }
             }

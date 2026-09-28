@@ -1,44 +1,124 @@
 #include "recording.hpp"
 #include "displays.hpp"
+#include "shortcuts.hpp"
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QThread>
 #include <QUrl>
 #include <QUuid>
+#include <QVersionNumber>
 #include <QtConcurrent>
 #include <algorithm>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
+#include <sys/prctl.h>
+
+static QByteArray command(const QString &program, const QStringList &args,
+                          int timeout = 2500) {
+  QProcess p;
+  p.start(program, args);
+  if (!p.waitForFinished(timeout)) {
+    p.kill();
+    p.waitForFinished();
+    return {};
+  }
+  return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
+}
 
 Recording::Placement Recording::placeStop(const QList<Display> &displays,
                                           const QString &capturedDisplay,
                                           const QRect &capture, QSize size) {
   // Keep a gap on every side, including for rounding at fractional scales.
   constexpr int gap = 16;
-  auto fits = [&](const Display &d, QPoint point) {
-    QRect rect(point, size);
-    return d.bounds.adjusted(gap, gap, -gap, -gap).contains(rect) &&
-           !capture.adjusted(-gap, -gap, gap, gap).intersects(rect);
+  const QRect keepOut = capture.adjusted(-gap, -gap, gap, gap);
+  auto usable = [&](const Display &d) {
+    return d.bounds.marginsRemoved(d.reserved).adjusted(gap, gap, -gap, -gap);
   };
+  auto clampX = [&](const QRect &area, int x) {
+    return std::clamp(x, area.left(),
+                      std::max(area.left(), area.x() + area.width() - size.width()));
+  };
+  auto clampY = [&](const QRect &area, int y) {
+    return std::clamp(y, area.top(),
+                      std::max(area.top(), area.y() + area.height() - size.height()));
+  };
+  // Beside a region on its own display: below, above, right, then left.
   for (const auto &d : displays) {
     if (d.name != capturedDisplay)
       continue;
-    const int x = std::clamp(
-        capture.center().x() - size.width() / 2, d.bounds.x() + gap,
-        std::max(d.bounds.x() + gap, d.bounds.right() - size.width() - gap));
-    for (QPoint point : {QPoint(x, capture.bottom() + gap + 1),
-                         QPoint(x, capture.top() - size.height() - gap - 1)})
-      if (fits(d, point))
-        return {d.name, QRect(point, size)};
+    const QRect area = usable(d);
+    const int x = clampX(area, capture.center().x() - size.width() / 2);
+    const int y = clampY(area, capture.top());
+    for (QPoint point : {QPoint(x, capture.y() + capture.height() + gap),
+                         QPoint(x, capture.top() - gap - size.height()),
+                         QPoint(capture.x() + capture.width() + gap, y),
+                         QPoint(capture.left() - gap - size.width(), y)}) {
+      const QRect rect(point, size);
+      if (area.contains(rect) && !keepOut.intersects(rect))
+        return {d.name, rect};
+    }
   }
-  // A control on another display is easy to miss, so a recording that leaves
-  // no room on its own display is stopped from the bar or the hotkey instead.
+  // Otherwise the nearest other display, at the edge that faces the capture,
+  // so the control stays next to what is being recorded.
+  Placement best;
+  double bestDistance = 0;
+  for (const auto &d : displays) {
+    if (d.name == capturedDisplay)
+      continue;
+    const QRect area = usable(d);
+    if (area.width() < size.width() || area.height() < size.height())
+      continue;
+    QPoint point;
+    if (d.bounds.left() >= capture.x() + capture.width())
+      point = {area.left(), clampY(area, capture.top())};
+    else if (d.bounds.x() + d.bounds.width() <= capture.left())
+      point = {area.x() + area.width() - size.width(), clampY(area, capture.top())};
+    else if (d.bounds.top() >= capture.y() + capture.height())
+      point = {clampX(area, capture.center().x() - size.width() / 2), area.top()};
+    else
+      point = {clampX(area, capture.center().x() - size.width() / 2),
+               area.y() + area.height() - size.height()};
+    const QRect rect(point, size);
+    if (keepOut.intersects(rect))
+      continue;
+    const int dx = std::max({0, rect.left() - (capture.x() + capture.width()),
+                             capture.left() - (rect.x() + rect.width())});
+    const int dy = std::max({0, rect.top() - (capture.y() + capture.height()),
+                             capture.top() - (rect.y() + rect.height())});
+    const double distance = std::hypot(dx, dy);
+    if (best.bounds.isEmpty() || distance < bestDistance) {
+      best = {d.name, rect};
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+Recording::Placement Recording::placeCountdown(const QList<Display> &displays,
+                                              const QString &capturedDisplay,
+                                              QSize size) {
+  constexpr int gap = 16;
+  for (const auto &d : displays) {
+    if (d.name != capturedDisplay)
+      continue;
+    const QRect area =
+        d.bounds.marginsRemoved(d.reserved).adjusted(gap, gap, -gap, -gap);
+    if (area.width() < 160 || area.height() < size.height())
+      return {};
+    size.setWidth(std::min(size.width(), area.width()));
+    return {d.name, QRect(QPoint(area.center().x() - size.width() / 2, area.top()),
+                          size)};
+  }
   return {};
 }
 QStringList Recording::arguments(const QString &target, const QString &path,
@@ -58,6 +138,8 @@ QStringList Recording::arguments(const QString &target, const QString &path,
                    cursor ? "yes" : "no",
                    "-exclude-metadata",
                    "yes",
+                   "-write-first-frame-ts",
+                   "yes",
                    "-o",
                    path};
   QStringList audio;
@@ -69,24 +151,27 @@ QStringList Recording::arguments(const QString &target, const QString &path,
     args << "-a" << audio.join('|') << "-ac" << "aac";
   return args;
 }
-static QByteArray command(const QString &program, const QStringList &args,
-                          int timeout = 2500) {
-  QProcess p;
-  p.start(program, args);
-  if (!p.waitForFinished(timeout)) {
-    p.kill();
-    p.waitForFinished();
-    return {};
-  }
-  return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
+QPair<QString, QStringList>
+Recording::recorderCommand(const QStringList &arguments) {
+  // `exec` keeps one process, so its PID, the parent-death signal and SIGINT
+  // all still reach the recorder itself.
+  return {"bash",
+          QStringList{"-c",
+                      "exec -a gpu-screen-recorder gpu-screen-recorder \"$@\"",
+                      "omaframe-recorder"} +
+              arguments};
 }
 Recorder::Recorder(QObject *parent) : QObject(parent) {
   QSettings s;
   m_desktop = s.value("record/desktop", false).toBool();
   m_microphone = s.value("record/microphone", false).toBool();
   m_cursor = s.value("record/cursor", true).toBool();
+  m_suppressStartupPop = s.value("record/suppressStartupPop", false).toBool();
   m_countdown = std::clamp(s.value("record/countdown", 3).toInt(), 0, 5);
   m_preferredMic = s.value("record/micSource").toString();
+  // If Omaframe itself dies, ask the recorder to finish its file instead of
+  // leaving an orphaned capture with an unwritten MP4 index.
+  m_process.setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGINT); });
   m_tick.setInterval(500);
   connect(&m_tick, &QTimer::timeout, this, &Recorder::changed);
   m_countdownTick.setInterval(1000);
@@ -103,8 +188,24 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
       m_startupCheck.stop();
       return;
     }
-    if (QFileInfo(m_path).size() > 0 &&
-        m_process.state() == QProcess::Running) {
+    // MP4 headers can be written before capture produces a frame. GSR writes
+    // this sidecar only after the first frame, so file size is not readiness.
+    QFile firstFrame(m_path + ".ts");
+    bool frameReady = false;
+    if (firstFrame.open(QIODevice::ReadOnly)) {
+      // GSR 6.1.3 writes a header followed by the timestamp values. Read the
+      // last line so the header cannot make a valid first frame look absent.
+      const auto fields =
+          firstFrame.readAll().trimmed().split('\n').last().simplified().split(' ');
+      bool monotonic = false, realtime = false;
+      if (fields.size() == 2) {
+        frameReady = fields[0].toLongLong(&monotonic) > 0 &&
+                     fields[1].toLongLong(&realtime) > 0 && monotonic && realtime;
+      }
+    }
+    if (frameReady && m_process.state() == QProcess::Running) {
+      firstFrame.close();
+      firstFrame.remove();
       m_state = "recording";
       m_status = "Recording";
       m_clock.restart();
@@ -113,8 +214,8 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
       refreshBar();
       emit changed();
     } else if (m_clock.elapsed() > 12000) {
-      m_status = "Recorder is still starting. You can stop safely.";
-      emit changed();
+      m_frameTimedOut = true;
+      stop();
     }
   });
   connect(&m_process, &QProcess::readyReadStandardError, this, [this] {
@@ -158,69 +259,132 @@ QString Recorder::place(const QString &display) const {
       return d.place;
   return display;
 }
-#define OPTION(Setter, Type, Member)                                           \
+Recording::Placement Recorder::visibleControl() const {
+  if (hasControl())
+    return m_control;
+  return m_state == "countdown" ? m_countdownControl : Recording::Placement{};
+}
+// Options are remembered as soon as they change, so a choice made in the
+// capture bar holds even if that recording is cancelled.
+#define OPTION(Setter, Type, Member, Key)                                      \
   void Recorder::Setter(Type v) {                                              \
     if (active())                                                              \
       return;                                                                  \
     Member = v;                                                                \
+    QSettings().setValue(Key, v);                                              \
+    updateSetupStatus();                                                       \
     emit changed();                                                            \
   }
-OPTION(setDesktopAudio, bool, m_desktop)
-OPTION(setMicAudio, bool, m_microphone)
-OPTION(setCursor, bool, m_cursor)
+OPTION(setDesktopAudio, bool, m_desktop, "record/desktop")
+OPTION(setMicAudio, bool, m_microphone, "record/microphone")
+OPTION(setCursor, bool, m_cursor, "record/cursor")
+OPTION(setSuppressStartupPop, bool, m_suppressStartupPop,
+       "record/suppressStartupPop")
 void Recorder::setMicrophone(int i) {
   if (!active() && i >= 0 && i < m_mics.size()) {
     m_mic = i;
     m_preferredMic = m_mics[i].toMap().value("id").toString();
+    QSettings().setValue("record/micSource", m_preferredMic);
+    updateSetupStatus();
     emit changed();
   }
 }
 void Recorder::setCountdown(int seconds) {
   if (!active()) {
     m_countdown = std::clamp(seconds, 0, 5);
+    QSettings().setValue("record/countdown", m_countdown);
     emit changed();
   }
 }
 QString Recorder::targetLabel() const {
   if (m_capture.isEmpty())
-    return "Select an area or display";
+    return "Choose an area, a window or a display";
   if (m_full)
     for (const auto &d : m_displays)
       if (d.name == m_screen)
         return "Entire display · " + d.label;
-  return QString("Region · %1 × %2 on the %3")
+  return QString("Area · %1 × %2 on the %3")
       .arg(m_capture.width())
       .arg(m_capture.height())
       .arg(place(m_screen));
 }
 bool Recorder::canStart() const {
-  return !active() && m_state != "loading" && !m_capture.isEmpty() &&
-         (!m_microphone || m_mic >= 0) &&
+  return !active() && m_state != "loading" && hasTarget() && !m_otherRecorder &&
+         (hasControl() || stopShortcut()) && (!m_microphone || m_mic >= 0) &&
          (!m_desktop || !m_defaultSink.isEmpty());
 }
 QString Recorder::controlLocation() const {
-  if (m_capture.isEmpty())
-    return "The Stop control will stay outside the recorded area.";
-  if (!safeStop() && m_barStop)
-    return "To stop, click the recording icon in the Omarchy bar or press "
-           "Alt+Print.";
-  if (!safeStop())
-    return "No room for a stop button outside this capture. Use Alt+Print to "
-           "stop, or select a smaller area.";
-  return "Stop button stays outside your selected area.";
+  const QString also =
+      stopShortcut() ? " " + m_stopKey + " also stops it." : QString();
+  if (!hasTarget())
+    return "A Stop button appears outside the recorded area when there is "
+           "room." + also;
+  if (hasControl())
+    return (m_control.display != m_screen
+                ? "Stop stays on the " + place(m_control.display) +
+                      ", outside the video."
+                : QString("Stop stays just outside the recorded area.")) +
+           also;
+  if (stopShortcut())
+    return "No Stop button is shown, so nothing from Omaframe is in the "
+           "video. Stop with " + m_stopKey +
+           (m_barStop ? " or the recording icon in the Omarchy bar." : ".");
+  if (m_full)
+    return "With the whole display recorded, no Stop button is shown so none "
+           "ends up in the video. Set up a stop shortcut to record it.";
+  return "There is no room for a Stop button outside this area. Set up a stop "
+         "shortcut, or choose a smaller area.";
 }
-void Recorder::prepare() {
-  if (active() || m_state == "loading")
+void Recorder::updateSetupStatus() {
+  if (m_state != "setup")
     return;
+  m_status = m_otherRecorder
+                 ? "Another screen recorder is running. Stop it before "
+                   "starting an Omaframe recording."
+             : m_microphone && m_mic < 0
+                 ? "Your selected microphone is unavailable. Choose a "
+                   "microphone or turn it off."
+             : m_desktop && m_defaultSink.isEmpty()
+                 ? "Desktop audio is unavailable. Turn it off or reconnect "
+                   "your output."
+             : !hasTarget() ? "Choose what to record."
+             : needsStopShortcut()
+                 ? "Set up a stop shortcut to record this area."
+                 : "Ready to record.";
+}
+void Recorder::setStopKey(const QString &key) {
+  if (m_stopKey == key)
+    return;
+  m_stopKey = key;
+  updateSetupStatus();
+  emit changed();
+}
+void Recorder::prepare(bool showSetup) {
+  if (active())
+    return;
+  if (m_state == "loading") {
+    if (showSetup && !m_showSetupWhenLoaded) {
+      m_showSetupWhenLoaded = true;
+      emit setupRequested();
+    }
+    return;
+  }
   const int generation = ++m_generation;
   m_state = "loading";
   m_status = "Checking displays and audio…";
+  m_showSetupWhenLoaded = showSetup;
+  m_screen.clear();
+  m_capture = {};
+  m_target.clear();
+  m_control = m_countdownControl = {};
+  m_pending = {};
   emit changed();
-  emit setupRequested();
+  if (showSetup)
+    emit setupRequested();
   struct Result {
     QList<Recording::Display> displays;
     QVariantList mics;
-    QString sink, defaultMic;
+    QString sink, defaultMic, stopKey;
     bool other = false;
   };
   auto *watcher = new QFutureWatcher<Result>(this);
@@ -233,6 +397,8 @@ void Recorder::prepare() {
             m_displays = r.displays;
             m_mics = r.mics;
             m_defaultSink = r.sink;
+            m_otherRecorder = r.other;
+            m_stopKey = r.stopKey;
             m_mic = -1;
             QString wanted = m_preferredMic;
             if (wanted.isEmpty()) {
@@ -245,16 +411,9 @@ void Recorder::prepare() {
               if (m_mics[i].toMap().value("id").toString() == wanted)
                 m_mic = i;
             m_state = "setup";
-            m_status =
-                r.other ? "Another screen recorder is running. Stop it before "
-                          "starting an Omaframe recording."
-                : m_microphone && m_mic < 0
-                    ? "Your selected microphone is unavailable. Choose a "
-                      "microphone or turn it off."
-                    : m_desktop && m_defaultSink.isEmpty()
-                    ? "Desktop audio is unavailable. Turn it off or reconnect your output."
-                    : "Choose what to capture.";
+            updateSetupStatus();
             emit changed();
+            applyPending();
           });
   watcher->setFuture(QtConcurrent::run([] {
     Result r;
@@ -270,7 +429,13 @@ void Recorder::prepare() {
       if (scale > 0 && w > 0 && h > 0) {
         const QRect bounds(o.value("x").toInt(), o.value("y").toInt(),
                            qRound(w / scale), qRound(h / scale));
-        r.displays.append({o.value("name").toString(), bounds});
+        // Hyprland lists reserved space as left, top, right, bottom.
+        const auto reserved = o.value("reserved").toArray();
+        QMargins margins;
+        if (reserved.size() == 4)
+          margins = QMargins(reserved[0].toInt(), reserved[1].toInt(),
+                             reserved[2].toInt(), reserved[3].toInt());
+        r.displays.append({o.value("name").toString(), bounds, {}, {}, margins});
         infos.append({o.value("name").toString(), o.value("make").toString(),
                       o.value("model").toString(), bounds, QSize(w, h)});
       }
@@ -298,8 +463,29 @@ void Recorder::prepare() {
       r.sink = sink + ".monitor";
     r.other = !command("pgrep", {"-f", "^([^ ]*/)?gpu-screen-recorder( |$)"})
                    .isEmpty();
+    r.stopKey = Shortcuts::omaframeKey(
+        QJsonDocument::fromJson(command("hyprctl", {"-j", "binds"})).array(),
+        Shortcuts::Action::Record);
     return r;
   }));
+}
+void Recorder::showSetup() {
+  if (active())
+    return;
+  if (m_state == "idle" || m_state == "saved" || m_state == "selecting") {
+    if (m_state == "selecting" && !m_displays.isEmpty()) {
+      m_state = "setup";
+      updateSetupStatus();
+      emit changed();
+      emit setupRequested();
+      return;
+    }
+    prepare(true);
+    return;
+  }
+  if (m_state == "loading")
+    m_showSetupWhenLoaded = true;
+  emit setupRequested();
 }
 void Recorder::setTarget(const QString &screen, const QRect &rect, bool full) {
   m_screen = screen;
@@ -312,23 +498,72 @@ void Recorder::setTarget(const QString &screen, const QRect &rect, bool full) {
                         .arg(rect.x())
                         .arg(rect.y());
   m_control = Recording::placeStop(m_displays, screen, rect);
+  m_countdownControl = hasControl()
+                           ? Recording::Placement{}
+                           : Recording::placeCountdown(m_displays, screen);
   m_state = "setup";
-  m_status = "Ready to record.";
+  updateSetupStatus();
   emit changed();
+}
+void Recorder::applyPending() {
+  if (!m_pending.valid)
+    return;
+  const Pending pending = m_pending;
+  m_pending = {};
+  if (pending.full)
+    selectDisplayNamed(pending.display, pending.start);
+  else
+    regionSelected(pending.display, pending.area, pending.start);
 }
 void Recorder::selectDisplay(int i) {
   if (active() || i < 0 || i >= m_displays.size())
     return;
   setTarget(m_displays[i].name, m_displays[i].bounds, true);
 }
+void Recorder::selectDisplayNamed(const QString &name, bool startAfterSelection) {
+  if (active())
+    return;
+  if (m_state == "loading") {
+    m_pending = {name, {}, true, startAfterSelection, true};
+    return;
+  }
+  for (const auto &d : m_displays)
+    if (d.name == name) {
+      setTarget(name, d.bounds, true);
+      if (startAfterSelection && canStart())
+        start();
+      else
+        emit setupRequested();
+      return;
+    }
+  fail("That display is no longer available. Choose what to record again.");
+}
 void Recorder::chooseRegion() {
   if (active() || m_state == "loading")
     return;
   m_state = "selecting";
   emit changed();
-  emit selectionRequested();
+  emit hideRequested();
+  QTimer::singleShot(120, this, [this] {
+    if (m_state == "selecting")
+      emit selectionRequested();
+  });
 }
-void Recorder::regionSelected(const QString &name, const QRectF &normalized) {
+void Recorder::regionSelected(const QString &name, const QRectF &normalized,
+                              bool startAfterSelection) {
+  if (active())
+    return;
+  if (m_state == "loading") {
+    m_pending = {name, normalized, false, startAfterSelection, true};
+    return;
+  }
+  // A selection that covers the display records the display itself, at its
+  // native resolution, rather than a region of the same size.
+  if (normalized.left() <= 0.001 && normalized.top() <= 0.001 &&
+      normalized.right() >= 0.999 && normalized.bottom() >= 0.999) {
+    selectDisplayNamed(name, startAfterSelection);
+    return;
+  }
   for (const auto &d : m_displays)
     if (d.name == name) {
       QRect r(qRound(d.bounds.x() + normalized.x() * d.bounds.width()),
@@ -341,7 +576,10 @@ void Recorder::regionSelected(const QString &name, const QRectF &normalized) {
         return;
       }
       setTarget(name, r, false);
-      emit setupRequested();
+      if (startAfterSelection && canStart())
+        start();
+      else
+        emit setupRequested();
       return;
     }
   fail("That display is no longer available. Select the recording area again.");
@@ -353,17 +591,19 @@ void Recorder::start() {
   m_state = "countdown";
   m_remaining = m_countdown;
   m_error.clear();
+  m_frameTimedOut = false;
   m_path.clear();
   QSettings s;
   s.setValue("record/desktop", m_desktop);
   s.setValue("record/microphone", m_microphone);
   s.setValue("record/cursor", m_cursor);
+  s.setValue("record/suppressStartupPop", m_suppressStartupPop);
   s.setValue("record/countdown", m_countdown);
   if (m_mic >= 0)
     s.setValue("record/micSource", m_mics[m_mic].toMap().value("id"));
   emit changed();
   emit hideRequested();
-  if (safeStop())
+  if (!visibleControl().bounds.isEmpty() && (hasControl() || m_remaining > 0))
     emit controlRequested();
   // Let the setup surface disappear before the first recorded frame.
   QTimer::singleShot(250, this, [this, generation] {
@@ -380,13 +620,21 @@ void Recorder::launch() {
     return;
   m_state = "starting";
   m_status = "Starting recorder…";
+  // The countdown sits on the recorded display. Take it down before capture.
+  if (!hasControl())
+    emit hideRequested();
   emit changed();
   const int generation = m_generation;
   struct Check {
     QString error;
   };
   const auto target = m_capture;
-  const bool hasControl = safeStop();
+  const bool hasControl = this->hasControl();
+  const QString controlDisplay = m_control.display;
+  const QString capturedDisplay = m_screen;
+  QHash<QString, QRect> bounds;
+  for (const auto &display : m_displays)
+    bounds.insert(display.name, display.bounds);
   auto *watcher = new QFutureWatcher<Check>(this);
   connect(
       watcher, &QFutureWatcher<Check>::finished, this,
@@ -417,54 +665,92 @@ void Recorder::launch() {
             m_microphone ? m_mics.value(m_mic).toMap().value("id").toString()
                          : QString();
         m_clock.start();
-        m_process.start(
-            "gpu-screen-recorder",
-            Recording::arguments(m_target, m_path,
-                                 m_desktop ? m_defaultSink : QString(), mic,
-                                 m_cursor));
+        const auto [program, arguments] =
+            Recording::recorderCommand(Recording::arguments(
+                m_target, m_path, m_desktop ? m_defaultSink : QString(), mic,
+                m_cursor));
+        m_process.start(program, arguments);
         m_startupCheck.start();
         emit changed();
       });
-  watcher->setFuture(QtConcurrent::run([target, hasControl] {
+  watcher->setFuture(QtConcurrent::run([target, hasControl, controlDisplay,
+                                       capturedDisplay, bounds] {
     if (!command("pgrep", {"-f", "^([^ ]*/)?gpu-screen-recorder( |$)"})
              .isEmpty())
       return Check{"Another screen recorder is running. Stop it first."};
-    if (hasControl) {
+    const QString recorderVersion =
+        QString::fromUtf8(command("gpu-screen-recorder", {"--version"})).trimmed();
+    const QVersionNumber parsed = QVersionNumber::fromString(recorderVersion);
+    if (parsed.isNull() ||
+        QVersionNumber::compare(parsed, QVersionNumber(6, 1, 3)) < 0)
+      return Check{recorderVersion.isEmpty()
+                       ? "Install GPU Screen Recorder 6.1.3 or newer to record."
+                       : "GPU Screen Recorder " + recorderVersion +
+                             " is too old. Version 6.1.3 or newer is required."};
+    // Nothing of Omaframe's may be inside the capture when it starts. Hidden
+    // surfaces can take a frame or two to leave, so check a few times.
+    const QRect keepOut = target.adjusted(-8, -8, 8, 8);
+    QString problem;
+    for (int attempt = 0; attempt < 12; ++attempt) {
+      problem.clear();
       bool found = false;
-      auto layers =
-          QJsonDocument::fromJson(command("hyprctl", {"-j", "layers"}))
-              .object();
-      for (auto mon : layers)
-        for (auto level : mon.toObject().value("levels").toObject())
+      const auto layers =
+          QJsonDocument::fromJson(command("hyprctl", {"-j", "layers"})).object();
+      for (auto mon = layers.begin(); mon != layers.end(); ++mon) {
+        const QRect display = bounds.value(mon.key());
+        for (auto level : mon.value().toObject().value("levels").toObject())
           for (auto value : level.toArray()) {
-            auto layer = value.toObject();
-            if (layer.value("namespace").toString() !=
-                "omaframe-record-control")
+            const auto layer = value.toObject();
+            const QString name = layer.value("namespace").toString();
+            if (!name.startsWith("omaframe-"))
               continue;
-            found = true;
             QRect actual(layer.value("x").toInt(), layer.value("y").toInt(),
                          layer.value("w").toInt(), layer.value("h").toInt());
-            if (actual.isEmpty() ||
-                target.adjusted(-8, -8, 8, 8).intersects(actual))
-              return Check{"The stop control could overlap the recording. "
-                           "Select another area."};
+            // Layer positions are global; accept display-local ones too.
+            if (!display.isEmpty() && !display.contains(actual) &&
+                display.contains(actual.translated(display.topLeft())))
+              actual.translate(display.topLeft());
+            if (name == "omaframe-record-control" && hasControl &&
+                mon.key() == controlDisplay) {
+              found = !actual.isEmpty();
+              if (keepOut.intersects(actual))
+                return Check{"The Stop button would be in the recording. "
+                             "Choose another area."};
+              continue;
+            }
+            if (mon.key() == capturedDisplay && keepOut.intersects(actual))
+              problem = "An Omaframe window is still over the recording "
+                        "area. Try again.";
           }
-      if (!found)
-        return Check{"The stop control did not appear safely. Select another "
-                     "area and retry."};
+      }
+      if (hasControl && !found)
+        problem = "The Stop button did not appear. Choose the area again.";
+      if (problem.isEmpty())
+        break;
+      QThread::msleep(60);
     }
+    if (!problem.isEmpty())
+      return Check{problem};
+    if (!hasControl &&
+        Shortcuts::omaframeKey(
+            QJsonDocument::fromJson(command("hyprctl", {"-j", "binds"})).array(),
+            Shortcuts::Action::Record)
+            .isEmpty())
+      return Check{"The stop shortcut is no longer active. Set it up again "
+                   "before recording this area."};
     return Check{};
   }));
 }
 void Recorder::stop() {
   if (m_state == "countdown" ||
       (m_state == "starting" && m_process.state() == QProcess::NotRunning)) {
+    // Nothing was captured yet. Cancel and go back to what the user was doing.
     ++m_generation;
     m_countdownTick.stop();
-    m_state = "setup";
+    m_state = "idle";
     emit hideRequested();
     emit changed();
-    emit setupRequested();
+    emit dismissRequested();
     return;
   }
   if (m_state != "recording" && m_state != "starting")
@@ -479,14 +765,24 @@ void Recorder::stop() {
   if (m_process.processId() > 0)
     ::kill(static_cast<pid_t>(m_process.processId()), SIGINT);
 }
+/** Removes a recording that holds no usable video, so a failed start does
+ *  not leave an unplayable file behind. */
+static bool discardEmpty(const QString &path) {
+  const QFileInfo info(path);
+  return info.exists() && info.size() < 64 * 1024 && QFile::remove(path);
+}
 void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
   m_startupCheck.stop();
   m_tick.stop();
+  QFile::remove(m_path + ".ts");
   refreshBar();
   emit hideRequested();
   if (code != 0 || exitStatus != QProcess::NormalExit) {
+    const bool discarded = discardEmpty(m_path);
     fail("Recording failed. " + m_error.simplified().right(500) +
-         (QFileInfo::exists(m_path) ? " File retained: " + m_path : QString()));
+         (discarded ? " No file was kept."
+          : QFileInfo::exists(m_path) ? " The partial file is " + m_path
+                                      : QString()));
     return;
   }
   m_state = "stopping";
@@ -494,11 +790,13 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
   emit changed();
   auto *watcher = new QFutureWatcher<QString>(this);
   const auto path = m_path;
+  const bool suppressStartupPop = m_suppressStartupPop;
+  const bool frameTimedOut = m_frameTimedOut;
   connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher] {
     const QString error = watcher->result();
     watcher->deleteLater();
     if (!error.isEmpty()) {
-      fail(error + " File retained: " + m_path);
+      fail(error + (QFileInfo::exists(m_path) ? " The file is " + m_path : QString()));
       return;
     }
     m_state = "saved";
@@ -506,7 +804,7 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
     emit changed();
     emit completed(QUrl::fromLocalFile(m_path));
   });
-  watcher->setFuture(QtConcurrent::run([path] {
+  watcher->setFuture(QtConcurrent::run([path, suppressStartupPop, frameTimedOut] {
     const auto data =
         QJsonDocument::fromJson(
             command("ffprobe",
@@ -524,11 +822,31 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
                           .toObject()
                           .value("duration")
                           .toString()
-                          .toDouble() <= 0)
-      return QString("The recorder stopped without a readable video.");
-    if (audio) {
-      // Preserve this desktop's existing capture-open pop suppression, without
-      // loudness normalization or re-encoding video frames.
+                          .toDouble() <= 0) {
+      const bool discarded = discardEmpty(path);
+      return (frameTimedOut
+                  ? QString("No video frame arrived within 12 seconds.")
+                  : QString("The recorder stopped without a readable video.")) +
+             (discarded ? " No file was kept." : QString());
+    }
+    QProcess decode;
+    decode.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-xerror",
+                             "-i", path, "-map", "0:v:0", "-frames:v", "1",
+                             "-f", "framecrc", "pipe:1"});
+    if (!decode.waitForFinished(20000)) {
+      decode.kill();
+      decode.waitForFinished();
+      return QString("Could not verify the first recorded video frame.");
+    }
+    bool decoded = false;
+    for (const auto &line : decode.readAllStandardOutput().split('\n'))
+      decoded |= !line.trimmed().isEmpty() && !line.startsWith('#');
+    if (decode.exitCode() != 0 || !decoded)
+      return QString("The saved video has no decodable frame.") +
+             (discardEmpty(path) ? " No file was kept." : QString());
+    if (audio && suppressStartupPop) {
+      // Optional cleanup: it removes a capture-open pop but also removes the
+      // start of speech. Leave recorded audio untouched by default.
       const QString processed = path + ".cleaning.mp4";
       QProcess cleanup;
       cleanup.start(
@@ -558,6 +876,7 @@ void Recorder::fail(const QString &message) {
   m_tick.stop();
   m_startupCheck.stop();
   m_countdownTick.stop();
+  m_pending = {};
   m_state = "failed";
   m_status = message;
   emit hideRequested();
@@ -570,24 +889,31 @@ void Recorder::cancel() {
     return;
   }
   ++m_generation;
+  m_pending = {};
   m_state = "idle";
   emit changed();
   emit dismissRequested();
+}
+void Recorder::reset() {
+  if (active() || m_state == "idle")
+    return;
+  ++m_generation;
+  m_pending = {};
+  m_capture = {};
+  m_control = m_countdownControl = {};
+  m_state = "idle";
+  emit changed();
 }
 void Recorder::layoutChanged() {
   if (active()) {
     emit hideRequested();
     stop();
-    if (m_state == "setup") {
-      m_capture = {};
-      m_control = {};
-      m_state = "idle";
-      prepare();
-    }
-  } else if (m_state == "setup" || m_state == "selecting") {
+  } else if (m_state == "setup" || m_state == "selecting" ||
+             m_state == "loading") {
+    const bool show = m_showSetupWhenLoaded;
     m_capture = {};
-    m_control = {};
+    m_control = m_countdownControl = {};
     m_state = "idle";
-    prepare();
+    prepare(show);
   }
 }

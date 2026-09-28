@@ -1,5 +1,6 @@
 #include "omarchy-theme.hpp"
 #include "recording.hpp"
+#include "shortcuts.hpp"
 #include "studio.hpp"
 #include "video.hpp"
 #include <LayerShellQt/Window>
@@ -24,7 +25,12 @@
 #include <QScreen>
 #include <QStandardPaths>
 #include <QThreadPool>
+#include <QThread>
 #include <QTimer>
+#include <QtConcurrent>
+#include <QDir>
+#include <QSettings>
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 
@@ -43,20 +49,6 @@ int main(int argc, char **argv) {
       });
   QGuiApplication app(argc, argv);
   mark("GUI application ready");
-  QPalette palette;
-  palette.setColor(QPalette::Window, QColor("#202821"));
-  palette.setColor(QPalette::WindowText, QColor("#e4eadd"));
-  palette.setColor(QPalette::Base, QColor("#161c18"));
-  palette.setColor(QPalette::AlternateBase, QColor("#253021"));
-  palette.setColor(QPalette::Text, QColor("#e4eadd"));
-  palette.setColor(QPalette::Button, QColor("#303a30"));
-  palette.setColor(QPalette::ButtonText, QColor("#e4eadd"));
-  palette.setColor(QPalette::Highlight, QColor("#76955f"));
-  palette.setColor(QPalette::HighlightedText, Qt::white);
-  palette.setColor(QPalette::PlaceholderText, QColor("#84927c"));
-  palette.setColor(QPalette::Mid, QColor("#43543b"));
-  palette.setColor(QPalette::Light, QColor("#819576"));
-  app.setPalette(palette);
   app.setOrganizationName("Omaframe");
   app.setApplicationName("Omaframe");
   app.setApplicationVersion("0.2.0");
@@ -64,18 +56,22 @@ int main(int argc, char **argv) {
   app.setQuitOnLastWindowClosed(false);
   QThreadPool::globalInstance()->setMaxThreadCount(2);
   QCommandLineParser parser;
-  parser.setApplicationDescription("A little finish. A better screenshot.");
+  parser.setApplicationDescription(
+      "Screenshots and screen recordings for Omarchy. With no option, "
+      "select an area, window or display to capture.");
   parser.addHelpOption();
   parser.addVersionOption();
   parser.addOption(
       {"record",
-       "Open recording setup, or stop the current Omaframe recording."});
+       "Select an area, window or display to record, or stop the current "
+       "Omaframe recording."});
   parser.addOption({"stop-recording",
                     "Stop an Omaframe recording; fail if none is active."});
-  parser.addOption({"studio", "Open the full editor and media tools."});
+  parser.addOption({"studio", "Open the Omaframe window."});
   parser.addOption({"capture", "Capture a region immediately."});
+  parser.addOption({"repeat", "Capture the last selected screen area again."});
   parser.addOption({"screen", "Capture the active monitor immediately."});
-  parser.addPositionalArgument("image", "Image file to open.", "[image]");
+  parser.addPositionalArgument("file", "Image or video to open.", "[file]");
   parser.process(app);
   const bool captureStartup =
       parser.positionalArguments().isEmpty() && !parser.isSet("studio");
@@ -87,6 +83,7 @@ int main(int argc, char **argv) {
                           : parser.isSet("record")       ? "record"
                           : !file.isEmpty()              ? "open"
                           : parser.isSet("studio")       ? "studio"
+                          : parser.isSet("repeat")       ? "repeat"
                           : parser.isSet("screen")       ? "screen"
                                                          : "capture";
   const QString socketName =
@@ -124,9 +121,18 @@ int main(int argc, char **argv) {
   if (!server.listen(socketName))
     return 1;
   auto *store = new ImageStore;
-  Studio studio(store, !captureStartup && file.isEmpty());
+  // The studio opens on its own start screen. The sample image is optional.
+  Studio studio(store, false);
+  QObject::connect(&app, &QCoreApplication::aboutToQuit, &studio,
+                   &Studio::saveDraftNow);
   Video video;
   Recorder recorder;
+  ShortcutSetup shortcuts;
+  // Setting up the recording shortcut also gives the recorder its stop key.
+  QObject::connect(&shortcuts, &ShortcutSetup::changed, &recorder, [&] {
+    if (shortcuts.available() && !shortcuts.checking())
+      recorder.setStopKey(shortcuts.recordKey());
+  });
   QObject::connect(&studio, &Studio::videoRequested, &video, &Video::open);
   // Chrome follows the live Omarchy theme and the `monospace` font alias,
   // like the Omarchy shell. Rendered output keeps its own palette.
@@ -166,6 +172,7 @@ int main(int argc, char **argv) {
   engine.rootContext()->setContextProperty("studio", &studio);
   engine.rootContext()->setContextProperty("video", &video);
   engine.rootContext()->setContextProperty("recorder", &recorder);
+  engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
   engine.rootContext()->setContextProperty("captureAtStartup", captureStartup);
   // The capture path only creates a selection surface. Load the chooser
   // after selection, and the full editor only when explicitly requested.
@@ -173,6 +180,9 @@ int main(int argc, char **argv) {
   QQuickWindow *chooser = nullptr;
   QQuickWindow *recordSetup = nullptr;
   QQuickWindow *recordControl = nullptr;
+  bool quickRecordingReview = false, reviewReturnsToStudio = false;
+  QObject::connect(&video, &Video::opening, &app,
+                   [&] { quickRecordingReview = false; });
   auto ensureWindow = [&]() -> bool {
     if (window)
       return true;
@@ -200,26 +210,126 @@ int main(int argc, char **argv) {
         return screen;
     return QGuiApplication::primaryScreen();
   };
-  // Recording setup opened by its hotkey appears where the user is working,
-  // like other Omarchy surfaces: Hyprland's focused monitor.
-  auto focusedMonitor = [] {
-    QProcess process;
-    process.start("hyprctl", {"-j", "monitors"});
-    if (!process.waitForFinished(1000)) {
-      process.kill();
-      process.waitForFinished();
-      return QString();
+  // A quick edit or a recording review is a short task. Float it at a
+  // comfortable size on the display it came from instead of squeezing it
+  // into a tile. Hyprland only; other compositors keep their own placement.
+  auto floatWindow = [&](QQuickWindow *surface, QScreen *screen) {
+    if (!surface || !screen)
+      return;
+    const qint64 pid = QCoreApplication::applicationPid();
+    const QString title = surface->title();
+    (void)QtConcurrent::run([pid, title] {
+      auto hyprctl = [](const QStringList &args) {
+        QProcess p;
+        p.start("hyprctl", args);
+        if (!p.waitForFinished(800)) {
+          p.kill();
+          p.waitForFinished();
+          return QByteArray();
+        }
+        return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
+      };
+      auto dispatch = [&](const QString &lua, const QStringList &legacy) {
+        const QByteArray out = hyprctl({"dispatch", lua});
+        if (out.isEmpty() || out.trimmed() != "ok")
+          hyprctl(QStringList{"dispatch"} + legacy);
+      };
+      for (int attempt = 0; attempt < 30; ++attempt) {
+        const auto clients = QJsonDocument::fromJson(hyprctl({"-j", "clients"})).array();
+        for (const auto &value : clients) {
+          const auto client = value.toObject();
+          if (client.value("pid").toInteger() != pid ||
+              client.value("title").toString() != title)
+            continue;
+          // Size it for the display Hyprland put it on, which is where the
+          // user is working, minus the space its bar reserves.
+          int width = 1320, height = 760;
+          QString workspace;
+          for (const auto &item : QJsonDocument::fromJson(hyprctl({"-j", "monitors"})).array()) {
+            const auto m = item.toObject();
+            if (m.value("id").toInt(-1) != client.value("monitor").toInt(-2))
+              continue;
+            workspace = QString::number(m.value("activeWorkspace").toObject().value("id").toInt());
+            const double scale = std::max(0.1, m.value("scale").toDouble(1));
+            int w = m.value("width").toInt(), h = m.value("height").toInt();
+            if (m.value("transform").toInt() % 2)
+              std::swap(w, h);
+            const auto reserved = m.value("reserved").toArray();
+            const int usableW = qRound(w / scale) - (reserved.size() == 4 ? reserved[0].toInt() + reserved[2].toInt() : 0);
+            const int usableH = qRound(h / scale) - (reserved.size() == 4 ? reserved[1].toInt() + reserved[3].toInt() : 0);
+            width = std::min(1560, qRound(usableW * 0.86));
+            height = std::min(1020, qRound(usableH * 0.88));
+          }
+          const QString target = "address:" + client.value("address").toString();
+          // A window that opens while a special workspace is shown (Omarchy's
+          // screensaver, a scratchpad) would stay hidden there once it closes.
+          if (client.value("workspace").toObject().value("name").toString().startsWith("special:") &&
+              !workspace.isEmpty() && workspace != "0") {
+            dispatch(QString("hl.dsp.window.move({ window = \"%1\", workspace = \"%2\" })")
+                         .arg(target, workspace),
+                     {"movetoworkspace", workspace + "," + target});
+            dispatch(QString("hl.dsp.focus({ window = \"%1\" })").arg(target),
+                     {"focuswindow", target});
+          }
+          if (!client.value("floating").toBool())
+            dispatch(QString("hl.dsp.window.float({ window = \"%1\", action = \"enable\" })")
+                         .arg(target),
+                     {"setfloating", target});
+          dispatch(QString("hl.dsp.window.resize({ window = \"%1\", x = %2, y = %3 })")
+                       .arg(target).arg(width).arg(height),
+                   {"resizewindowpixel", QString("exact %1 %2,%3").arg(width).arg(height).arg(target)});
+          dispatch(QString("hl.dsp.window.center({ window = \"%1\" })").arg(target),
+                   {"centerwindow"});
+          return;
+        }
+        QThread::msleep(50);
+      }
+    });
+  };
+  auto notify = [](const QString &summary, const QString &body,
+                   const QString &image) {
+    if (!QSettings().value("notifications", true).toBool() ||
+        QStandardPaths::findExecutable("notify-send").isEmpty())
+      return;
+    // Without an installed icon, daemons show a placeholder; send none.
+    const QString icon =
+        !image.isEmpty() ? image
+                         : QStandardPaths::locate(
+                               QStandardPaths::GenericDataLocation,
+                               "icons/hicolor/scalable/apps/omaframe.svg");
+    QStringList args{"--app-name=Omaframe"};
+    if (!icon.isEmpty())
+      args << "--icon" << icon;
+    QProcess::startDetached("notify-send", args << summary << body);
+  };
+  // Recording review ends like a quick screenshot: the video goes on the
+  // clipboard, the window closes (or returns to the studio when the recording
+  // started there), and a notification says where the file is. A failed copy
+  // or export keeps the review open. Videos opened in the studio stay open.
+  auto finishReview = [&] {
+    if (!quickRecordingReview || !window || !video.copyFile())
+      return;
+    const bool edited = !video.savedPath().isEmpty();
+    quickRecordingReview = false;
+    const QString folder =
+        QFileInfo(video.savedPath().isEmpty() ? video.source().toLocalFile()
+                                              : video.savedPath())
+            .absolutePath()
+            .replace(QDir::homePath(), "~");
+    notify(edited ? "Edited video copied" : "Video copied", "Saved in " + folder,
+           QString());
+    if (reviewReturnsToStudio) {
+      reviewReturnsToStudio = false;
+      window->setProperty("recordingReview", false);
+      window->setProperty("videoMode", false);
+      return;
     }
-    for (const auto &value : QJsonDocument::fromJson(process.readAllStandardOutput()).array())
-      if (value.toObject().value("focused").toBool())
-        return value.toObject().value("name").toString();
-    return QString();
+    window->close();
   };
-  auto prepareRecording = [&] {
-    if (const QString monitor = focusedMonitor(); !monitor.isEmpty())
-      studio.setCaptureMonitor(monitor);
-    recorder.prepare();
-  };
+  QObject::connect(&video, &Video::originalAccepted, &app,
+                   [&](const QUrl &) { finishReview(); });
+  QObject::connect(&video, &Video::exported, &app,
+                   [&](const QUrl &) { finishReview(); });
   auto placeLayer = [](QQuickWindow *surface, QScreen *screen,
                        const QString &scope) {
     if (!screen)
@@ -244,16 +354,50 @@ int main(int argc, char **argv) {
     }
     selections.clear();
   };
-  auto hideAll = [&] {
+  auto hideCaptureSurfaces = [&] {
     if (window)
       window->hide();
     if (chooser)
       chooser->hide();
     clearSelections();
+  };
+  // The recorder hides only its own surfaces. A screenshot can be in progress
+  // during a recording, and clearing its selector here would strand it.
+  auto hideRecorderSurfaces = [&] {
     if (recordSetup)
       recordSetup->hide();
     if (recordControl)
       recordControl->hide();
+  };
+  auto hideAll = [&] {
+    hideCaptureSurfaces();
+    if (recordSetup)
+      recordSetup->hide();
+    if (recordControl)
+      recordControl->hide();
+  };
+  auto showStudioWindow = [&] {
+    if (!ensureWindow()) {
+      app.exit(1);
+      return;
+    }
+    window->show();
+    window->requestActivate();
+  };
+  // A finished or cancelled capture returns to the studio if it started
+  // there, and otherwise ends this short-lived process.
+  auto endQuickTask = [&] {
+    if (recorder.active()) {
+      studio.leaveQuickMode();
+      return;
+    }
+    recorder.reset();
+    if (studio.takeReturnToStudio()) {
+      studio.leaveQuickMode();
+      showStudioWindow();
+      return;
+    }
+    QTimer::singleShot(0, &app, &QCoreApplication::quit);
   };
   auto showChooser = [&] {
     if (window)
@@ -269,7 +413,9 @@ int main(int argc, char **argv) {
     chooser->requestActivate();
   };
   auto showRecordSetup = [&] {
-    hideAll();
+    hideRecorderSurfaces();
+    if (!studio.quickMode())
+      hideCaptureSurfaces();
     if (!recordSetup) {
       QQmlComponent component(&engine, QUrl("qrc:/qml/RecordSetup.qml"));
       recordSetup = qobject_cast<QQuickWindow *>(component.create());
@@ -278,25 +424,47 @@ int main(int argc, char **argv) {
         return;
       }
     }
-    placeLayer(recordSetup, screenFor(studio.captureMonitor()),
-               "omaframe-record-setup");
+    auto *screen = screenFor(studio.captureMonitor());
+    if (!screen) {
+      app.exit(1);
+      return;
+    }
+    shortcuts.refresh();
+    auto *layer = LayerShellQt::Window::get(recordSetup);
+    layer->setScope("omaframe-record-setup");
+    layer->setLayer(LayerShellQt::Window::LayerOverlay);
+    layer->setExclusiveZone(-1);
+    layer->setAnchors(LayerShellQt::Window::Anchors::fromInt(0));
+    layer->setKeyboardInteractivity(
+        LayerShellQt::Window::KeyboardInteractivityOnDemand);
+    recordSetup->setScreen(screen);
+    layer->setScreen(screen);
+    recordSetup->resize(std::min(620, screen->geometry().width()),
+                        std::min(recordSetup->property("wantedHeight").toInt(),
+                                 screen->geometry().height()));
     recordSetup->show();
     recordSetup->requestActivate();
   };
   QObject::connect(&recorder, &Recorder::setupRequested, &app, showRecordSetup);
-  QObject::connect(&recorder, &Recorder::hideRequested, &app, hideAll);
+  QObject::connect(&recorder, &Recorder::hideRequested, &app,
+                   hideRecorderSurfaces);
   QObject::connect(&recorder, &Recorder::selectionRequested, &app, [&] {
     studio.setRecordingSelection(true);
     studio.capture(true);
   });
-  QObject::connect(&studio, &Studio::recordRequested, &app,
-                   [&] { recorder.prepare(); });
+  QObject::connect(&studio, &Studio::recordModeEntered, &app,
+                   [&] { recorder.prepare(false); });
+  QObject::connect(&studio, &Studio::recordOptionsRequested, &app,
+                   [&] { recorder.showSetup(); });
   QObject::connect(&studio, &Studio::recordRegionSelected, &recorder,
-                   &Recorder::regionSelected);
+                   [&](const QString &monitor, const QRectF &area) {
+                     recorder.regionSelected(monitor, area, true);
+                   });
   QObject::connect(&recorder, &Recorder::controlRequested, &app, [&] {
-    const auto placement = recorder.control();
+    const auto placement = recorder.visibleControl();
     auto *screen = screenFor(placement.display);
-    if (!screen || screen->name() != placement.display) {
+    if (placement.bounds.isEmpty() || !screen ||
+        screen->name() != placement.display) {
       recorder.layoutChanged();
       return;
     }
@@ -324,21 +492,41 @@ int main(int argc, char **argv) {
     recordControl->resize(placement.bounds.size());
     recordControl->show();
   });
+  auto openReview = [&](const QUrl &path, bool returnsToStudio) {
+    hideAll();
+    studio.leaveQuickMode();
+    reviewReturnsToStudio = returnsToStudio;
+    if (!ensureWindow()) {
+      app.exit(1);
+      return;
+    }
+    video.open(path);
+    quickRecordingReview = true;
+    window->setProperty("recordingReview", true);
+    window->show();
+    window->requestActivate();
+    floatWindow(window, screenFor(studio.captureMonitor()));
+  };
+  // A recording stopped while a screenshot is being selected, finished or
+  // edited opens its review once that screenshot is done.
+  QUrl pendingReview;
   QObject::connect(&recorder, &Recorder::completed, &app,
                    [&](const QUrl &path) {
-                     hideAll();
-                     studio.leaveQuickMode();
-                     if (!ensureWindow()) {
-                       app.exit(1);
+                     if (studio.quickMode()) {
+                       pendingReview = path;
+                       notify("Recording saved",
+                              "Its review opens when you finish this screenshot.",
+                              QString());
                        return;
                      }
-                     video.open(path);
-                     window->show();
-                     window->requestActivate();
+                     openReview(path, studio.takeReturnToStudio());
                    });
   QObject::connect(&recorder, &Recorder::dismissRequested, &app, [&] {
-    hideAll();
-    QTimer::singleShot(0, &app, &QCoreApplication::quit);
+    hideRecorderSurfaces();
+    if (studio.quickMode())
+      return;
+    hideCaptureSurfaces();
+    endQuickTask();
   });
   for (auto *screen : QGuiApplication::screens())
     QObject::connect(screen, &QScreen::geometryChanged, &recorder,
@@ -351,21 +539,15 @@ int main(int argc, char **argv) {
       });
   QObject::connect(&app, &QGuiApplication::screenRemoved, &recorder,
                    [&](QScreen *) { recorder.layoutChanged(); });
-  QObject::connect(&studio, &Studio::hideStudio, &app, hideAll);
+  QObject::connect(&studio, &Studio::hideStudio, &app, hideCaptureSurfaces);
   QObject::connect(&studio, &Studio::selectionDone, &app, clearSelections);
   QObject::connect(&studio, &Studio::chooserRequested, &app, showChooser);
   QObject::connect(&studio, &Studio::captureFailed, &app, showChooser);
-  QObject::connect(&studio, &Studio::showStudio, &app, [&] {
-    if (!ensureWindow()) {
-      app.exit(1);
-      return;
-    }
-    window->show();
-    window->requestActivate();
-  });
+  QObject::connect(&studio, &Studio::showStudio, &app, showStudioWindow);
   QObject::connect(&studio, &Studio::editorRequested, &app, [&] {
     if (chooser)
       chooser->hide();
+    const bool wasVisible = window && window->isVisible();
     if (!ensureWindow()) {
       app.exit(1);
       return;
@@ -375,10 +557,35 @@ int main(int argc, char **argv) {
     window->setScreen(screenFor(studio.captureMonitor()));
     window->show();
     window->requestActivate();
+    if (studio.quickMode() && !wasVisible)
+      floatWindow(window, screenFor(studio.captureMonitor()));
   });
   QObject::connect(&studio, &Studio::dismissRequested, &app, [&] {
-    hideAll();
-    QTimer::singleShot(0, &app, &QCoreApplication::quit);
+    const bool saved = studio.quickState() == "done" && !studio.savedPath().isEmpty();
+    const QString path = studio.savedPath();
+    hideCaptureSurfaces();
+    const bool returning = !recorder.active() && studio.takeReturnToStudio();
+    if (!pendingReview.isEmpty() && !recorder.active()) {
+      const QUrl review = pendingReview;
+      pendingReview.clear();
+      if (saved)
+        notify("Screenshot copied",
+               "Saved in " + QFileInfo(path).absolutePath().replace(QDir::homePath(), "~"),
+               path);
+      openReview(review, returning);
+      return;
+    }
+    if (returning) {
+      studio.leaveQuickMode();
+      recorder.reset();
+      showStudioWindow();
+      return;
+    }
+    if (saved)
+      notify("Screenshot copied",
+             "Saved in " + QFileInfo(path).absolutePath().replace(QDir::homePath(), "~"),
+             path);
+    endQuickTask();
   });
   QObject::connect(
       &studio, &Studio::selectionReady, &app, [&](const QStringList &names) {
@@ -442,23 +649,34 @@ int main(int argc, char **argv) {
         }
         client->write("ok\n");
         client->disconnectFromServer();
-        if (recorder.active())
-          return;
-        if (cmd == "record") {
-          if (!studio.busy() && !video.busy())
-            prepareRecording();
+        if (recorder.active()) {
+          if (!studio.busy() && !video.busy() && !studio.quickMode()) {
+            if (cmd == "repeat")
+              studio.repeatLastArea();
+            else if (cmd == "capture" || cmd == "screen")
+              studio.capture(cmd == "capture");
+          }
           return;
         }
         if (studio.busy() || video.busy())
           return;
         if (studio.quickMode()) {
+          // The recording shortcut switches an open selector to video.
+          if (cmd == "record" && studio.quickState() == "selecting") {
+            studio.recordInstead();
+            return;
+          }
           if (chooser && chooser->isVisible())
             chooser->requestActivate();
           else if (window && window->isVisible())
             window->requestActivate();
           return;
         }
-        if (cmd == "capture" || cmd == "screen")
+        if (cmd == "record")
+          studio.captureVideo();
+        else if (cmd == "repeat")
+          studio.repeatLastArea();
+        else if (cmd == "capture" || cmd == "screen")
           studio.capture(cmd == "capture");
         else {
           if (!ensureWindow()) {
@@ -480,7 +698,9 @@ int main(int argc, char **argv) {
   if (captureStartup)
     QTimer::singleShot(0, &studio, [&] {
       if (command == "record")
-        prepareRecording();
+        studio.captureVideo();
+      else if (command == "repeat")
+        studio.repeatLastArea();
       else {
         mark("capture requested");
         studio.capture(command != "screen");

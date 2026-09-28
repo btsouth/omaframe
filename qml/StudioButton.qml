@@ -4,12 +4,14 @@ import QtQuick.Layouts
 
 // Omarchy's button: flat, theme-rounded, 1px control border, and fills from
 // the theme's [controls] states. `primary` is the one accent-filled action
-// per surface; `selected` is the persistent chosen state; `quiet` drops the
-// idle chrome for secondary icon actions.
+// per surface; `danger` fills a confirmed destructive action with the urgent
+// color; `selected` is the persistent chosen state; `quiet` drops the idle
+// chrome for secondary icon actions.
 Button {
     id: control
     property string glyph: ""
     property bool primary: false
+    property bool danger: false
     property bool quiet: false
     property bool selected: false
     property string hint: ""
@@ -24,12 +26,13 @@ Button {
     ToolTip.text: hint
     ToolTip.delay: 600
     opacity: enabled ? 1 : 0.38
-    readonly property color ink: primary ? theme.onAccent : selected ? theme.selectedText : quiet && !hovered ? theme.muted : theme.text
+    readonly property color ink: danger ? theme.readableOn(theme.urgent) : primary ? theme.onAccent : selected ? theme.selectedText : quiet && !hovered ? theme.muted : theme.text
     background: Rectangle {
         radius: theme.radius
-        color: control.primary ? (control.down ? theme.mix(theme.accent, theme.background, 0.18) : control.hovered ? theme.mix(theme.accent, theme.text, 0.14) : theme.accent)
+        color: control.danger ? (control.down ? theme.mix(theme.urgent, theme.background, 0.18) : control.hovered ? theme.mix(theme.urgent, theme.text, 0.14) : theme.urgent)
+             : control.primary ? (control.down ? theme.mix(theme.accent, theme.background, 0.18) : control.hovered ? theme.mix(theme.accent, theme.text, 0.14) : theme.accent)
              : control.down ? theme.pressedFill : control.selected ? theme.selectedFill : control.hovered ? theme.hoverFill : control.quiet ? "transparent" : theme.controlFill
-        border.width: control.activeFocus ? 2 : control.primary || control.selected || (control.quiet && !control.hovered) ? 0 : 1
+        border.width: control.activeFocus ? 2 : control.primary || control.danger || control.selected || (control.quiet && !control.hovered) ? 0 : 1
         border.color: control.activeFocus ? theme.focusBorder : control.hovered ? theme.hoverBorder : theme.controlBorder
         Behavior on color { ColorAnimation { duration: 90 } }
     }
@@ -49,7 +52,7 @@ Button {
             color: control.ink
             font.family: control.font.family
             font.pixelSize: control.font.pixelSize
-            font.weight: control.primary ? Font.DemiBold : Font.Normal
+            font.weight: control.primary || control.danger ? Font.DemiBold : Font.Normal
             Layout.alignment: Qt.AlignVCenter
         }
     }

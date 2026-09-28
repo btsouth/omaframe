@@ -6,21 +6,48 @@ import QtQuick.Layouts
 Window {
     id: window
     visible: false
+    palette.window: theme.alpha(theme.background, 1)
+    palette.windowText: theme.text
+    palette.base: theme.well
+    palette.text: theme.text
+    palette.button: theme.controlFill
+    palette.buttonText: theme.text
+    palette.toolTipBase: theme.alpha(theme.background, 1)
+    palette.toolTipText: theme.text
+    palette.highlight: theme.accent
+    palette.highlightedText: theme.onAccent
+    palette.placeholderText: theme.faint
+    palette.mid: theme.controlBorder
+    palette.dark: theme.frame
     flags: Qt.FramelessWindowHint
     color: theme.background
     title: "Omaframe selection"
     Shortcut {sequence: "Escape"; enabled: window.visible; onActivated: studio.cancelSelection()}
     Shortcut {sequence: "Tab"; enabled: window.visible && !window.dragging; onActivated: window.toggleMode()}
+    Shortcut {sequence: "F"; enabled: window.visible && !window.dragging; onActivated: window.wholeDisplay()}
+    Shortcut {sequence: "D"; enabled: window.visible && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
+    Shortcut {sequence: "M"; enabled: window.visible && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
     property string monitorName: ""
     property real startX: 0
     property real startY: 0
     property real endX: 0
     property real endY: 0
     property bool dragging: false
-    property real sx: Math.min(startX, endX)
-    property real sy: Math.min(startY, endY)
-    property real sw: Math.abs(endX - startX)
-    property real sh: Math.abs(endY - startY)
+    property var hoveredTarget: null
+    property real sx: dragging || !hoveredTarget ? Math.min(startX, endX) : hoveredTarget.x * width
+    property real sy: dragging || !hoveredTarget ? Math.min(startY, endY) : hoveredTarget.y * height
+    property real sw: dragging || !hoveredTarget ? Math.abs(endX - startX) : hoveredTarget.w * width
+    property real sh: dragging || !hoveredTarget ? Math.abs(endY - startY) : hoveredTarget.h * height
+    function targetAt(px, py) {
+        const x = px / width;
+        const y = py / height;
+        for (const target of studio.windowTargets) {
+            if (target.monitor === monitorName && x >= target.x && y >= target.y &&
+                    x < target.x + target.w && y < target.y + target.h)
+                return target;
+        }
+        return null;
+    }
     // Screenshots use the theme accent; recordings use the color the Omarchy
     // bar gives its own recording indicator.
     readonly property color mark: studio.recordingSelection ? theme.recording : theme.popupFrame
@@ -31,12 +58,21 @@ Window {
         else
             studio.recordInstead(window.monitorName);
     }
+    // Each display has its own selector, but only one gets the keyboard.
+    // F records or captures the display the pointer is on.
+    function wholeDisplay() {
+        studio.finishSelection(studio.pointerMonitor.length ? studio.pointerMonitor : window.monitorName, 0, 0, 1, 1);
+    }
+    function cycleCountdown() {
+        recorder.countdown = recorder.countdown === 0 ? 3 : recorder.countdown === 3 ? 5 : 0;
+    }
     onVisibleChanged: {
         dragging = false;
         startX = 0;
         startY = 0;
         endX = 0;
         endY = 0;
+        hoveredTarget = null;
         if (visible)
             area.forceActiveFocus();
     }
@@ -82,12 +118,12 @@ Window {
         color: "transparent"
         border.color: window.mark
         border.width: 2
-        visible: window.dragging
+        visible: window.dragging || window.hoveredTarget !== null
     }
     // Live size beside the selection, flipped inside the screen near edges.
     Rectangle {
         id: sizeChip
-        visible: window.dragging && window.sw > 0 && window.sh > 0
+        visible: (window.dragging || window.hoveredTarget !== null) && window.sw > 0 && window.sh > 0
         readonly property real below: window.sy + window.sh + 8
         x: Math.max(4, Math.min(window.sx + window.sw - width, window.width - width - 4))
         y: below + height + 4 < window.height ? below : Math.max(4, window.sy - height - 8)
@@ -110,6 +146,7 @@ Window {
         id: area
         anchors.fill: parent
         cursorShape: Qt.CrossCursor
+        hoverEnabled: true
         focus: true
         Keys.onEscapePressed: studio.cancelSelection()
         onPressed: function (mouse) {
@@ -120,15 +157,30 @@ Window {
             window.endY = mouse.y;
             window.dragging = true;
         }
+        onEntered: studio.pointerMonitor = window.monitorName
         onPositionChanged: function (mouse) {
+            if (studio.pointerMonitor !== window.monitorName)
+                studio.pointerMonitor = window.monitorName;
             if (pressed) {
                 window.endX = Math.max(0, Math.min(width, mouse.x));
                 window.endY = Math.max(0, Math.min(height, mouse.y));
-            }
+            } else
+                window.hoveredTarget = window.targetAt(mouse.x, mouse.y);
         }
+        onExited: if (!pressed) window.hoveredTarget = null
         onReleased: function (mouse) {
-            studio.finishSelection(window.monitorName, window.startX / width, window.startY / height, window.endX / width, window.endY / height);
+            const dx = mouse.x - window.startX;
+            const dy = mouse.y - window.startY;
+            const target = window.targetAt(mouse.x, mouse.y);
+            if (dx * dx + dy * dy < 36) {
+                if (target)
+                    studio.finishSelection(window.monitorName, target.x, target.y, target.x + target.w, target.y + target.h);
+                else
+                    studio.finishSelection(window.monitorName, 0, 0, 1, 1);
+            } else
+                studio.finishSelection(window.monitorName, window.startX / width, window.startY / height, window.endX / width, window.endY / height);
             window.dragging = false;
+            window.hoveredTarget = target;
         }
     }
 
@@ -191,7 +243,44 @@ Window {
         }
     }
 
+    component BarToggle: Rectangle {
+        id: toggle
+        property string label
+        property string glyph
+        property bool on: false
+        property string hint
+        signal activated()
+        Layout.fillHeight: true
+        implicitWidth: toggleRow.implicitWidth + 18
+        radius: theme.radius
+        color: toggleMouse.pressed ? theme.pressedFill : on ? theme.selectedFill : toggleMouse.containsMouse ? theme.hoverFill : "transparent"
+        border.width: on ? 0 : 1
+        border.color: theme.controlBorder
+        Accessible.role: Accessible.CheckBox
+        Accessible.name: label
+        Accessible.checked: on
+        RowLayout {
+            id: toggleRow
+            anchors.centerIn: parent
+            spacing: 6
+            Glyph { name: toggle.glyph; ink: toggle.on ? theme.selectedText : theme.muted; Layout.preferredWidth: 15; Layout.preferredHeight: 15 }
+            Text { text: toggle.label; color: toggle.on ? theme.text : theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
+        }
+        MouseArea {
+            id: toggleMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: toggle.activated()
+        }
+        ToolTip.visible: toggleMouse.containsMouse && hint.length > 0
+        ToolTip.text: hint
+        ToolTip.delay: 500
+    }
+
     // The capture bar: an Omarchy popup, framed in the active-border color.
+    // Video mode keeps the same selection and adds the recording options, so
+    // a drag starts recording straight away.
     Rectangle {
         id: bar
         anchors.horizontalCenter: parent.horizontalCenter
@@ -200,8 +289,8 @@ Window {
         clip: true
         // Narrow or high-scale displays drop the key hints, then the prompt,
         // so the mode switch always fits on screen.
-        readonly property bool showHints: window.width >= 720
-        readonly property bool showPrompt: window.width >= 470
+        readonly property bool showHints: window.width >= (studio.recordingSelection ? 1500 : 1000)
+        readonly property bool showPrompt: window.width >= (studio.recordingSelection ? 1240 : 720)
         height: 48
         radius: theme.radius
         color: theme.alpha(theme.background, 1)
@@ -228,24 +317,80 @@ Window {
                 markColor: theme.recording
                 onActivated: if (!studio.recordingSelection) studio.recordInstead(window.monitorName)
             }
-            Rectangle {visible: bar.showPrompt; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 6; Layout.rightMargin: 6; width: 1; color: theme.separator}
+            Rectangle {visible: bar.showPrompt; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
             Text {
                 visible: bar.showPrompt
-                Layout.minimumWidth: 200
-                text: studio.recordingSelection ? "Drag an area to record" : "Drag an area to capture"
+                text: studio.recordingSelection ? "Click a window or drag an area to record" : "Click a window or drag an area"
                 color: theme.text
                 font.family: theme.fontFamily
                 font.pixelSize: 13
             }
-            Rectangle {visible: bar.showHints; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 6; Layout.rightMargin: 6; width: 1; color: theme.separator}
+            Rectangle {Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
+            BarToggle {
+                label: "Whole display"
+                glyph: "display"
+                hint: (studio.recordingSelection ? "Record" : "Capture") + " this entire display · F"
+                onActivated: studio.finishSelection(window.monitorName, 0, 0, 1, 1)
+            }
+            BarToggle {
+                visible: studio.recordingSelection
+                label: "Sound"
+                glyph: recorder.desktopAudio ? "volume" : "mute"
+                on: recorder.desktopAudio
+                hint: "Record what your computer plays · D"
+                onActivated: recorder.desktopAudio = !recorder.desktopAudio
+            }
+            BarToggle {
+                visible: studio.recordingSelection
+                label: "Mic"
+                glyph: "mic"
+                on: recorder.micAudio
+                hint: (recorder.micAudio && recorder.microphone >= 0 ? "Recording from " + recorder.microphones[recorder.microphone].label : "Record your microphone") + " · M"
+                onActivated: recorder.micAudio = !recorder.micAudio
+            }
+            BarToggle {
+                visible: studio.recordingSelection
+                label: recorder.countdown === 0 ? "No delay" : recorder.countdown + " s"
+                glyph: "timer"
+                on: recorder.countdown > 0
+                hint: "Countdown before recording starts"
+                onActivated: window.cycleCountdown()
+            }
+            BarToggle {
+                visible: studio.recordingSelection
+                label: ""
+                glyph: "settings"
+                implicitWidth: 34
+                hint: "More recording options"
+                onActivated: studio.recordingOptions(window.monitorName)
+            }
+            Rectangle {visible: bar.showHints; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
             Keycap {visible: bar.showHints; key: "Tab"}
-            Text {visible: bar.showHints; text: "Mode"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 8}
+            Text {visible: bar.showHints; text: studio.recordingSelection ? "Screenshot" : "Video"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
             Keycap {
-                visible: bar.showHints
                 key: "Esc"
                 MouseArea {anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studio.cancelSelection()}
             }
             Text {visible: bar.showHints; text: "Cancel"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
+        }
+    }
+    // Recording options load in the background; say so if they are slow.
+    Rectangle {
+        visible: studio.recordingSelection && recorder.state === "loading"
+        anchors.horizontalCenter: bar.horizontalCenter
+        anchors.top: bar.bottom
+        anchors.topMargin: 8
+        width: loadingText.implicitWidth + 20
+        height: 26
+        radius: theme.radius
+        color: theme.alpha(theme.background, 0.94)
+        Text {
+            id: loadingText
+            anchors.centerIn: parent
+            text: "Checking audio and displays…"
+            color: theme.muted
+            font.family: theme.fontFamily
+            font.pixelSize: 11
         }
     }
     onClosing: function (close) {

@@ -7,12 +7,34 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
+#include <QProcess>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QUuid>
 #include <QtConcurrent>
+#include <QVector>
+#include <algorithm>
 #include <cmath>
 #include <sys/resource.h>
+
+static bool decodesVideoFrame(const QString &path, const QStringList &seek = {}) {
+  QProcess decode;
+  QStringList args{"-hide_banner", "-loglevel", "error", "-xerror"};
+  args << seek << "-i" << path << "-map" << "0:v:0" << "-frames:v" << "1"
+       << "-f" << "framecrc" << "pipe:1";
+  decode.start("ffmpeg", args);
+  if (!decode.waitForFinished(10000)) {
+    decode.kill();
+    decode.waitForFinished();
+    return false;
+  }
+  bool frame = false;
+  for (const auto &line : decode.readAllStandardOutput().split('\n'))
+    frame |= !line.trimmed().isEmpty() && !line.startsWith('#');
+  return decode.exitStatus() == QProcess::NormalExit &&
+         decode.exitCode() == 0 && frame;
+}
 
 Video::Video(QObject *parent) : QObject(parent) {
   m_directory =
@@ -53,22 +75,94 @@ Video::Video(QObject *parent) : QObject(parent) {
           });
   connect(&m_encoder, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
           this, [this](int code, QProcess::ExitStatus status) {
-            m_busy = false;
             if (m_cancelled) {
+              m_busy = false;
               QFile::remove(m_temporary);
               m_status = "Export cancelled. Your recording is unchanged.";
             } else if (code != 0 || status != QProcess::NormalExit) {
+              m_busy = false;
               QFile::remove(m_temporary);
               m_status =
                   "Video export failed: " + m_error.simplified().right(300);
-            } else if (!QFile::rename(m_temporary, m_final)) {
-              QFile::remove(m_temporary);
-              m_status =
-                  "Could not finish saving the clip. Check the save folder.";
             } else {
-              m_saved = m_final;
-              m_progress = 1;
-              m_status = "Clip saved. Your original recording is unchanged.";
+              m_status = "Checking the exported video…";
+              emit changed();
+              auto *watcher = new QFutureWatcher<bool>(this);
+              connect(watcher, &QFutureWatcher<bool>::finished, this,
+                      [this, watcher] {
+                        const bool valid = watcher->result();
+                        watcher->deleteLater();
+                        m_busy = false;
+                        if (m_cancelled) {
+                          QFile::remove(m_temporary);
+                          m_status = "Export cancelled. Your recording is unchanged.";
+                        } else if (!valid) {
+                          QFile::remove(m_temporary);
+                          m_status = "The exported video could not be played. "
+                                     "Your original recording is unchanged.";
+                        } else if (!QFile::rename(m_temporary, m_final)) {
+                          QFile::remove(m_temporary);
+                          m_status = "Could not finish saving the clip. "
+                                     "Check the save folder.";
+                        } else {
+                          m_saved = m_final;
+                          m_progress = 1;
+                          m_savedSummary =
+                              QString("%1 s · %2")
+                                  .arg(m_exportDuration, 0, 'f', 1)
+                                  .arg(QLocale().formattedDataSize(
+                                      QFileInfo(m_saved).size()));
+                          m_status = "Saved " + QFileInfo(m_saved).fileName() +
+                                     ". The original is unchanged.";
+                        }
+                        emit changed();
+                        if (!m_saved.isEmpty())
+                          emit exported(QUrl::fromLocalFile(m_saved));
+                      });
+              watcher->setFuture(QtConcurrent::run(
+                  [path = m_temporary, expected = m_exportDuration,
+                   expectedAudio = m_muteExport ? 0 : m_audioTracks] {
+                    if (QFileInfo(path).size() < 1024)
+                      return false;
+                    QProcess probe;
+                    probe.start("ffprobe", {"-v", "error", "-show_entries",
+                                            "format=duration:stream=codec_type,width,height",
+                                            "-of", "json", path});
+                    if (!probe.waitForFinished(10000)) {
+                      probe.kill();
+                      probe.waitForFinished();
+                      return false;
+                    }
+                    const auto doc = QJsonDocument::fromJson(
+                                         probe.readAllStandardOutput())
+                                         .object();
+                    const double duration = doc.value("format")
+                                                .toObject()
+                                                .value("duration")
+                                                .toString()
+                                                .toDouble();
+                    bool hasVideo = false;
+                    int audioTracks = 0;
+                    for (const auto &item : doc.value("streams").toArray()) {
+                      const auto stream = item.toObject();
+                      hasVideo |= stream.value("codec_type").toString() ==
+                                      "video" &&
+                                  stream.value("width").toInt() > 0 &&
+                                  stream.value("height").toInt() > 0;
+                      audioTracks += stream.value("codec_type").toString() == "audio";
+                    }
+                    if (probe.exitCode() != 0 || !hasVideo ||
+                        audioTracks != expectedAudio ||
+                        !std::isfinite(duration) ||
+                        std::abs(duration - expected) >
+                            std::max(0.35, expected * 0.02))
+                      return false;
+                    const double tail = std::min(1.0, duration);
+                    return decodesVideoFrame(path) &&
+                           decodesVideoFrame(
+                               path, {"-sseof", QString::number(-tail, 'f', 3)});
+                  }));
+              return;
             }
             emit changed();
           });
@@ -93,6 +187,7 @@ void Video::open(const QUrl &url) {
     double duration = 0;
     QString dimensions, error;
     int audioTracks = 0;
+    bool copyCompatible = false;
   };
   auto *watcher = new QFutureWatcher<Result>(this);
   connect(watcher, &QFutureWatcher<Result>::finished, this,
@@ -110,9 +205,12 @@ void Video::open(const QUrl &url) {
             m_duration = r.duration;
             m_dimensions = r.dimensions;
             m_audioTracks = r.audioTracks;
+            m_copyCompatible = r.copyCompatible;
             m_saved.clear();
+            m_savedSummary.clear();
             m_progress = 0;
-            m_status = "Trim the beginning and end, then export your clip.";
+            m_status = "Edits are saved as a new file. " + m_name +
+                       " stays as it is.";
             makeThumbnails();
             emit changed();
             emit loaded();
@@ -131,13 +229,18 @@ void Video::open(const QUrl &url) {
     const auto doc =
         QJsonDocument::fromJson(probe.readAllStandardOutput()).object();
     bool hasVideo = false;
+    bool compatibleAudio = true;
+    bool h264 = false;
     for (const auto &value : doc.value("streams").toArray()) {
       const auto stream = value.toObject();
       const QString type = stream.value("codec_type").toString();
-      if (type == "audio")
+      if (type == "audio") {
         ++r.audioTracks;
+        compatibleAudio &= stream.value("codec_name").toString() == "aac";
+      }
       if (type == "video" && !hasVideo) {
         hasVideo = true;
+        h264 = stream.value("codec_name").toString() == "h264";
         r.dimensions = QString("%1 × %2")
                            .arg(stream.value("width").toInt())
                            .arg(stream.value("height").toInt());
@@ -152,6 +255,9 @@ void Video::open(const QUrl &url) {
         r.duration < 0.1)
       r.error =
           "This file does not contain a readable video with a known duration.";
+    r.copyCompatible = h264 && compatibleAudio &&
+                       QStringList{"mp4", "mov", "m4v"}.contains(
+                           QFileInfo(url.toLocalFile()).suffix().toLower());
     return r;
   }));
 }
@@ -174,6 +280,38 @@ void Video::makeThumbnails() {
                                         file = m_source.toLocalFile(),
                                         duration = m_duration] {
     QStringList result;
+    // For short clips, decode once instead of starting and seeking FFmpeg
+    // sixteen times. Long clips keep bounded seeks rather than a full decode.
+    if (duration <= 90) {
+      const QString fps = QString::number(ThumbnailCount / duration, 'f', 8);
+      const QString first = QString::number(duration / (2 * ThumbnailCount), 'f', 6);
+      QProcess batch;
+      batch.start("ffmpeg",
+                  {"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                   "-i", file, "-an", "-vf",
+                   "fps=fps=" + fps + ":start_time=" + first + ",scale=-2:120",
+                   "-frames:v", QString::number(ThumbnailCount), "-q:v", "5",
+                   "-start_number", "0", dir + "/%02d.jpg"});
+      const bool complete = batch.waitForFinished(15000) &&
+                            batch.exitStatus() == QProcess::NormalExit &&
+                            batch.exitCode() == 0;
+      if (batch.state() != QProcess::NotRunning) {
+        batch.kill();
+        batch.waitForFinished();
+      }
+      if (complete) {
+        for (int i = 0; i < ThumbnailCount; ++i) {
+          const QString path =
+              QString("%1/%2.jpg").arg(dir).arg(i, 2, 10, QChar('0'));
+          if (!QFileInfo::exists(path))
+            break;
+          result << QUrl::fromLocalFile(path).toString();
+        }
+        if (result.size() == ThumbnailCount)
+          return result;
+        result.clear();
+      }
+    }
     for (int i = 0; i < ThumbnailCount; ++i) {
       const QString path =
           QString("%1/%2.jpg").arg(dir).arg(i, 2, 10, QChar('0'));
@@ -201,6 +339,10 @@ void Video::makeThumbnails() {
   }));
 }
 void Video::exportClip(double start, double end, bool mute) {
+  exportEdited(start, end, mute, {});
+}
+void Video::exportEdited(double start, double end, bool mute,
+                         const QVariantList &removedRanges) {
   if (m_busy || m_source.isEmpty())
     return;
   if (!std::isfinite(start) || !std::isfinite(end) || start < 0 ||
@@ -209,17 +351,60 @@ void Video::exportClip(double start, double end, bool mute) {
     emit changed();
     return;
   }
+  QVector<QPair<double, double>> cuts;
+  for (const auto &value : removedRanges) {
+    const auto range = value.toMap();
+    bool startOk = false, endOk = false;
+    const double first = range.value("start").toDouble(&startOk);
+    const double last = range.value("end").toDouble(&endOk);
+    if (!startOk || !endOk || !std::isfinite(first) || !std::isfinite(last) ||
+        first < 0 || last > m_duration + 0.05 || last - first + 0.000001 < 0.1) {
+      m_status = "A removed section has invalid times.";
+      emit changed();
+      return;
+    }
+    if (last > start && first < end)
+      cuts.append({std::max(first, start), std::min(last, end)});
+  }
+  std::sort(cuts.begin(), cuts.end(), [](const auto &a, const auto &b) {
+    return a.first < b.first;
+  });
+  QVector<QPair<double, double>> kept;
+  double cursor = start;
+  for (const auto &cut : cuts) {
+    if (cut.first > cursor + 0.001)
+      kept.append({cursor, cut.first});
+    cursor = std::max(cursor, cut.second);
+  }
+  if (end > cursor + 0.001)
+    kept.append({cursor, end});
+  double outputDuration = 0;
+  for (const auto &range : kept)
+    outputDuration += range.second - range.first;
+  if (outputDuration + 0.000001 < 0.1) {
+    m_status = "Keep at least a tenth of a second after removing sections.";
+    emit changed();
+    return;
+  }
+  if (kept.size() == 1) {
+    start = kept.first().first;
+    end = kept.first().second;
+  }
   if (!QDir().mkpath(m_directory)) {
     m_status = "Could not create the save folder.";
     emit changed();
     return;
   }
-  QString id =
-      QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss-zzz") + "-" +
-      QUuid::createUuid().toString(QUuid::Id128).left(6);
-  m_final = m_directory + "/Omaframe-" + id + ".mp4";
-  m_temporary = m_directory + "/.Omaframe-" + id + ".part.mp4";
-  m_exportDuration = end - start;
+  // Name the clip after its recording, so the two sit together.
+  const QString base = QFileInfo(m_source.toLocalFile()).completeBaseName();
+  m_final = m_directory + "/" + base + "-edited.mp4";
+  for (int n = 2; QFileInfo::exists(m_final); ++n)
+    m_final = m_directory + QString("/%1-edited-%2.mp4").arg(base).arg(n);
+  m_temporary = m_directory + "/." + QFileInfo(m_final).completeBaseName() +
+                "-" + QUuid::createUuid().toString(QUuid::Id128).left(6) +
+                ".part.mp4";
+  m_exportDuration = outputDuration;
+  m_muteExport = mute;
   m_cancelled = false;
   m_progress = 0;
   m_error.clear();
@@ -227,8 +412,75 @@ void Video::exportClip(double start, double end, bool mute) {
   m_busy = true;
   m_exporting = true;
   m_saved.clear();
+  m_savedSummary.clear();
   m_status = "Exporting a clean MP4…";
+  // A clip beginning at the first frame can be shortened at the end without
+  // re-encoding. Start trims and middle cuts still need exact frame removal.
+  const bool streamCopy = kept.size() == 1 && m_copyCompatible && start <= 0.001;
+  if (streamCopy)
+    m_status = "Saving the original quality without re-encoding…";
   emit changed();
+  if (streamCopy) {
+    QStringList args{"-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+                     "-i", m_source.toLocalFile()};
+    if (end < m_duration - 0.001)
+      args << "-t" << QString::number(m_exportDuration, 'f', 3);
+    args << "-map" << "0:v:0";
+    if (!mute)
+      args << "-map" << "0:a?";
+    args << "-c" << "copy" << "-map_metadata" << "-1"
+         << "-movflags" << "+faststart" << "-progress" << "pipe:1"
+         << m_temporary;
+    m_encoder.start("ffmpeg", args);
+    return;
+  }
+  if (kept.size() > 1) {
+    QStringList filters;
+    QString videoInputs;
+    for (int i = 0; i < kept.size(); ++i) {
+      const auto &range = kept[i];
+      const QString times = QString("start=%1:end=%2")
+                                .arg(range.first, 0, 'f', 3)
+                                .arg(range.second, 0, 'f', 3);
+      filters << QString("[0:v:0]trim=%1,setpts=PTS-STARTPTS,"
+                         "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v%2]")
+                     .arg(times).arg(i);
+      videoInputs += QString("[v%1]").arg(i);
+      if (!mute) {
+        for (int track = 0; track < m_audioTracks; ++track)
+          filters << QString("[0:a:%1]atrim=%2,asetpts=PTS-STARTPTS[a%1_%3]")
+                         .arg(track).arg(times).arg(i);
+      }
+    }
+    filters << QString("%1concat=n=%2:v=1:a=0[v]")
+                   .arg(videoInputs).arg(kept.size());
+    if (!mute) {
+      for (int track = 0; track < m_audioTracks; ++track) {
+        QString inputs;
+        for (int i = 0; i < kept.size(); ++i)
+          inputs += QString("[a%1_%2]").arg(track).arg(i);
+        filters << QString("%1concat=n=%2:v=0:a=1[a%3]")
+                       .arg(inputs).arg(kept.size()).arg(track);
+      }
+    }
+    QStringList args{"-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+                     "-i", m_source.toLocalFile(), "-filter_complex",
+                     filters.join(';'), "-map", "[v]"};
+    if (mute)
+      args << "-an";
+    else {
+      for (int track = 0; track < m_audioTracks; ++track)
+        args << "-map" << QString("[a%1]").arg(track);
+      if (m_audioTracks)
+        args << "-c:a" << "aac" << "-b:a" << "192k";
+    }
+    args << "-c:v" << "libx264" << "-preset" << "veryfast" << "-crf" << "16"
+         << "-pix_fmt" << "yuv420p" << "-map_metadata" << "-1"
+         << "-movflags" << "+faststart" << "-progress" << "pipe:1"
+         << m_temporary;
+    m_encoder.start("ffmpeg", args);
+    return;
+  }
   QStringList args{"-hide_banner",
                    "-loglevel",
                    "error",
@@ -247,16 +499,66 @@ void Video::exportClip(double start, double end, bool mute) {
   else
     args << "-map" << "0:a?" << "-c:a" << "aac" << "-b:a" << "192k";
   args << "-vf" << "scale=trunc(iw/2)*2:trunc(ih/2)*2" << "-c:v" << "libx264"
-       << "-preset" << "fast" << "-crf" << "18" << "-pix_fmt" << "yuv420p"
+       << "-preset" << "veryfast" << "-crf" << "16" << "-pix_fmt" << "yuv420p"
        << "-map_metadata" << "-1" << "-movflags"
        << "+faststart" << "-progress" << "pipe:1" << m_temporary;
   m_encoder.start("ffmpeg", args);
 }
 void Video::cancel() {
-  if (m_encoder.state() != QProcess::NotRunning) {
+  if (m_busy && m_exporting)
     m_cancelled = true;
+  if (m_encoder.state() != QProcess::NotRunning) {
     m_encoder.kill();
   }
+}
+void Video::keepOriginal() {
+  if (m_busy || !m_source.isLocalFile() ||
+      !QFileInfo::exists(m_source.toLocalFile()))
+    return;
+  m_saved = m_source.toLocalFile();
+  m_status = "Recording saved as " + QFileInfo(m_saved).fileName() + ".";
+  emit changed();
+  emit originalAccepted(m_source);
+}
+QString Video::savedName() const {
+  return m_saved.isEmpty() ? QString() : QFileInfo(m_saved).fileName();
+}
+bool Video::copyFile() {
+  const QString path = m_saved.isEmpty() ? m_source.toLocalFile() : m_saved;
+  if (path.isEmpty() || !QFileInfo::exists(path)) {
+    m_status = "The video file is missing, so it could not be copied.";
+    emit changed();
+    return false;
+  }
+  QProcess clipboard;
+  clipboard.start("wl-copy", {"--type", "text/uri-list"});
+  const bool started = clipboard.waitForStarted(3000);
+  if (started) {
+    clipboard.write(QUrl::fromLocalFile(path).toEncoded() + "\r\n");
+    clipboard.closeWriteChannel();
+  }
+  const bool copied = started && clipboard.waitForFinished(5000) &&
+                      clipboard.exitCode() == 0;
+  if (clipboard.state() != QProcess::NotRunning) {
+    clipboard.kill();
+    clipboard.waitForFinished();
+  }
+  m_status = copied ? QFileInfo(path).fileName() +
+                          " is on the clipboard. Paste it into a chat or folder."
+                    : "The video is saved, but it could not be copied. Check "
+                      "that wl-clipboard is installed.";
+  emit changed();
+  return copied;
+}
+void Video::finish() {
+  if (m_busy)
+    return;
+  emit originalAccepted(m_source);
+}
+void Video::revealSource() {
+  if (m_source.isLocalFile())
+    QDesktopServices::openUrl(
+        QUrl::fromLocalFile(QFileInfo(m_source.toLocalFile()).absolutePath()));
 }
 void Video::revealSaved() {
   if (!m_saved.isEmpty())

@@ -526,6 +526,6 @@ The third task becomes a release gate when the complete studio is delivered. It 
 
 ## Recording implementation update, 2026-09-26
 
-The local preview now owns GPU Screen Recorder launch/stop and opens the saved clip automatically. The capture bar switches between Screenshot and Video. Recording setup includes region/display, independent desktop/mic switches, explicit microphone selection, cursor visibility, and countdown. A timer/Stop pill is placed outside the capture and its actual compositor geometry is checked before starting. Full-display recording uses another monitor for Stop when available; otherwise keyboard-only stopping requires explicit acknowledgement.
+The local preview now owns GPU Screen Recorder launch/stop and opens the saved clip automatically. The capture bar switches between Screenshot and Video. Recording setup includes region/display, independent desktop/mic switches, explicit microphone selection, cursor visibility, and countdown. A timer/Stop pill is placed outside a region capture and its actual compositor geometry is checked before starting. Full-display recording stops from the Omarchy bar or the acknowledged hotkey.
 
 Pause, separate audio tracks, camera integration, scrolling capture, and automatic focus remain planned. Existing Omarchy webcam recording remains available. See recording-validation.md for the distinction between automated/UI verification and physical recording acceptance.

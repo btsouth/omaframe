@@ -1,23 +1,25 @@
 [Desktop Entry]
 Type=Application
 Name=Omaframe
-Comment=A little finish. A better screenshot.
-Exec=omaframe %f
+GenericName=Screenshot and screen recorder
+Comment=Capture, mark up and share screenshots and screen recordings
+Exec=omaframe --studio %f
 Icon=omaframe
 Terminal=false
-Categories=Graphics;Photography;
+Categories=Graphics;
+Keywords=screenshot;screen;capture;record;recording;annotate;
 MimeType=image/png;image/jpeg;image/webp;image/bmp;video/mp4;video/webm;video/x-matroska;video/quicktime;
 StartupWMClass=io.github.btsouth.omaframe
-Actions=Capture;Record;Studio;
+Actions=Screenshot;Record;Repeat;
 
-[Desktop Action Capture]
-Name=Capture a region
+[Desktop Action Screenshot]
+Name=Take a screenshot
 Exec=omaframe --capture
 
-[Desktop Action Studio]
-Name=Open editor and video tools
-Exec=omaframe --studio
-
 [Desktop Action Record]
-Name=Record your screen
+Name=Record the screen
 Exec=omaframe --record
+
+[Desktop Action Repeat]
+Name=Screenshot the last area again
+Exec=omaframe --repeat

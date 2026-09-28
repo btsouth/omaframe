@@ -1,5 +1,6 @@
 #include "renderer.hpp"
 #include <QFont>
+#include <QFontMetrics>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
@@ -20,21 +21,193 @@ static QRect pixelRect(QSize size, QPointF from, QPointF to) {
   return r.normalized().toAlignedRect().intersected(QRect(QPoint(), size));
 }
 
-QImage applyEdits(const QImage &source, const QVector<Edit> &edits) {
+QRectF cropBounds(const QVector<Edit> &edits) {
+  QRectF crop(0, 0, 1, 1);
+  for (const Edit &edit : edits)
+    if (edit.type == "crop") {
+      const QRectF candidate(edit.from, edit.to);
+      const QRectF clipped = candidate.normalized().intersected(QRectF(0, 0, 1, 1));
+      if (clipped.width() > 0 && clipped.height() > 0)
+        crop = clipped;
+    }
+  return crop;
+}
+
+static double annotationUnit(const QImage &source) {
+  return std::max(2., std::min(source.width(), source.height()) / 240.);
+}
+
+double textSizeForPixels(int pixels, const QImage &source) {
+  return std::clamp(pixels, 8, 4096) / (annotationUnit(source) * 6.);
+}
+
+int textPixelSize(const Edit &edit, const QImage &source) {
+  return std::clamp(qRound(annotationUnit(source) * 6. * edit.size), 8, 4096);
+}
+
+struct TextLayout {
+  QString visibleText;
+  QSizeF size;
+};
+
+static TextLayout layoutText(const Edit &edit, const QImage &source,
+                             const QFont &font) {
+  const QFontMetrics metrics(font, &source);
+  const double inset = std::max(4., textPixelSize(edit, source) * 0.27);
+  const int lineLimit = std::max(1, qFloor(source.width() * 0.85 - inset * 2));
+  QStringList lines;
+  for (const QString &paragraph : edit.text.split('\n')) {
+    QString line;
+    for (const QString &word : paragraph.split(' ')) {
+      const QString candidate = line.isEmpty() ? word : line + ' ' + word;
+      if (metrics.horizontalAdvance(candidate) <= lineLimit) {
+        line = candidate;
+        continue;
+      }
+      if (!line.isEmpty()) {
+        lines.append(line);
+        line.clear();
+      }
+      for (const QChar ch : word) {
+        const QString next = line + ch;
+        if (!line.isEmpty() && metrics.horizontalAdvance(next) > lineLimit) {
+          lines.append(line);
+          line.clear();
+        }
+        line += ch;
+      }
+    }
+    lines.append(line);
+  }
+  int width = 1;
+  for (const QString &line : lines)
+    width = std::max(width, metrics.horizontalAdvance(line));
+  return {lines.join('\n'),
+          QSizeF(width + inset * 2,
+                 metrics.lineSpacing() * std::max(1, int(lines.size())) + inset * 2)};
+}
+
+QRectF annotationBounds(const Edit &edit, const QImage &source) {
+  if (source.isNull())
+    return {};
+  const double unit = annotationUnit(source);
+  const double markSize = std::clamp(edit.size, 0.5, 8.0);
+  const QPointF anchor(edit.from.x() * source.width(),
+                       edit.from.y() * source.height());
+  QRectF pixels;
+  if (edit.type == "text") {
+    QFont font("sans-serif");
+    font.setPixelSize(textPixelSize(edit, source));
+    font.setWeight(QFont::DemiBold);
+    pixels = QRectF(anchor, layoutText(edit, source, font).size);
+  } else if (edit.type == "step") {
+    pixels = QRectF(anchor - QPointF(unit * 5 * markSize, unit * 5 * markSize),
+                    QSizeF(unit * 10 * markSize, unit * 10 * markSize));
+  } else if (edit.type == "pen" && !edit.points.isEmpty()) {
+    double left = 1., right = 0., top = 1., bottom = 0.;
+    for (const QPointF &point : edit.points) {
+      left = std::min(left, point.x());
+      right = std::max(right, point.x());
+      top = std::min(top, point.y());
+      bottom = std::max(bottom, point.y());
+    }
+    return QRectF(QPointF(left, top), QPointF(right, bottom)).normalized();
+  } else {
+    pixels = QRectF(anchor,
+                    QPointF(edit.to.x() * source.width(),
+                            edit.to.y() * source.height()))
+                 .normalized();
+  }
+  return {pixels.x() / source.width(), pixels.y() / source.height(),
+          pixels.width() / source.width(),
+          pixels.height() / source.height()};
+}
+
+QImage cropImage(const QImage &image, const QVector<Edit> &edits) {
+  if (image.isNull())
+    return image;
+  QRect region(QPoint(), image.size());
+  bool cropped = false;
+  for (const Edit &edit : edits)
+    if (edit.type == "crop") {
+      region = pixelRect(image.size(), edit.from, edit.to);
+      cropped = true;
+    }
+  if (!cropped)
+    return image;
+  return region.width() >= 2 && region.height() >= 2 ? image.copy(region)
+                                                       : image;
+}
+
+QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
+                  bool applyCrop) {
   QImage img = source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
   img.setDevicePixelRatio(1);
   int step = 0;
   for (const Edit &edit : edits) {
+    if (edit.type == "crop")
+      continue;
     QRect r = pixelRect(img.size(), edit.from, edit.to);
-    if (edit.type == "crop") {
-      if (r.width() >= 2 && r.height() >= 2)
-        img = img.copy(r);
+    if (edit.type == "blur" && r.width() > 1 && r.height() > 1) {
+      const QImage region = img.copy(r);
+      const int radius = std::clamp(qRound(annotationUnit(img) * 4 * edit.size),
+                                    2, 48);
+      QImage horizontal(region.size(), region.format());
+      QImage softened(region.size(), region.format());
+      for (int y = 0; y < region.height(); ++y) {
+        const QRgb *src = reinterpret_cast<const QRgb *>(region.constScanLine(y));
+        QRgb *dst = reinterpret_cast<QRgb *>(horizontal.scanLine(y));
+        int red = 0, green = 0, blue = 0, alpha = 0;
+        for (int x = -radius; x <= radius; ++x) {
+          const QRgb pixel = src[std::clamp(x, 0, region.width() - 1)];
+          red += qRed(pixel); green += qGreen(pixel);
+          blue += qBlue(pixel); alpha += qAlpha(pixel);
+        }
+        const int count = radius * 2 + 1;
+        for (int x = 0; x < region.width(); ++x) {
+          dst[x] = qRgba(red / count, green / count, blue / count,
+                         alpha / count);
+          const QRgb remove = src[std::clamp(x - radius, 0, region.width() - 1)];
+          const QRgb add = src[std::clamp(x + radius + 1, 0, region.width() - 1)];
+          red += qRed(add) - qRed(remove);
+          green += qGreen(add) - qGreen(remove);
+          blue += qBlue(add) - qBlue(remove);
+          alpha += qAlpha(add) - qAlpha(remove);
+        }
+      }
+      for (int x = 0; x < region.width(); ++x) {
+        int red = 0, green = 0, blue = 0, alpha = 0;
+        for (int y = -radius; y <= radius; ++y) {
+          const QRgb *row = reinterpret_cast<const QRgb *>(
+              horizontal.constScanLine(std::clamp(y, 0, region.height() - 1)));
+          const QRgb pixel = row[x];
+          red += qRed(pixel); green += qGreen(pixel);
+          blue += qBlue(pixel); alpha += qAlpha(pixel);
+        }
+        const int count = radius * 2 + 1;
+        for (int y = 0; y < region.height(); ++y) {
+          QRgb *row = reinterpret_cast<QRgb *>(softened.scanLine(y));
+          row[x] = qRgba(red / count, green / count, blue / count,
+                         alpha / count);
+          const QRgb *removeRow = reinterpret_cast<const QRgb *>(
+              horizontal.constScanLine(std::clamp(y - radius, 0, region.height() - 1)));
+          const QRgb *addRow = reinterpret_cast<const QRgb *>(
+              horizontal.constScanLine(std::clamp(y + radius + 1, 0, region.height() - 1)));
+          red += qRed(addRow[x]) - qRed(removeRow[x]);
+          green += qGreen(addRow[x]) - qGreen(removeRow[x]);
+          blue += qBlue(addRow[x]) - qBlue(removeRow[x]);
+          alpha += qAlpha(addRow[x]) - qAlpha(removeRow[x]);
+        }
+      }
+      QPainter blurPainter(&img);
+      blurPainter.setCompositionMode(QPainter::CompositionMode_Source);
+      blurPainter.drawImage(r.topLeft(), softened);
       continue;
     }
     QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing);
-    const double unit =
-        std::max(2., std::min(img.width(), img.height()) / 240.);
+    const double unit = annotationUnit(img);
+    const double markSize = std::clamp(edit.size, 0.5, 8.0);
     QPointF a(edit.from.x() * img.width(), edit.from.y() * img.height());
     QPointF b(edit.to.x() * img.width(), edit.to.y() * img.height());
     if (edit.type == "redact") {
@@ -46,11 +219,32 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits) {
       p.fillRect(r, QColor(250, 210, 70, 95));
       p.setPen(QPen(QColor("#eab841"), unit * 0.5));
       p.drawRect(r);
+    } else if (edit.type == "line" || edit.type == "box" ||
+               edit.type == "ellipse") {
+      p.setPen(QPen(edit.color, unit * markSize, Qt::SolidLine, Qt::RoundCap,
+                    Qt::RoundJoin));
+      p.setBrush(Qt::NoBrush);
+      if (edit.type == "line")
+        p.drawLine(a, b);
+      else if (edit.type == "box")
+        p.drawRect(QRectF(a, b).normalized());
+      else
+        p.drawEllipse(QRectF(a, b).normalized());
+    } else if (edit.type == "pen" && edit.points.size() >= 2) {
+      p.setPen(QPen(edit.color, unit * markSize, Qt::SolidLine,
+                    Qt::RoundCap, Qt::RoundJoin));
+      QPainterPath path;
+      path.moveTo(edit.points.first().x() * img.width(),
+                  edit.points.first().y() * img.height());
+      for (qsizetype i = 1; i < edit.points.size(); ++i)
+        path.lineTo(edit.points[i].x() * img.width(),
+                    edit.points[i].y() * img.height());
+      p.drawPath(path);
     } else if (edit.type == "arrow") {
       const double angle = std::atan2(b.y() - a.y(), b.x() - a.x());
-      const double head = unit * 5;
+      const double head = unit * 5 * markSize;
       p.setPen(
-          QPen(edit.color, unit, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+          QPen(edit.color, unit * markSize, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
       p.drawLine(a, b);
       p.drawLine(b,
                  b - QPointF(std::cos(angle - 0.55), std::sin(angle - 0.55)) *
@@ -62,37 +256,60 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits) {
       ++step;
       p.setPen(QPen(Qt::white, unit * 0.7));
       p.setBrush(edit.color);
-      p.drawEllipse(a, unit * 5, unit * 5);
+      p.drawEllipse(a, unit * 5 * markSize, unit * 5 * markSize);
       QFont font("sans-serif");
-      font.setPixelSize(qRound(unit * 5));
+      font.setPixelSize(qRound(unit * 5 * markSize));
       font.setWeight(QFont::DemiBold);
       p.setFont(font);
       p.drawText(
-          QRectF(a - QPointF(unit * 5, unit * 5), QSizeF(unit * 10, unit * 10)),
+          QRectF(a - QPointF(unit * 5 * markSize, unit * 5 * markSize),
+                 QSizeF(unit * 10 * markSize, unit * 10 * markSize)),
           Qt::AlignCenter, QString::number(step));
     } else if (edit.type == "text") {
       QFont font("sans-serif");
-      font.setPixelSize(qRound(unit * 6));
+      font.setPixelSize(textPixelSize(edit, img));
       font.setWeight(QFont::DemiBold);
       p.setFont(font);
-      const QRectF bounds = p.fontMetrics().boundingRect(edit.text).adjusted(
-          -unit * 2, -unit, unit * 2, unit);
-      const QRectF box(a, bounds.size());
-      p.setPen(Qt::NoPen);
-      p.setBrush(QColor("#151a20"));
-      p.drawRoundedRect(box, unit * 1.3, unit * 1.3);
-      p.setPen(Qt::white);
-      p.drawText(box, Qt::AlignCenter, edit.text);
+      const QRectF normalized = annotationBounds(edit, img);
+      const QString visibleText = layoutText(edit, img, font).visibleText;
+      const QRectF box(normalized.x() * img.width(),
+                       normalized.y() * img.height(),
+                       normalized.width() * img.width(),
+                       normalized.height() * img.height());
+      const double inset = std::max(4., textPixelSize(edit, img) * 0.27);
+      const QRectF content = box.adjusted(inset, 0, -inset, 0);
+      const auto align = Qt::AlignVCenter |
+          (edit.textAlign == "left" ? Qt::AlignLeft
+           : edit.textAlign == "right" ? Qt::AlignRight : Qt::AlignHCenter);
+      if (edit.textStyle == "box") {
+        QColor fill = edit.background;
+        fill.setAlphaF(std::clamp(edit.backgroundOpacity, 0.0, 1.0));
+        p.setPen(Qt::NoPen);
+        p.setBrush(fill);
+        p.drawRoundedRect(box, unit * 1.3 * markSize,
+                          unit * 1.3 * markSize);
+      } else {
+        p.setPen(QColor(0, 0, 0, 210));
+        p.drawText(content.translated(std::max(1., unit * 0.6),
+                                      std::max(1., unit * 0.6)),
+                   align, visibleText);
+      }
+      p.setPen(edit.color);
+      p.drawText(content, align, visibleText);
     }
   }
-  return img;
+  return applyCrop ? cropImage(img, edits) : img;
 }
 
 QSize outputSize(QSize source, const Options &o) {
   if (source.isEmpty() || o.style == 8)
     return source;
-  const int pad = qRound(std::max(source.width(), source.height()) *
-                         std::clamp(o.padding, 0.02, 0.22));
+  const double rate = std::clamp(o.padding, 0.02, 0.22) *
+                      (o.style == 5 ? 0.6 : 1.0);
+  // Base the frame on the shorter edge so wide windows do not gain a huge
+  // top and bottom matte. Outline deliberately uses a slimmer treatment.
+  const int pad = std::clamp(qRound(std::min(source.width(), source.height()) * rate),
+                             o.style == 5 ? 8 : 16, o.style == 5 ? 56 : 96);
   int w = source.width() + pad * 2, h = source.height() + pad * 2;
   double aspect = o.aspect == 1   ? 1.
                   : o.aspect == 2 ? 16. / 9.

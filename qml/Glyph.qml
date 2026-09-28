@@ -45,10 +45,38 @@ Canvas {
             line(7, 17, 21, 17);
             line(3, 7, 17, 7);
             line(17, 7, 17, 21);
+        } else if (name === "cut") {
+            c.moveTo(7, 7);
+            c.arc(5, 7, 2, 0, Math.PI * 2);
+            c.moveTo(7, 17);
+            c.arc(5, 17, 2, 0, Math.PI * 2);
+            line(7, 8, 20, 21);
+            line(7, 16, 20, 3);
         } else if (name === "arrow") {
             line(4, 20, 20, 4);
             line(11, 4, 20, 4);
             line(20, 4, 20, 13);
+        } else if (name === "select") {
+            c.moveTo(5, 3);
+            c.lineTo(5, 20);
+            c.lineTo(10, 15);
+            c.lineTo(14, 21);
+            c.lineTo(17, 19);
+            c.lineTo(13, 13);
+            c.lineTo(20, 12);
+            c.closePath();
+        } else if (name === "line") {
+            line(4, 20, 20, 4);
+            c.rect(2, 18, 4, 4);
+            c.rect(18, 2, 4, 4);
+        } else if (name === "box") {
+            c.rect(4, 5, 16, 14);
+        } else if (name === "ellipse") {
+            c.save();
+            c.translate(12, 12);
+            c.scale(8, 6);
+            c.arc(0, 0, 1, 0, Math.PI * 2);
+            c.restore();
         } else if (name === "highlight") {
             line(6, 16, 15, 3);
             line(15, 3, 21, 7);
@@ -62,6 +90,16 @@ Canvas {
             line(3, 3, 3, 5);
             line(21, 21, 16, 21);
             line(21, 21, 21, 19);
+        } else if (name === "blur") {
+            c.arc(12, 12, 3, 0, Math.PI * 2);
+            c.moveTo(12, 3); c.arc(12, 12, 9, -Math.PI / 2, Math.PI / 2);
+            c.moveTo(12, 5); c.arc(12, 12, 7, Math.PI / 2, Math.PI * 1.5);
+        } else if (name === "pen") {
+            line(5, 19, 17, 5);
+            line(17, 5, 20, 8);
+            line(20, 8, 8, 21);
+            line(8, 21, 4, 21);
+            line(4, 21, 5, 19);
         } else if (name === "text") {
             line(4, 4, 20, 4);
             line(12, 4, 12, 20);
@@ -145,6 +183,55 @@ Canvas {
         } else if (name === "close") {
             line(6, 6, 18, 18);
             line(18, 6, 6, 18);
+        } else if (name === "display") {
+            c.rect(3, 4, 18, 12);
+            line(12, 16, 12, 20);
+            line(8, 20, 16, 20);
+        } else if (name === "mic") {
+            c.moveTo(9, 6);
+            c.arc(12, 6, 3, Math.PI, 0);
+            c.lineTo(15, 12);
+            c.arc(12, 12, 3, 0, Math.PI);
+            c.closePath();
+            c.moveTo(6, 12);
+            c.quadraticCurveTo(6, 17.5, 12, 17.5);
+            c.quadraticCurveTo(18, 17.5, 18, 12);
+            line(12, 17.5, 12, 21);
+        } else if (name === "settings") {
+            c.moveTo(15, 12);
+            c.arc(12, 12, 3, 0, Math.PI * 2);
+            for (let i = 0; i < 8; ++i) {
+                const a = i * Math.PI / 4;
+                line(12 + Math.cos(a) * 6, 12 + Math.sin(a) * 6, 12 + Math.cos(a) * 9, 12 + Math.sin(a) * 9);
+            }
+            c.moveTo(18, 12);
+            c.arc(12, 12, 6, 0, Math.PI * 2);
+        } else if (name === "timer") {
+            c.moveTo(20, 13);
+            c.arc(12, 13, 8, 0, Math.PI * 2);
+            line(12, 13, 12, 9);
+            line(10, 2, 14, 2);
+        } else if (name === "trash") {
+            line(4, 6, 20, 6);
+            line(9, 6, 9, 3);
+            line(9, 3, 15, 3);
+            line(15, 3, 15, 6);
+            c.moveTo(6, 6);
+            c.lineTo(7, 21);
+            c.lineTo(17, 21);
+            c.lineTo(18, 6);
+        } else if (name === "keyboard") {
+            c.rect(2, 6, 20, 12);
+            line(6, 10, 7, 10);
+            line(11, 10, 13, 10);
+            line(17, 10, 18, 10);
+            line(7, 14, 17, 14);
+        } else if (name === "cursor") {
+            c.moveTo(6, 3);
+            c.lineTo(18, 13);
+            c.lineTo(12, 14);
+            c.lineTo(9, 20);
+            c.closePath();
         } else {
             line(12, 4, 12, 20);
             line(4, 12, 20, 12);
