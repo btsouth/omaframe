@@ -193,7 +193,7 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
     QFile firstFrame(m_path + ".ts");
     bool frameReady = false;
     if (firstFrame.open(QIODevice::ReadOnly)) {
-      // GSR 6.1.3 writes a header followed by the timestamp values. Read the
+      // GSR 6.1 writes a header followed by the timestamp values. Read the
       // last line so the header cannot make a valid first frame look absent.
       const auto fields =
           firstFrame.readAll().trimmed().split('\n').last().simplified().split(' ');
@@ -682,11 +682,11 @@ void Recorder::launch() {
         QString::fromUtf8(command("gpu-screen-recorder", {"--version"})).trimmed();
     const QVersionNumber parsed = QVersionNumber::fromString(recorderVersion);
     if (parsed.isNull() ||
-        QVersionNumber::compare(parsed, QVersionNumber(6, 1, 3)) < 0)
+        QVersionNumber::compare(parsed, QVersionNumber(6, 1, 0)) < 0)
       return Check{recorderVersion.isEmpty()
-                       ? "Install GPU Screen Recorder 6.1.3 or newer to record."
+                       ? "Install GPU Screen Recorder 6.1.0 or newer to record."
                        : "GPU Screen Recorder " + recorderVersion +
-                             " is too old. Version 6.1.3 or newer is required."};
+                             " is too old. Version 6.1.0 or newer is required."};
     // Nothing of Omaframe's may be inside the capture when it starts. Hidden
     // surfaces can take a frame or two to leave, so check a few times.
     const QRect keepOut = target.adjusted(-8, -8, 8, 8);

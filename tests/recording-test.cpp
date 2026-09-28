@@ -312,11 +312,19 @@ while True: time.sleep(.05)
    QVERIFY(!QFileInfo::exists(r.savedPath()));
  }
  void oldRecorderIsRejectedBeforeCreatingAFile() {
-   qputenv("OMAFRAME_TEST_RECORDER_VERSION", "6.1.2");
+   // 6.1.0 is the oldest release Omarchy's stable channel serves; it is accepted.
+   qputenv("OMAFRAME_TEST_RECORDER_VERSION", "6.1.0");
+   {
+     Recorder ok;ok.prepare();QTRY_COMPARE(ok.state(),QString("setup"));
+     ok.selectDisplay(0);ok.setCountdown(0);ok.start();
+     QTRY_COMPARE_WITH_TIMEOUT(ok.state(),QString("recording"),5000);
+     ok.stop();QTRY_COMPARE_WITH_TIMEOUT(ok.state(),QString("saved"),5000);
+   }
+   qputenv("OMAFRAME_TEST_RECORDER_VERSION", "6.0.9");
    Recorder r;r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
    r.selectDisplay(0);r.setCountdown(0);r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("failed"),5000);
-   QVERIFY(r.status().contains("6.1.3 or newer"));
+   QVERIFY(r.status().contains("6.1.0 or newer"));
    QVERIFY(r.savedPath().isEmpty());
    qunsetenv("OMAFRAME_TEST_RECORDER_VERSION");
  }

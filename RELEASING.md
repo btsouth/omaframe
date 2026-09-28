@@ -57,8 +57,9 @@ testing or sharing any candidate.
    and any unsupported behavior. Publish only the verified candidate and
    describe it as a screenshot and basic recording beta.
 
-GPU Screen Recorder 6.1.3 is the conservative minimum. This version is
-installed locally and supports the `-write-first-frame-ts` signal that
-Omaframe requires before reporting Recording. The Arch package declares the
-minimum and the app checks it before launching a recording. This does not
-replace a real GPU capture test.
+GPU Screen Recorder 6.1.0 is the minimum, in the package and at runtime. It is
+the version Omarchy's stable and RC channels serve, and it supports every
+option Omaframe passes, including `-write-first-frame-ts`, which Omaframe needs
+before reporting Recording. Before raising this floor, check what those
+channels serve (`stable-mirror.omarchy.org` and `rc-mirror.omarchy.org`), or
+stable Omarchy users cannot install the package.
