@@ -131,6 +131,11 @@ Item {
     function commitText() {
         markCanvas.commitText();
     }
+    // Whether a mark is on at the playhead. One that runs to the end of the
+    // clip is still on at its last frame.
+    function shows(start, end) {
+        return head >= start && (head < end || end >= video.duration);
+    }
     function markName(type) {
         return ({ redact: "Redaction", blur: "Blur", arrow: "Arrow", box: "Box", text: "Label", step: "Step" })[type] || "Mark";
     }
@@ -164,7 +169,7 @@ Item {
     }
     function selectMark(index, start, end) {
         player.pause();
-        if (head < start || head >= end)
+        if (!shows(start, end))
             seek(start);
         video.marks.select(index);
     }
@@ -586,7 +591,7 @@ Item {
                         y: modelData.y1 * picture.height
                         width: Math.max(1, (modelData.x2 - modelData.x1) * picture.width)
                         height: Math.max(1, (modelData.y2 - modelData.y1) * picture.height)
-                        visible: pane.head >= modelData.start && pane.head < modelData.end
+                        visible: pane.shows(modelData.start, modelData.end)
                         Rectangle {
                             anchors.fill: parent
                             visible: preview.modelData.type === "redact"
@@ -621,7 +626,7 @@ Item {
                         y: modelData.y * picture.height
                         width: modelData.w * picture.width
                         height: modelData.h * picture.height
-                        visible: pane.head >= modelData.start && pane.head < modelData.end
+                        visible: pane.shows(modelData.start, modelData.end)
                         source: modelData.source
                         cache: false
                         smooth: true
@@ -638,6 +643,7 @@ Item {
                     workingSize: video.frameSize
                     sourceSize: video.frameSize
                     time: pane.head
+                    duration: video.duration
                     onToolRequested: key => pane.tool = key
                     onEmptyClicked: hadSelection => { if (!hadSelection) pane.togglePlay(); }
                 }
