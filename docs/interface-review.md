@@ -136,16 +136,17 @@ a recording, and shortcuts surviving a theme change. What remains:
    (recorder states, bindings editing, file deletion, review flow, QML
    references) found and fixed three bugs (see recording-validation.md, "Code
    review fixes"). It was not a line-by-line read of all 6,700 lines.
-2. **Microphone and a real game.** The run used computer sound and a
-   fullscreen video player. Record once with the microphone on and once over
-   a real fullscreen game.
+2. **Microphone.** The owner recorded a real fullscreen game on 2026-09-28:
+   whole display with computer sound, 21.7 s, decodes fully, and the Stop
+   control is absent from every sampled frame. The microphone was off, so
+   mic capture is still unverified on hardware.
 3. ~~Fresh-system package lifecycle~~: passed in a fresh Arch container with
    dependency resolution (install, upgrade, rollback, uninstall, user files
    untouched). A launcher check in a real fresh session is still open.
-4. **Shortcut persistence across a new login.** A theme change was checked; a
-   full log out and in was not.
-5. **Tag, build the release package from the tag, create the public
-   repository, and publish.**
+4. ~~Shortcut persistence across a new login~~: the owner restarted on
+   2026-09-28 and Print and Alt+Print still opened Omaframe.
+5. ~~Tag and publish~~: v0.2.0 is a GitHub pre-release at
+   https://github.com/btsouth/omaframe/releases/tag/v0.2.0.
 
 Should follow soon after, not blocking: an outline around the recorded area
 (kept outside it), live preview of a mark while it is dragged, hardware

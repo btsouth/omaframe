@@ -217,3 +217,22 @@ in omabox; `desktop-file-validate`, `ldd -r` and `namcap` were clean apart
 from the usual warnings. The lifecycle container run above used the previous
 candidate; the changes since then are in application code only, not package
 layout.
+
+## Release v0.2.0, 2026-09-28
+
+Built from tag `v0.2.0` (commit `5a98612`) with `packaging/build-package.sh`
+and published as a GitHub pre-release at
+https://github.com/btsouth/omaframe/releases/tag/v0.2.0.
+
+| File | SHA-256 |
+| --- | --- |
+| `omaframe-0.2.0-1-x86_64.pkg.tar.zst` | `c145c28a10ff510e61449ccdba39e1e6b560ac2ba0f1c1e2eace2a4d3bf4758f` |
+| `omaframe-0.2.0.tar.gz` | `5cc2ccf37d47a2a8d7c6fafed77302f9f2b3e7bfcaa6e0a90b5ed1fa101dc956` |
+| `PKGBUILD` | `3bc8b208c47b71add2762dba0a4b19c74363864875f34add1e1381cdd2c62c28` |
+| `usr/bin/omaframe` in the package | `52eebbbd742569e99c2ea0edff0f3e4f522fa5d03a0fe9ac93545b1081b569bc` |
+
+`desktop-file-validate`, `ldd -r` and `namcap` were clean apart from the usual
+warnings. The assets were downloaded back from the release and matched
+`SHA256SUMS`. The published `PKGBUILD` alone downloaded the source archive from
+the release, passed its checksum and built the package. The release binary is
+installed as `~/.local/bin/omaframe`.
