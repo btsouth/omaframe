@@ -1,4 +1,5 @@
 #pragma once
+#include "marks.hpp"
 #include "renderer.hpp"
 #include <QMutex>
 #include <QObject>
@@ -40,8 +41,6 @@ class Studio final : public QObject {
   Q_PROPERTY(QString outputDirectory READ outputDirectory NOTIFY changed)
   Q_PROPERTY(bool busy READ busy NOTIFY changed)
   Q_PROPERTY(bool rendering READ rendering NOTIFY changed)
-  Q_PROPERTY(bool canUndo READ canUndo NOTIFY changed)
-  Q_PROPERTY(bool canRedo READ canRedo NOTIFY changed)
   Q_PROPERTY(bool demo READ demo NOTIFY changed)
   Q_PROPERTY(QString savedPath READ savedPath NOTIFY changed)
   Q_PROPERTY(QString recoveryAction READ recoveryAction NOTIFY changed)
@@ -49,13 +48,9 @@ class Studio final : public QObject {
   Q_PROPERTY(int originalsCount READ originalsCount NOTIFY changed)
   Q_PROPERTY(QVariantList windowTargets READ windowTargets NOTIFY changed)
   Q_PROPERTY(bool hasLastArea READ hasLastArea NOTIFY changed)
-  Q_PROPERTY(bool hasCrop READ hasCrop NOTIFY changed)
-  Q_PROPERTY(QRectF cropBounds READ cropBounds NOTIFY changed)
-  Q_PROPERTY(QVariantMap selectedAnnotation READ selectedAnnotation NOTIFY changed)
+  Q_PROPERTY(MarkDocument *marks READ marks CONSTANT)
   Q_PROPERTY(QVariantList drafts READ drafts NOTIFY changed)
   Q_PROPERTY(bool keepOriginals READ keepOriginals WRITE setKeepOriginals NOTIFY changed)
-  Q_PROPERTY(int newTextPixels READ newTextPixels NOTIFY changed)
-  Q_PROPERTY(bool textEditing READ textEditing NOTIFY changed)
   Q_PROPERTY(bool editing READ editing WRITE setEditing NOTIFY changed)
   /** False until the first-run welcome has been seen or dismissed. */
   Q_PROPERTY(bool welcomed READ welcomed WRITE setWelcomed NOTIFY changed)
@@ -82,8 +77,6 @@ public:
   QString outputDirectory() const { return m_directory; }
   bool busy() const { return m_busy; }
   bool rendering() const { return m_rendering; }
-  bool canUndo() const { return !m_undoStates.isEmpty(); }
-  bool canRedo() const { return !m_redoStates.isEmpty(); }
   bool demo() const { return m_demo; }
   bool quickMode() const { return m_quickMode; }
   QString quickState() const { return m_quickState; }
@@ -94,16 +87,11 @@ public:
   int originalsCount() const { return m_originalsCount; }
   QVariantList windowTargets() const { return m_windowTargets; }
   bool hasLastArea() const;
-  bool hasCrop() const;
-  QRectF cropBounds() const { return Frame::cropBounds(m_edits); }
-  QVariantMap selectedAnnotation() const;
+  MarkDocument *marks() { return &m_marks; }
   QVariantList drafts() const { return m_drafts; }
   /** Whether each accepted capture also keeps a private, unedited copy. */
   bool keepOriginals() const;
   void setKeepOriginals(bool);
-  /** The font size a new label starts at, in source pixels. */
-  int newTextPixels() const;
-  bool textEditing() const { return m_hiddenEdit >= 0; }
   bool editing() const { return m_editing; }
   bool welcomed() const;
   /** The cropped image the editor shows, and the whole capture, in pixels. */
@@ -136,37 +124,6 @@ public:
   Q_INVOKABLE void loadDemo(int variant = 0);
   /** Returns the studio to its start screen. Drafts are kept. */
   Q_INVOKABLE void closeImage();
-  Q_INVOKABLE void edit(const QString &type, double x1, double y1, double x2,
-                        double y2, const QString &text = {});
-  Q_INVOKABLE void addStroke(const QVariantList &points);
-  Q_INVOKABLE void undo();
-  Q_INVOKABLE void redo();
-  Q_INVOKABLE void resetEdits();
-  Q_INVOKABLE void clearCrop();
-  Q_INVOKABLE int selectAt(double x, double y);
-  /** The topmost mark at a point, without selecting it: its bounds in view
-   *  coordinates, or an empty map. */
-  Q_INVOKABLE QVariantMap hitAt(double x, double y, bool edgesOnly = false) const;
-  Q_INVOKABLE void select(int index);
-  Q_INVOKABLE void clearSelection();
-  /** Hides the selected label from the preview while it is typed on the
-   *  canvas. endTextEdit() applies or discards the typed text. */
-  Q_INVOKABLE void beginTextEdit();
-  Q_INVOKABLE void endTextEdit(const QString &text, bool commit);
-  Q_INVOKABLE void moveSelected(double dx, double dy);
-  Q_INVOKABLE void nudgeSelected(int dx, int dy);
-  Q_INVOKABLE void resizeSelected(int handle, double x, double y);
-  Q_INVOKABLE void deleteSelected();
-  Q_INVOKABLE void duplicateSelected();
-  Q_INVOKABLE void moveSelectedLayer(int direction);
-  Q_INVOKABLE void updateSelectedText(const QString &text);
-  Q_INVOKABLE void setSelectedColor(const QString &color);
-  Q_INVOKABLE void setSelectedSize(double size);
-  Q_INVOKABLE void setSelectedFontPixels(int pixels);
-  Q_INVOKABLE void setSelectedTextStyle(const QString &style);
-  Q_INVOKABLE void setSelectedTextAlignment(const QString &alignment);
-  Q_INVOKABLE void setSelectedBackground(const QString &color);
-  Q_INVOKABLE void setSelectedBackgroundOpacity(double opacity);
   Q_INVOKABLE void accept();
   Q_INVOKABLE void retryOutput();
   Q_INVOKABLE void clearOriginals();
@@ -229,8 +186,6 @@ private:
   void persistOptions();
   void refreshDrafts();
   void invalidateSaved();
-  void saveHistory();
-  QPointF sourcePoint(double x, double y) const;
   void captureImpl(bool region, int monitor, bool repeat);
   ImageStore *m_store;
   QImage m_original;
@@ -240,17 +195,11 @@ private:
   QSize m_lastAreaPixels;
   QString m_lastAreaMonitor;
   QSize m_workingSize;
-  QVector<Frame::Edit> m_edits;
-  struct EditState {
-    QVector<Frame::Edit> edits;
-    int selected = -1;
-  };
-  QVector<EditState> m_undoStates, m_redoStates;
+  MarkDocument m_marks;
   QVariantList m_drafts;
   QTimer m_draftTimer;
   QString m_draftId;
   bool m_draftDirty = false;
-  int m_selected = -1;
   Frame::Options m_options;
   QString m_name, m_status, m_directory, m_savedPath, m_backupPath,
       m_originalsSummary;
@@ -260,12 +209,6 @@ private:
   bool m_quickMode = false, m_recordingSelection = false;
   bool m_copyPending = false, m_backupPending = false;
   QString m_quickState = "idle", m_captureMonitor, m_pointerMonitor;
-  QPointF viewPoint(const QPointF &source) const;
-  /** With `edgesOnly`, filled areas (boxes, highlights, redactions, blur)
-   *  are hit only near their border, so a drawing tool can still start a
-   *  new mark inside them. */
-  int hitIndex(double x, double y, bool edgesOnly = false) const;
   int m_pendingFinish = -1;
-  int m_hiddenEdit = -1;
   bool m_editing = false, m_thumbnailsStale = false, m_returnToStudio = false;
 };

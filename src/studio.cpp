@@ -16,7 +16,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLineF>
 #include <QLocale>
 #include <QMutexLocker>
 #include <QPainter>
@@ -125,6 +124,16 @@ void ImageStore::put(const QString &name, const QImage &image) {
 }
 
 Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
+  m_marks.setLockCheck([this] { return m_busy; });
+  connect(&m_marks, &MarkDocument::edited, this, [this](bool modified) {
+    if (modified)
+      invalidateSaved();
+    scheduleRender();
+  });
+  connect(&m_marks, &MarkDocument::message, this, [this](const QString &text) {
+    m_status = text;
+    emit changed();
+  });
   QSettings settings;
   m_options.style = std::clamp(settings.value("style", 0).toInt(), 0, 8);
   double savedPadding = settings.value("padding", 0.05).toDouble();
@@ -267,12 +276,6 @@ void Studio::setKeepOriginals(bool value) {
   QSettings().setValue("privacy/keepOriginals", value);
   emit changed();
 }
-int Studio::newTextPixels() const {
-  if (m_original.isNull())
-    return 32;
-  return std::clamp(
-      qRound(std::min(m_original.width(), m_original.height()) * 0.06), 20, 64);
-}
 
 struct PreviewResult {
   QImage source, uncropped, preview;
@@ -308,9 +311,7 @@ void Studio::scheduleRender() {
           });
   // Each request owns immutable implicitly-shared input. Obsolete results never
   // reach the UI.
-  QVector<Frame::Edit> edits = m_edits;
-  if (m_hiddenEdit >= 0 && m_hiddenEdit < edits.size())
-    edits.removeAt(m_hiddenEdit);
+  const QVector<Frame::Edit> edits = m_marks.visibleEdits();
   const bool thumbnails = !m_editing;
   m_thumbnailsStale = !thumbnails;
   watcher->setFuture(QtConcurrent::run(
@@ -341,11 +342,7 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
   m_workingSize = m_original.size();
   m_name = std::move(name);
   m_demo = demo;
-  m_edits.clear();
-  m_undoStates.clear();
-  m_redoStates.clear();
-  m_selected = -1;
-  m_hiddenEdit = -1;
+  m_marks.reset(m_original);
   invalidateSaved();
   m_draftTimer.stop();
   m_draftDirty = false;
@@ -363,10 +360,7 @@ void Studio::closeImage() {
   m_original = {};
   m_workingSize = {};
   m_name.clear();
-  m_edits.clear();
-  m_undoStates.clear();
-  m_redoStates.clear();
-  m_selected = m_hiddenEdit = -1;
+  m_marks.reset({});
   m_draftId.clear();
   m_draftDirty = false;
   m_rendering = false;
@@ -421,616 +415,6 @@ void Studio::open(const QUrl &url) {
                              : QString()};
   }));
 }
-static bool fitTextToImage(Frame::Edit &edit, const QImage &source) {
-  if (edit.type != "text" || source.isNull())
-    return false;
-  const int requested = Frame::textPixelSize(edit, source);
-  auto fits = [&source, &edit](int pixels) {
-    Frame::Edit candidate = edit;
-    candidate.size = Frame::textSizeForPixels(pixels, source);
-    const QRectF bounds = Frame::annotationBounds(candidate, source);
-    return bounds.width() <= 1. && bounds.height() <= 1.;
-  };
-  if (!fits(requested)) {
-    int low = 8, high = requested;
-    while (low < high) {
-      const int middle = (low + high + 1) / 2;
-      if (fits(middle)) low = middle;
-      else high = middle - 1;
-    }
-    edit.size = Frame::textSizeForPixels(low, source);
-  }
-  const QRectF bounds = Frame::annotationBounds(edit, source);
-  double dx = 0., dy = 0.;
-  if (bounds.width() <= 1.)
-    dx = std::clamp(1. - bounds.right(), -bounds.left(), 0.);
-  else
-    dx = -bounds.left();
-  if (bounds.height() <= 1.)
-    dy = std::clamp(1. - bounds.bottom(), -bounds.top(), 0.);
-  else
-    dy = -bounds.top();
-  edit.from += QPointF(dx, dy);
-  edit.to = edit.from;
-  return Frame::textPixelSize(edit, source) < requested;
-}
-
-void Studio::edit(const QString &type, double x1, double y1, double x2,
-                  double y2, const QString &text) {
-  if (m_busy)
-    return;
-  if (!QStringList{"crop", "arrow", "line", "box", "ellipse", "highlight",
-                   "redact", "blur", "text", "step"}.contains(type))
-    return;
-  QPointF a(std::clamp(x1, 0., 1.), std::clamp(y1, 0., 1.)),
-      b(std::clamp(x2, 0., 1.), std::clamp(y2, 0., 1.));
-  if (type == "text" && text.trimmed().isEmpty())
-    return;
-  if (type != "step" && type != "text" && QLineF(a, b).length() < 0.006)
-    return;
-  if (m_edits.size() >= 100 && !(type == "crop" && hasCrop())) {
-    m_status = "This image has reached the 100-edit limit.";
-    emit changed();
-    return;
-  }
-  if (type != "crop") {
-    a = sourcePoint(a.x(), a.y());
-    b = sourcePoint(b.x(), b.y());
-  }
-  saveHistory();
-  if (type == "crop") {
-    m_edits.removeIf([](const Frame::Edit &edit) { return edit.type == "crop"; });
-    m_selected = -1;
-  }
-  Frame::Edit edit{type, a, b, text.left(240)};
-  if (type == "text") {
-    edit.color = Qt::white;
-    edit.size = Frame::textSizeForPixels(newTextPixels(), m_original);
-    fitTextToImage(edit, m_original);
-  }
-  m_edits.append(edit);
-  if (type != "crop")
-    m_selected = m_edits.size() - 1;
-  invalidateSaved();
-  m_status = type == "redact"
-                 ? "Redaction applied. Exported pixels are fully replaced."
-                 : "Edit applied. Undo is always available.";
-  scheduleRender();
-}
-void Studio::addStroke(const QVariantList &points) {
-  if (m_busy || points.size() < 2 || m_edits.size() >= 100)
-    return;
-  QVector<QPointF> path;
-  path.reserve(std::min<qsizetype>(points.size(), 2048));
-  double length = 0.;
-  for (const QVariant &item : points) {
-    if (path.size() >= 2048)
-      break;
-    const QVariantMap point = item.toMap();
-    if (!point.contains("x") || !point.contains("y"))
-      continue;
-    const QPointF mapped = sourcePoint(point.value("x").toDouble(),
-                                      point.value("y").toDouble());
-    if (!path.isEmpty())
-      length += QLineF(path.last(), mapped).length();
-    path.append(mapped);
-  }
-  if (path.size() < 2 || length < 0.006)
-    return;
-  double left = 1., right = 0., top = 1., bottom = 0.;
-  for (const QPointF &point : path) {
-    left = std::min(left, point.x()); right = std::max(right, point.x());
-    top = std::min(top, point.y()); bottom = std::max(bottom, point.y());
-  }
-  saveHistory();
-  Frame::Edit stroke{"pen", {left, top}, {right, bottom}};
-  stroke.points = std::move(path);
-  m_edits.append(stroke);
-  m_selected = m_edits.size() - 1;
-  invalidateSaved();
-  m_status = "Stroke added. Select it to move, resize, or change color.";
-  scheduleRender();
-}
-void Studio::saveHistory() {
-  if (m_undoStates.size() >= 100)
-    m_undoStates.removeFirst();
-  m_undoStates.append({m_edits, m_selected});
-  m_redoStates.clear();
-}
-QPointF Studio::sourcePoint(double x, double y) const {
-  const QRectF crop = cropBounds();
-  return {std::clamp(crop.x() + std::clamp(x, 0., 1.) * crop.width(), 0., 1.),
-          std::clamp(crop.y() + std::clamp(y, 0., 1.) * crop.height(), 0., 1.)};
-}
-bool Studio::hasCrop() const {
-  return std::any_of(m_edits.begin(), m_edits.end(),
-                     [](const Frame::Edit &edit) { return edit.type == "crop"; });
-}
-QVariantMap Studio::selectedAnnotation() const {
-  if (m_selected < 0 || m_selected >= m_edits.size())
-    return {};
-  const auto &edit = m_edits[m_selected];
-  if (edit.type == "crop")
-    return {};
-  const QRectF crop = cropBounds();
-  const QRectF bounds = Frame::annotationBounds(edit, m_original);
-  int layer = 0, layers = 0;
-  for (int i = 0; i < m_edits.size(); ++i) {
-    if (m_edits[i].type == "crop")
-      continue;
-    ++layers;
-    if (i <= m_selected)
-      ++layer;
-  }
-  return {{"type", edit.type},
-          {"layer", layer},
-          {"layers", layers},
-          {"text", edit.text},
-          {"color", edit.color.name()},
-          {"size", edit.size},
-          {"fontPx", edit.type == "text" ? Frame::textPixelSize(edit, m_original) : 0},
-          {"textStyle", edit.textStyle},
-          {"textAlign", edit.textAlign},
-          {"background", edit.background.name()},
-          {"backgroundOpacity", edit.backgroundOpacity},
-          {"x1", (edit.from.x() - crop.x()) / crop.width()},
-          {"y1", (edit.from.y() - crop.y()) / crop.height()},
-          {"x2", (edit.to.x() - crop.x()) / crop.width()},
-          {"y2", (edit.to.y() - crop.y()) / crop.height()},
-          {"boundX", (bounds.x() - crop.x()) / crop.width()},
-          {"boundY", (bounds.y() - crop.y()) / crop.height()},
-          {"boundW", bounds.width() / crop.width()},
-          {"boundH", bounds.height() / crop.height()}};
-}
-int Studio::hitIndex(double x, double y, bool edgesOnly) const {
-  const QRectF crop = cropBounds();
-  const QPointF point(std::clamp(x, 0., 1.), std::clamp(y, 0., 1.));
-  const double tolerance = 0.018;
-  for (int i = m_edits.size() - 1; i >= 0; --i) {
-    const auto &edit = m_edits[i];
-    if (edit.type == "crop")
-      continue;
-    const QPointF a((edit.from.x() - crop.x()) / crop.width(),
-                    (edit.from.y() - crop.y()) / crop.height());
-    const QPointF b((edit.to.x() - crop.x()) / crop.width(),
-                    (edit.to.y() - crop.y()) / crop.height());
-    bool hit = false;
-    if (edit.type == "pen" && edit.points.size() >= 2) {
-      for (qsizetype j = 1; j < edit.points.size() && !hit; ++j) {
-        const QPointF first((edit.points[j - 1].x() - crop.x()) / crop.width(),
-                            (edit.points[j - 1].y() - crop.y()) / crop.height());
-        const QPointF second((edit.points[j].x() - crop.x()) / crop.width(),
-                             (edit.points[j].y() - crop.y()) / crop.height());
-        const QPointF segment = second - first;
-        const double length2 = QPointF::dotProduct(segment, segment);
-        const double t = length2 > 0
-                             ? std::clamp(QPointF::dotProduct(point - first, segment) /
-                                              length2,
-                                          0., 1.)
-                             : 0.;
-        hit = QLineF(point, first + segment * t).length() <= tolerance;
-      }
-    } else if (edit.type == "line" || edit.type == "arrow") {
-      const QPointF ab = b - a;
-      const double length2 = QPointF::dotProduct(ab, ab);
-      const double t = length2 > 0
-                           ? std::clamp(QPointF::dotProduct(point - a, ab) /
-                                            length2, 0., 1.)
-                           : 0.;
-      hit = QLineF(point, a + ab * t).length() <= tolerance;
-    } else if (edit.type == "step" || edit.type == "text") {
-      const QRectF bounds = Frame::annotationBounds(edit, m_original);
-      const QRectF visible((bounds.x() - crop.x()) / crop.width(),
-                           (bounds.y() - crop.y()) / crop.height(),
-                           bounds.width() / crop.width(),
-                           bounds.height() / crop.height());
-      hit = visible.adjusted(-tolerance, -tolerance, tolerance, tolerance)
-                .contains(point);
-    } else {
-      const QRectF area = QRectF(a, b).normalized();
-      hit = area.adjusted(-tolerance, -tolerance, tolerance, tolerance)
-                .contains(point) &&
-            !(edgesOnly && area.width() > tolerance * 4 &&
-              area.height() > tolerance * 4 &&
-              area.adjusted(tolerance, tolerance, -tolerance, -tolerance)
-                  .contains(point));
-    }
-    if (hit)
-      return i;
-  }
-  return -1;
-}
-int Studio::selectAt(double x, double y) {
-  const int found = hitIndex(x, y);
-  if (found != m_selected) {
-    m_selected = found;
-    emit changed();
-  }
-  return m_selected;
-}
-void Studio::select(int index) {
-  if (index < -1 || index >= m_edits.size() ||
-      (index >= 0 && m_edits[index].type == "crop") || index == m_selected)
-    return;
-  m_selected = index;
-  emit changed();
-}
-QVariantMap Studio::hitAt(double x, double y, bool edgesOnly) const {
-  const int found = hitIndex(x, y, edgesOnly);
-  if (found < 0)
-    return {};
-  const QRectF crop = cropBounds();
-  const QRectF bounds = Frame::annotationBounds(m_edits[found], m_original);
-  return {{"index", found},
-          {"type", m_edits[found].type},
-          {"x", (bounds.x() - crop.x()) / crop.width()},
-          {"y", (bounds.y() - crop.y()) / crop.height()},
-          {"w", bounds.width() / crop.width()},
-          {"h", bounds.height() / crop.height()}};
-}
-void Studio::clearSelection() {
-  if (m_selected < 0)
-    return;
-  m_selected = -1;
-  emit changed();
-}
-void Studio::beginTextEdit() {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits[m_selected].type != "text" || m_hiddenEdit == m_selected)
-    return;
-  m_hiddenEdit = m_selected;
-  scheduleRender();
-}
-void Studio::endTextEdit(const QString &text, bool commit) {
-  if (m_hiddenEdit < 0)
-    return;
-  const int index = m_hiddenEdit;
-  m_hiddenEdit = -1;
-  // Typed text is applied even while a preview is still rendering, so a
-  // quick click away never loses it.
-  if (commit && index < m_edits.size() && m_edits[index].type == "text") {
-    if (text.trimmed().isEmpty()) {
-      saveHistory();
-      m_edits.removeAt(index);
-      m_selected = -1;
-      invalidateSaved();
-      m_status = "Empty label removed.";
-    } else if (m_edits[index].text != text.left(240)) {
-      saveHistory();
-      m_edits[index].text = text.left(240);
-      const bool fitted = fitTextToImage(m_edits[index], m_original);
-      invalidateSaved();
-      m_status = fitted ? "Text updated. Font size limited so the full label fits."
-                        : "Text updated.";
-    }
-  }
-  scheduleRender();
-}
-void Studio::moveSelected(double dx, double dy) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size())
-    return;
-  const auto edit = m_edits.at(m_selected);
-  const QRectF crop = cropBounds();
-  const QRectF bounds = Frame::annotationBounds(edit, m_original);
-  const bool fitBounds =
-      (edit.type == "text" || edit.type == "step") &&
-      bounds.width() <= 1. && bounds.height() <= 1.;
-  const double left = fitBounds ? bounds.left()
-                                : std::min(edit.from.x(), edit.to.x());
-  const double right = fitBounds ? bounds.right()
-                                 : std::max(edit.from.x(), edit.to.x());
-  const double top = fitBounds ? bounds.top()
-                               : std::min(edit.from.y(), edit.to.y());
-  const double bottom = fitBounds ? bounds.bottom()
-                                  : std::max(edit.from.y(), edit.to.y());
-  dx = std::clamp(dx * crop.width(), -left, 1. - right);
-  dy = std::clamp(dy * crop.height(), -top, 1. - bottom);
-  if (qFuzzyIsNull(dx) && qFuzzyIsNull(dy))
-    return;
-  saveHistory();
-  m_edits[m_selected].from += QPointF(dx, dy);
-  m_edits[m_selected].to += QPointF(dx, dy);
-  for (QPointF &point : m_edits[m_selected].points)
-    point += QPointF(dx, dy);
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::nudgeSelected(int dx, int dy) {
-  if (m_original.isNull() || (dx == 0 && dy == 0))
-    return;
-  const QRectF crop = cropBounds();
-  moveSelected(double(dx) / (m_original.width() * crop.width()),
-               double(dy) / (m_original.height() * crop.height()));
-}
-void Studio::resizeSelected(int handle, double x, double y) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size())
-    return;
-  const auto edit = m_edits.at(m_selected);
-  if (edit.type == "crop")
-    return;
-  const QPointF point = sourcePoint(x, y);
-  if (edit.type == "text" || edit.type == "step") {
-    if (handle < 0 || handle > 3)
-      return;
-    const QRectF bounds = Frame::annotationBounds(edit, m_original);
-    const QPointF opposite = edit.type == "step" ? edit.from
-        : handle == 0 ? bounds.bottomRight()
-        : handle == 1 ? bounds.bottomLeft()
-        : handle == 2 ? bounds.topLeft() : bounds.topRight();
-    const QPointF corner = handle == 0 ? bounds.topLeft()
-        : handle == 1 ? bounds.topRight()
-        : handle == 2 ? bounds.bottomRight() : bounds.bottomLeft();
-    const QPointF scale(m_original.width(), m_original.height());
-    const QPointF oldVector((corner.x() - opposite.x()) * scale.x(),
-                            (corner.y() - opposite.y()) * scale.y());
-    const QPointF newVector((point.x() - opposite.x()) * scale.x(),
-                            (point.y() - opposite.y()) * scale.y());
-    const double oldLength2 = QPointF::dotProduct(oldVector, oldVector);
-    if (oldLength2 <= 0)
-      return;
-    const double minimum = edit.type == "text"
-                               ? Frame::textSizeForPixels(8, m_original)
-                               : 0.5;
-    const double maximum = edit.type == "text"
-                               ? Frame::textSizeForPixels(4096, m_original)
-                               : 8.0;
-    const double next = std::clamp(edit.size *
-                                       QPointF::dotProduct(oldVector, newVector) /
-                                       oldLength2,
-                                   minimum, maximum);
-    if (qAbs(next - edit.size) < 0.01)
-      return;
-    Frame::Edit updated = edit;
-    updated.size = next;
-    if (edit.type == "text" && handle != 2) {
-      const QRectF resized = Frame::annotationBounds(updated, m_original);
-      QPointF anchor = handle == 0 ? opposite - QPointF(resized.width(), resized.height())
-                       : handle == 1 ? opposite - QPointF(0, resized.height())
-                                     : opposite - QPointF(resized.width(), 0);
-      updated.from = QPointF(std::clamp(anchor.x(), 0., 1.),
-                             std::clamp(anchor.y(), 0., 1.));
-      updated.to = updated.from;
-    }
-    const bool fitted = fitTextToImage(updated, m_original);
-    saveHistory();
-    m_edits[m_selected] = updated;
-    invalidateSaved();
-    if (fitted)
-      m_status = "Font size limited so the full label fits.";
-    scheduleRender();
-    return;
-  }
-  QPointF a = edit.from, b = edit.to;
-  if (edit.type == "line" || edit.type == "arrow") {
-    if (handle == 0) a = point;
-    else if (handle == 1) b = point;
-    else return;
-  } else {
-    const QRectF rect(a, b);
-    const QRectF r = rect.normalized();
-    if (handle == 0) { a = point; b = r.bottomRight(); }
-    else if (handle == 1) { a = {r.left(), point.y()}; b = {point.x(), r.bottom()}; }
-    else if (handle == 2) { a = r.topLeft(); b = point; }
-    else if (handle == 3) { a = {point.x(), r.top()}; b = {r.right(), point.y()}; }
-    else return;
-  }
-  if (QLineF(a, b).length() < 0.006 || (a == edit.from && b == edit.to))
-    return;
-  saveHistory();
-  if (edit.type == "pen") {
-    const QRectF sourceBounds = QRectF(edit.from, edit.to).normalized();
-    const QRectF targetBounds = QRectF(a, b).normalized();
-    for (QPointF &pathPoint : m_edits[m_selected].points) {
-      const double nx = sourceBounds.width() > 1e-8
-                            ? (pathPoint.x() - sourceBounds.left()) / sourceBounds.width()
-                            : 0.5;
-      const double ny = sourceBounds.height() > 1e-8
-                            ? (pathPoint.y() - sourceBounds.top()) / sourceBounds.height()
-                            : 0.5;
-      pathPoint = {targetBounds.left() + nx * targetBounds.width(),
-                   targetBounds.top() + ny * targetBounds.height()};
-    }
-  }
-  m_edits[m_selected].from = a;
-  m_edits[m_selected].to = b;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::deleteSelected() {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size())
-    return;
-  m_hiddenEdit = -1;
-  saveHistory();
-  m_edits.removeAt(m_selected);
-  m_selected = -1;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::duplicateSelected() {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.size() >= 100 || m_edits[m_selected].type == "crop")
-    return;
-  Frame::Edit copy = m_edits[m_selected];
-  const QRectF bounds = Frame::annotationBounds(copy, m_original);
-  const double stepX = 12. / std::max(1, m_original.width());
-  const double stepY = 12. / std::max(1, m_original.height());
-  const double dx = bounds.right() + stepX <= 1. ? stepX
-                      : bounds.left() - stepX >= 0. ? -stepX : 0.;
-  const double dy = bounds.bottom() + stepY <= 1. ? stepY
-                      : bounds.top() - stepY >= 0. ? -stepY : 0.;
-  copy.from += QPointF(dx, dy);
-  copy.to += QPointF(dx, dy);
-  for (QPointF &point : copy.points)
-    point += QPointF(dx, dy);
-  saveHistory();
-  m_edits.append(copy);
-  m_selected = m_edits.size() - 1;
-  invalidateSaved();
-  m_status = "Annotation duplicated. Drag it to place it.";
-  scheduleRender();
-}
-void Studio::moveSelectedLayer(int direction) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits[m_selected].type == "crop" || (direction != -1 && direction != 1))
-    return;
-  int target = m_selected + direction;
-  while (target >= 0 && target < m_edits.size() && m_edits[target].type == "crop")
-    target += direction;
-  if (target < 0 || target >= m_edits.size())
-    return;
-  saveHistory();
-  std::swap(m_edits[m_selected], m_edits[target]);
-  m_selected = target;
-  invalidateSaved();
-  m_status = direction > 0 ? "Annotation moved forward." : "Annotation moved back.";
-  scheduleRender();
-}
-void Studio::updateSelectedText(const QString &text) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.at(m_selected).type != "text" || text.trimmed().isEmpty())
-    return;
-  const QString updated = text.left(240);
-  if (m_edits.at(m_selected).text == updated)
-    return;
-  saveHistory();
-  m_edits[m_selected].text = updated;
-  const bool fitted = fitTextToImage(m_edits[m_selected], m_original);
-  invalidateSaved();
-  m_status = fitted ? "Text updated. Font size limited so the full label fits."
-                    : "Text updated.";
-  scheduleRender();
-}
-void Studio::setSelectedColor(const QString &color) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size())
-    return;
-  const QString type = m_edits.at(m_selected).type;
-  if (!QStringList{"arrow", "line", "box", "ellipse", "step", "text", "pen"}
-           .contains(type))
-    return;
-  const QColor parsed(color);
-  if (!parsed.isValid() || m_edits.at(m_selected).color == parsed)
-    return;
-  saveHistory();
-  m_edits[m_selected].color = parsed;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::setSelectedSize(double size) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size())
-    return;
-  const QString type = m_edits.at(m_selected).type;
-  if (!QStringList{"arrow", "line", "box", "ellipse", "step", "text", "pen", "blur"}
-           .contains(type) || !std::isfinite(size))
-    return;
-  const double next = type == "text"
-                          ? std::clamp(size,
-                                       Frame::textSizeForPixels(8, m_original),
-                                       Frame::textSizeForPixels(4096, m_original))
-                          : std::clamp(size, 0.5, 8.0);
-  if (qAbs(m_edits.at(m_selected).size - next) < 0.01)
-    return;
-  saveHistory();
-  m_edits[m_selected].size = next;
-  const bool fitted = fitTextToImage(m_edits[m_selected], m_original);
-  invalidateSaved();
-  if (fitted)
-    m_status = "Font size limited so the full label fits.";
-  scheduleRender();
-}
-void Studio::setSelectedFontPixels(int pixels) {
-  if (m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.at(m_selected).type != "text")
-    return;
-  setSelectedSize(Frame::textSizeForPixels(pixels, m_original));
-}
-void Studio::setSelectedTextStyle(const QString &style) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.at(m_selected).type != "text" ||
-      (style != "box" && style != "shadow") ||
-      m_edits.at(m_selected).textStyle == style)
-    return;
-  saveHistory();
-  m_edits[m_selected].textStyle = style;
-  if (style == "shadow" && m_edits[m_selected].color == QColor(Qt::white))
-    m_edits[m_selected].color = QColor("#e75439");
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::setSelectedTextAlignment(const QString &alignment) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.at(m_selected).type != "text" ||
-      !QStringList{"left", "center", "right"}.contains(alignment) ||
-      m_edits.at(m_selected).textAlign == alignment)
-    return;
-  saveHistory();
-  m_edits[m_selected].textAlign = alignment;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::setSelectedBackground(const QString &color) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.at(m_selected).type != "text")
-    return;
-  const QColor parsed(color);
-  if (!parsed.isValid() || parsed == m_edits.at(m_selected).background)
-    return;
-  saveHistory();
-  m_edits[m_selected].background = parsed;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::setSelectedBackgroundOpacity(double opacity) {
-  if (m_busy || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.at(m_selected).type != "text" || !std::isfinite(opacity))
-    return;
-  const double next = std::clamp(opacity, 0.0, 1.0);
-  if (qAbs(next - m_edits.at(m_selected).backgroundOpacity) < 0.01)
-    return;
-  saveHistory();
-  m_edits[m_selected].backgroundOpacity = next;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::clearCrop() {
-  if (m_busy || !hasCrop())
-    return;
-  saveHistory();
-  m_edits.removeIf([](const Frame::Edit &edit) { return edit.type == "crop"; });
-  m_selected = -1;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::undo() {
-  if (m_busy || m_undoStates.isEmpty())
-    return;
-  m_hiddenEdit = -1;
-  m_redoStates.append({m_edits, m_selected});
-  const EditState previous = m_undoStates.takeLast();
-  m_edits = previous.edits;
-  m_selected = previous.selected;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::redo() {
-  if (m_busy || m_redoStates.isEmpty())
-    return;
-  m_hiddenEdit = -1;
-  m_undoStates.append({m_edits, m_selected});
-  const EditState next = m_redoStates.takeLast();
-  m_edits = next.edits;
-  m_selected = next.selected;
-  invalidateSaved();
-  scheduleRender();
-}
-void Studio::resetEdits() {
-  if (m_busy || m_edits.isEmpty())
-    return;
-  saveHistory();
-  m_edits.clear();
-  m_selected = -1;
-  invalidateSaved();
-  scheduleRender();
-}
 void Studio::setOutputDirectory(const QUrl &url) {
   if (!url.isLocalFile() || m_busy)
     return;
@@ -1074,7 +458,7 @@ void Studio::saveDraftNow() {
   m_draftTimer.stop();
   if (!m_draftDirty || m_demo || m_original.isNull())
     return;
-  if (m_draftId.isEmpty() && m_edits.isEmpty()) {
+  if (m_draftId.isEmpty() && m_marks.edits().isEmpty()) {
     m_draftDirty = false;
     return;
   }
@@ -1105,13 +489,13 @@ void Studio::saveDraftNow() {
     }
   }
   QJsonArray edits;
-  for (const auto &edit : m_edits)
+  for (const auto &edit : m_marks.edits())
     edits.append(editToJson(edit));
   const QJsonObject document{{"version", 1}, {"name", m_name},
                              {"style", m_options.style},
                              {"padding", m_options.padding},
                              {"aspect", m_options.aspect},
-                             {"selected", m_selected},
+                             {"selected", m_marks.selected()},
                              {"savedPath", m_savedPath}, {"edits", edits}};
   QSaveFile metadata(directory + "/" + m_draftId + ".json");
   const QByteArray serialized = QJsonDocument(document).toJson(QJsonDocument::Compact);
@@ -1140,7 +524,7 @@ void Studio::resumeDraft(const QString &id) {
   }
   const QJsonObject document = QJsonDocument::fromJson(metadata.readAll()).object();
   const QJsonArray savedEdits = document.value("edits").toArray();
-  if (document.value("version").toInt() != 1 || savedEdits.size() > 100) {
+  if (document.value("version").toInt() != 1 || savedEdits.size() > MarkDocument::MaxEdits) {
     m_status = "This editable draft is damaged or unsupported.";
     emit changed();
     return;
@@ -1170,11 +554,8 @@ void Studio::resumeDraft(const QString &id) {
   }
   m_original = std::move(image);
   m_workingSize = m_original.size();
-  m_edits = std::move(edits);
-  m_undoStates.clear();
-  m_redoStates.clear();
-  m_selected = std::clamp(document.value("selected").toInt(-1), -1,
-                          int(m_edits.size()) - 1);
+  m_marks.restore(m_original, std::move(edits),
+                  document.value("selected").toInt(-1));
   m_options.style = std::clamp(document.value("style").toInt(), 0, 8);
   m_options.padding = std::clamp(document.value("padding").toDouble(0.05), 0.02, 0.22);
   m_options.aspect = std::clamp(document.value("aspect").toInt(), 0, 4);
@@ -1341,7 +722,7 @@ void Studio::accept() {
             if (m_quickMode && m_quickState == "done")
               emit dismissRequested();
           });
-  watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_edits,
+  watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_marks.edits(),
                                         options = m_options,
                                         directory = m_directory,
                                         originalDirectory] {
