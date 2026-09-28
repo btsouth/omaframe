@@ -1,0 +1,215 @@
+#include "marks.hpp"
+#include "video.hpp"
+#include <QProcess>
+#include <QSettings>
+#include <QTemporaryDir>
+#include <QTest>
+
+class VideoMarksTest : public QObject {
+  Q_OBJECT
+  QTemporaryDir temp;
+  QString plain, pattern;
+
+  static bool makeClip(const QString &source, const QString &path) {
+    QProcess ffmpeg;
+    ffmpeg.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                            "-i", source, "-t", "4", "-c:v", "libx264",
+                            "-preset", "ultrafast", "-pix_fmt", "yuv420p", path});
+    return ffmpeg.waitForFinished(20000) && ffmpeg.exitCode() == 0;
+  }
+  // The frame shown `seconds` into a file, as RGB.
+  static QImage frameAt(const QString &path, double seconds, QSize size) {
+    QProcess ffmpeg;
+    ffmpeg.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-ss",
+                            QString::number(seconds, 'f', 3), "-i", path,
+                            "-frames:v", "1", "-f", "rawvideo", "-pix_fmt",
+                            "rgb24", "-"});
+    if (!ffmpeg.waitForFinished(10000) || ffmpeg.exitCode() != 0)
+      return {};
+    const QByteArray data = ffmpeg.readAllStandardOutput();
+    if (data.size() != size.width() * size.height() * 3)
+      return {};
+    return QImage(reinterpret_cast<const uchar *>(data.constData()),
+                  size.width(), size.height(), size.width() * 3,
+                  QImage::Format_RGB888)
+        .copy();
+  }
+  static bool redacted(const QImage &frame, int x, int y) {
+    const QColor c = frame.pixelColor(x, y);
+    return qAbs(c.red() - 0x15) < 14 && qAbs(c.green() - 0x1a) < 14 &&
+           qAbs(c.blue() - 0x20) < 14;
+  }
+  static bool white(const QImage &frame, int x, int y) {
+    const QColor c = frame.pixelColor(x, y);
+    return c.red() > 235 && c.green() > 235 && c.blue() > 235;
+  }
+  // How sharply neighbouring pixels differ inside `area`: lower is softer.
+  // Squared, because a blurred edge changes as much in total, only gradually.
+  static double detail(const QImage &frame, QRect area) {
+    double total = 0;
+    for (int y = area.top(); y <= area.bottom(); ++y)
+      for (int x = area.left(); x < area.right(); ++x) {
+        const int step = qGray(frame.pixel(x, y)) - qGray(frame.pixel(x + 1, y));
+        total += step * step;
+      }
+    return total;
+  }
+  static Frame::Edit mark(const QString &type, double start, double end) {
+    Frame::Edit edit{type, {0.25, 0.25}, {0.5, 0.5}};
+    edit.start = start;
+    edit.end = end;
+    return edit;
+  }
+  // A white clip with a redaction from 1 to 2 seconds, ready to export.
+  void openRedacted(Video &video, const QString &folder) {
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath(folder)));
+    video.open(QUrl::fromLocalFile(plain));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QCOMPARE(video.frameSize(), QSize(320, 240));
+    video.marks()->edit("redact", 0.25, 0.25, 0.5, 0.5);
+    video.marks()->setSelectedTimes(1, 2);
+    QCOMPARE(video.marks()->annotations().size(), 1);
+  }
+
+private slots:
+  void initTestCase() {
+    QCoreApplication::setOrganizationName("Omaframe-test");
+    QCoreApplication::setApplicationName("VideoMarks");
+    QSettings().clear();
+    QVERIFY(temp.isValid());
+    plain = temp.filePath("plain.mp4");
+    pattern = temp.filePath("pattern.mp4");
+    QVERIFY(makeClip("color=c=white:size=320x240:rate=25", plain));
+    QVERIFY(makeClip("testsrc2=size=320x240:rate=25", pattern));
+  }
+
+  void noMarksGiveNoFilters() {
+    QVERIFY(videoMarkFilters({}, {320, 240}, 0, "[0:v:0]", "[out]").isEmpty());
+    // Only blur and redaction are burned in so far.
+    QVERIFY(videoMarkFilters({mark("arrow", 0, 4)}, {320, 240}, 0, "[0:v:0]",
+                             "[out]").isEmpty());
+    QVERIFY(videoMarkFilters({mark("redact", 0, 4)}, {}, 0, "[0:v:0]", "[out]")
+                .isEmpty());
+  }
+  void redactionCoversEvenPixelsWhileItShows() {
+    Frame::Edit edit = mark("redact", 1, 2);
+    edit.from = {0.101, 0.201};
+    edit.to = {0.499, 0.603};
+    const auto filters =
+        videoMarkFilters({edit}, {321, 241}, 0, "[0:v:0]", "[out]");
+    QCOMPARE(filters, QStringList{
+        "[0:v:0]drawbox=x=32:y=48:w=130:h=98:color=0x151a20@1:t=fill"
+        ":enable='between(t,1.000,2.000)'[out]"});
+  }
+  void blurSoftensACropAndPutsItBack() {
+    const auto filters = videoMarkFilters({mark("blur", 0, -1)}, {320, 240}, 0,
+                                          "[0:v:0]", "[out]");
+    QCOMPARE(filters, (QStringList{
+        "[0:v:0]split[mark0base][mark0area]",
+        "[mark0area]crop=80:60:80:60,gblur=sigma=24[mark0soft]",
+        "[mark0base][mark0soft]overlay=80:60:enable='gte(t,0.000)'[out]"}));
+  }
+  void marksChainInOrderAndFollowTheInputStart() {
+    const auto filters = videoMarkFilters(
+        {mark("redact", 0, 1), mark("blur", 1.5, 3), mark("redact", 2, 4)},
+        {320, 240}, 1.25, "[0:v:0]", "[out]");
+    // The first mark ends before the input starts, so it is left out.
+    QCOMPARE(filters.size(), 4);
+    QVERIFY(filters[0].startsWith("[0:v:0]split[mark0base]"));
+    QVERIFY(filters[2].endsWith("enable='between(t,0.250,1.750)'[mark0]"));
+    QVERIFY(filters[3].startsWith("[mark0]drawbox="));
+    QVERIFY(filters[3].endsWith("enable='between(t,0.750,2.750)'[out]"));
+  }
+
+  void newMarksOnAVideoGetTimes() {
+    MarkDocument marks;
+    QImage frame(320, 240, QImage::Format_ARGB32_Premultiplied);
+    frame.fill(Qt::transparent);
+    marks.reset(frame);
+    marks.setDuration(8);
+    marks.setPlayhead(3);
+    marks.edit("blur", 0.1, 0.1, 0.3, 0.3);
+    QCOMPARE(marks.selectedAnnotation().value("start").toDouble(), 0.);
+    QCOMPARE(marks.selectedAnnotation().value("end").toDouble(), 8.);
+    marks.edit("arrow", 0.5, 0.5, 0.8, 0.8);
+    QCOMPARE(marks.selectedAnnotation().value("start").toDouble(), 3.);
+    QCOMPARE(marks.selectedAnnotation().value("end").toDouble(), 8.);
+    marks.setSelectedTimes(4, 20);
+    QCOMPARE(marks.selectedAnnotation().value("start").toDouble(), 4.);
+    QCOMPARE(marks.selectedAnnotation().value("end").toDouble(), 8.);
+    // A mark that is not showing at the playhead cannot be picked up.
+    QVERIFY(!marks.hitAt(0.65, 0.65).contains("index"));
+    marks.setPlayhead(5);
+    QVERIFY(marks.hitAt(0.65, 0.65).contains("index"));
+    marks.undo();
+    QCOMPARE(marks.selectedAnnotation().value("start").toDouble(), 3.);
+    // Screenshots ignore times.
+    MarkDocument still;
+    still.reset(frame);
+    still.edit("blur", 0.1, 0.1, 0.3, 0.3);
+    QCOMPARE(still.selectedAnnotation().value("end").toDouble(), 0.);
+    still.setSelectedTimes(1, 2);
+    QCOMPARE(still.selectedAnnotation().value("start").toDouble(), 0.);
+  }
+
+  void trimmedExportRedactsOnlyWhileTheMarkShows() {
+    Video video;
+    openRedacted(video, "trimmed");
+    video.exportClip(0.5, 3.5, true);
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    const QImage before = frameAt(video.savedPath(), 0.25, {320, 240});
+    const QImage during = frameAt(video.savedPath(), 1.0, {320, 240});
+    const QImage after = frameAt(video.savedPath(), 1.75, {320, 240});
+    QVERIFY(!before.isNull() && !during.isNull() && !after.isNull());
+    QVERIFY(white(before, 120, 90));
+    QVERIFY(redacted(during, 120, 90));
+    QVERIFY(redacted(during, 81, 61));
+    QVERIFY(white(during, 200, 200));
+    QVERIFY(white(after, 120, 90));
+  }
+  void exportWithACutRedactsInRecordingTime() {
+    Video video;
+    openRedacted(video, "cut");
+    video.exportEdited(0, 4, true, {QVariantMap{{"start", 0.2}, {"end", 0.6}}});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    // 0.4 seconds were removed before the mark, so it shows from 0.6 to 1.6.
+    QVERIFY(white(frameAt(video.savedPath(), 0.4, {320, 240}), 120, 90));
+    QVERIFY(redacted(frameAt(video.savedPath(), 1.1, {320, 240}), 120, 90));
+    QVERIFY(white(frameAt(video.savedPath(), 1.9, {320, 240}), 120, 90));
+  }
+  void marksStopTheUnchangedCopy() {
+    Video video;
+    openRedacted(video, "whole");
+    video.exportClip(0, 4, true);
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    QVERIFY(redacted(frameAt(video.savedPath(), 1.5, {320, 240}), 120, 90));
+  }
+  void exportedBlurIsSofterThanTheRecording() {
+    Video video;
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("blur")));
+    video.open(QUrl::fromLocalFile(pattern));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.marks()->edit("blur", 0.25, 0.25, 0.75, 0.75);
+    video.marks()->setSelectedTimes(0, 2);
+    video.exportClip(0.5, 4, true);
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    const QRect area(90, 70, 140, 100);
+    const QImage original = frameAt(pattern, 1.2, {320, 240});
+    const QImage blurred = frameAt(video.savedPath(), 0.7, {320, 240});
+    QVERIFY(!original.isNull() && !blurred.isNull());
+    QVERIFY2(detail(blurred, area) < detail(original, area) * 0.35,
+             qPrintable(QString("%1 vs %2").arg(detail(blurred, area))
+                            .arg(detail(original, area))));
+    // Once the mark ends, the picture is sharp again.
+    const QImage laterOriginal = frameAt(pattern, 3, {320, 240});
+    const QImage later = frameAt(video.savedPath(), 2.5, {320, 240});
+    QVERIFY(detail(later, area) > detail(laterOriginal, area) * 0.8);
+  }
+};
+
+QTEST_MAIN(VideoMarksTest)
+#include "video-marks-test.moc"

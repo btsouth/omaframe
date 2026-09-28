@@ -50,6 +50,11 @@ button always sits outside what you are recording, so it never ends up in the
 video. When you stop, trim the ends or cut out a slow part, then **Copy and
 close**. The video is on your clipboard.
 
+If something private showed up while you recorded, press G to blur it or R to
+cover it, and drag over it. It stays hidden for the whole clip. To hide it for
+only part of the clip, select it and press I and O where it should start and
+stop.
+
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 
 [Watch the full 50-second demo](https://github.com/btsouth/omaframe/releases/download/v0.2.1/omaframe-demo.mp4)
@@ -68,6 +73,7 @@ close**. The video is on your clipboard.
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
+| Reviewing a video | G / R | Blur / redact an area. With one selected, I / O set when it shows |
 | In the window | Ctrl+C or Ctrl+S | Copy and save |
 
 ## Good to know
@@ -95,7 +101,8 @@ the middle of a screenshot, its review opens once the screenshot is done.
 
 Omaframe follows your Omarchy theme and updates when you switch themes.
 
-There is no pause, webcam overlay, zoom or annotation on video yet.
+There is no pause, webcam overlay or zoom yet. Blur and redaction on video stay
+in place: they do not follow something that moves or scrolls.
 
 ## Uninstall
 

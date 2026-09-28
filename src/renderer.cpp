@@ -33,8 +33,14 @@ QRectF cropBounds(const QVector<Edit> &edits) {
   return crop;
 }
 
+static double annotationUnit(QSize size) {
+  return std::max(2., std::min(size.width(), size.height()) / 240.);
+}
 static double annotationUnit(const QImage &source) {
-  return std::max(2., std::min(source.width(), source.height()) / 240.);
+  return annotationUnit(source.size());
+}
+int blurRadius(const Edit &edit, QSize size) {
+  return std::clamp(qRound(annotationUnit(size) * 4 * edit.size), 2, 48);
 }
 
 double textSizeForPixels(int pixels, const QImage &source) {
@@ -150,8 +156,7 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
     QRect r = pixelRect(img.size(), edit.from, edit.to);
     if (edit.type == "blur" && r.width() > 1 && r.height() > 1) {
       const QImage region = img.copy(r);
-      const int radius = std::clamp(qRound(annotationUnit(img) * 4 * edit.size),
-                                    2, 48);
+      const int radius = blurRadius(edit, img.size());
       QImage horizontal(region.size(), region.format());
       QImage softened(region.size(), region.format());
       for (int y = 0; y < region.height(); ++y) {

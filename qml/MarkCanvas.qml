@@ -11,9 +11,18 @@ Item {
     // The image being marked, after any crop, and before it, in pixels.
     property size workingSize
     property size sourceSize
+    // The playhead on a video, in seconds. Marks not showing there are not
+    // outlined. Negative for a screenshot.
+    property real time: -1
     readonly property bool typing: textEditor.active
     readonly property bool dragging: drawArea.pressed
+    readonly property bool hovered: drawArea.containsMouse
     signal toolRequested(string key)
+    // A click with the select tool that hit no mark.
+    signal emptyClicked(bool hadSelection)
+    function showing(mark) {
+        return time < 0 || mark.start === undefined || (time >= mark.start && time < mark.end);
+    }
     function commitText() { textEditor.commit(); }
     function cancelText() { textEditor.cancel(); }
     function editSelectedText() { textEditor.editSelected(); }
@@ -42,8 +51,10 @@ Item {
         property var hoverMark: ({})
         property string pressedType: ""
         property var strokePoints: []
+        property bool pressedEmpty: false
+        property bool pressedWithSelection: false
         readonly property bool moved: Math.hypot(endX - startX, endY - startY) > 3
-        readonly property bool selectionShown: editSurface.tool !== "crop" && !textEditor.active
+        readonly property bool selectionShown: editSurface.tool !== "crop" && !textEditor.active && editSurface.showing(editSurface.doc.selectedAnnotation)
         function handleAt(px, py) {
             const selected = editSurface.doc.selectedAnnotation;
             if (!selected.type || !selectionShown)
@@ -81,6 +92,8 @@ Item {
                 return;
             }
             forceActiveFocus();
+            pressedEmpty = false;
+            pressedWithSelection = editSurface.doc.selectedAnnotation.type !== undefined;
             hoverMark = ({});
             hoverHandle = -1;
             startX = endX = mouse.x;
@@ -117,8 +130,10 @@ Item {
                 return;
             }
             editSurface.doc.clearSelection();
-            if (editSurface.tool === "select")
+            if (editSurface.tool === "select") {
                 interaction = "none";
+                pressedEmpty = true;
+            }
             else if (editSurface.tool === "text")
                 interaction = "newText";
             else if (editSurface.tool === "pen") {
@@ -164,6 +179,9 @@ Item {
                 textEditor.create(startX / width, startY / height);
             else if (interaction === "draw")
                 editSurface.doc.edit(editSurface.tool, startX / width, startY / height, endX / width, endY / height);
+            else if (pressedEmpty && !moved)
+                editSurface.emptyClicked(pressedWithSelection);
+            pressedEmpty = false;
             interaction = "none";
             hoverMark = ({});
             hoverHandle = handleAt(endX, endY);
