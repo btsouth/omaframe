@@ -1,0 +1,101 @@
+#pragma once
+#include "renderer.hpp"
+#include <QImage>
+#include <QObject>
+#include <QVariantMap>
+#include <functional>
+
+/** The marks on one image: the edit list, selection, undo and redo, and the
+ *  label being typed. Screenshots and video frames share it. It never
+ *  renders; it reports edits and the owner re-renders. */
+class MarkDocument final : public QObject {
+  Q_OBJECT
+  Q_PROPERTY(bool canUndo READ canUndo NOTIFY changed)
+  Q_PROPERTY(bool canRedo READ canRedo NOTIFY changed)
+  Q_PROPERTY(bool hasCrop READ hasCrop NOTIFY changed)
+  Q_PROPERTY(QRectF cropBounds READ cropBounds NOTIFY changed)
+  Q_PROPERTY(QVariantMap selectedAnnotation READ selectedAnnotation NOTIFY changed)
+  Q_PROPERTY(int newTextPixels READ newTextPixels NOTIFY changed)
+  Q_PROPERTY(bool textEditing READ textEditing NOTIFY changed)
+public:
+  static constexpr int MaxEdits = 100;
+  explicit MarkDocument(QObject *parent = nullptr) : QObject(parent) {}
+  /** Edits are refused while this returns true, e.g. during a save. */
+  void setLockCheck(std::function<bool()> locked) { m_locked = std::move(locked); }
+  /** Starts over on a new image with no marks and no history. */
+  void reset(const QImage &base);
+  /** Reopens saved marks on their image, with no history. */
+  void restore(const QImage &base, QVector<Frame::Edit> edits, int selected);
+  const QVector<Frame::Edit> &edits() const { return m_edits; }
+  /** The edits to preview: all of them except a label being typed. */
+  QVector<Frame::Edit> visibleEdits() const;
+  int selected() const { return m_selected; }
+
+  bool canUndo() const { return !m_undoStates.isEmpty(); }
+  bool canRedo() const { return !m_redoStates.isEmpty(); }
+  bool hasCrop() const;
+  QRectF cropBounds() const { return Frame::cropBounds(m_edits); }
+  QVariantMap selectedAnnotation() const;
+  /** The font size a new label starts at, in source pixels. */
+  int newTextPixels() const;
+  bool textEditing() const { return m_hiddenEdit >= 0; }
+
+  Q_INVOKABLE void edit(const QString &type, double x1, double y1, double x2,
+                        double y2, const QString &text = {});
+  Q_INVOKABLE void addStroke(const QVariantList &points);
+  Q_INVOKABLE void undo();
+  Q_INVOKABLE void redo();
+  Q_INVOKABLE void resetEdits();
+  Q_INVOKABLE void clearCrop();
+  Q_INVOKABLE int selectAt(double x, double y);
+  /** The topmost mark at a point, without selecting it: its bounds in view
+   *  coordinates, or an empty map. */
+  Q_INVOKABLE QVariantMap hitAt(double x, double y, bool edgesOnly = false) const;
+  Q_INVOKABLE void select(int index);
+  Q_INVOKABLE void clearSelection();
+  /** Hides the selected label from the preview while it is typed on the
+   *  canvas. endTextEdit() applies or discards the typed text. */
+  Q_INVOKABLE void beginTextEdit();
+  Q_INVOKABLE void endTextEdit(const QString &text, bool apply);
+  Q_INVOKABLE void moveSelected(double dx, double dy);
+  Q_INVOKABLE void nudgeSelected(int dx, int dy);
+  Q_INVOKABLE void resizeSelected(int handle, double x, double y);
+  Q_INVOKABLE void deleteSelected();
+  Q_INVOKABLE void duplicateSelected();
+  Q_INVOKABLE void moveSelectedLayer(int direction);
+  Q_INVOKABLE void updateSelectedText(const QString &text);
+  Q_INVOKABLE void setSelectedColor(const QString &color);
+  Q_INVOKABLE void setSelectedSize(double size);
+  Q_INVOKABLE void setSelectedFontPixels(int pixels);
+  Q_INVOKABLE void setSelectedTextStyle(const QString &style);
+  Q_INVOKABLE void setSelectedTextAlignment(const QString &alignment);
+  Q_INVOKABLE void setSelectedBackground(const QString &color);
+  Q_INVOKABLE void setSelectedBackgroundOpacity(double opacity);
+signals:
+  void changed();
+  /** The preview needs rendering again. `modified` is false when only the
+   *  label being typed was hidden or shown, with no change to the marks. */
+  void edited(bool modified);
+  /** A short note for the status line. */
+  void message(const QString &text);
+
+private:
+  bool locked() const { return m_locked && m_locked(); }
+  void saveHistory();
+  void commit(bool modified = true);
+  QPointF sourcePoint(double x, double y) const;
+  /** With `edgesOnly`, filled areas (boxes, highlights, redactions, blur)
+   *  are hit only near their border, so a drawing tool can still start a
+   *  new mark inside them. */
+  int hitIndex(double x, double y, bool edgesOnly = false) const;
+  std::function<bool()> m_locked;
+  QImage m_base;
+  QVector<Frame::Edit> m_edits;
+  struct EditState {
+    QVector<Frame::Edit> edits;
+    int selected = -1;
+  };
+  QVector<EditState> m_undoStates, m_redoStates;
+  int m_selected = -1;
+  int m_hiddenEdit = -1;
+};

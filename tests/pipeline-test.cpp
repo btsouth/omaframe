@@ -119,16 +119,16 @@ private slots:
     studio.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("images")));
     studio.open(QUrl::fromLocalFile(path));
     QTRY_VERIFY_WITH_TIMEOUT(!studio.busy() && !studio.rendering(), 5000);
-    studio.edit("crop", 0.25, 0, 0.75, 1);
+    studio.marks()->edit("crop", 0.25, 0, 0.75, 1);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
     QCOMPARE(studio.dimensions(), QString("200 × 200"));
-    studio.undo();
+    studio.marks()->undo();
     QTRY_VERIFY(!studio.rendering());
     QCOMPARE(studio.dimensions(), QString("400 × 200"));
-    studio.redo();
+    studio.marks()->redo();
     QTRY_VERIFY(!studio.rendering());
     QCOMPARE(studio.dimensions(), QString("200 × 200"));
-    studio.edit("redact", 0.5, 0, 1, 1);
+    studio.marks()->edit("redact", 0.5, 0, 1, 1);
     QTRY_VERIFY(!studio.rendering());
     studio.setStyle(8);
     QTRY_VERIFY(!studio.rendering());
@@ -163,224 +163,224 @@ private slots:
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
     studio.setEditing(true);
-    studio.edit("text", 0.2, 0.2, 0.2, 0.2, "Draft");
+    studio.marks()->edit("text", 0.2, 0.2, 0.2, 0.2, "Draft");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("fontPx").toInt(), studio.newTextPixels());
+    QCOMPARE(studio.marks()->selectedAnnotation().value("fontPx").toInt(), studio.marks()->newTextPixels());
     // While a label is being typed its rendered copy is hidden, and the
     // typed words are applied even if a preview is still rendering.
-    studio.beginTextEdit();
-    QVERIFY(studio.textEditing());
-    studio.endTextEdit("Final words", true);
-    QVERIFY(!studio.textEditing());
-    QCOMPARE(studio.selectedAnnotation().value("text").toString(), QString("Final words"));
+    studio.marks()->beginTextEdit();
+    QVERIFY(studio.marks()->textEditing());
+    studio.marks()->endTextEdit("Final words", true);
+    QVERIFY(!studio.marks()->textEditing());
+    QCOMPARE(studio.marks()->selectedAnnotation().value("text").toString(), QString("Final words"));
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.beginTextEdit();
-    studio.endTextEdit("Ignored", false);
-    QCOMPARE(studio.selectedAnnotation().value("text").toString(), QString("Final words"));
-    studio.undo();
+    studio.marks()->beginTextEdit();
+    studio.marks()->endTextEdit("Ignored", false);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("text").toString(), QString("Final words"));
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("text").toString(), QString("Draft"));
-    studio.beginTextEdit();
-    studio.endTextEdit("   ", true);
-    QVERIFY(studio.selectedAnnotation().isEmpty());
+    QCOMPARE(studio.marks()->selectedAnnotation().value("text").toString(), QString("Draft"));
+    studio.marks()->beginTextEdit();
+    studio.marks()->endTextEdit("   ", true);
+    QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
     QVERIFY(studio.status().contains("Empty label removed"));
     // A drawing tool can start a new mark inside a highlight; its border
     // still picks the highlight up.
-    studio.edit("highlight", 0.4, 0.4, 0.8, 0.8);
+    studio.marks()->edit("highlight", 0.4, 0.4, 0.8, 0.8);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.hitAt(0.6, 0.6).contains("index"));
-    QVERIFY(!studio.hitAt(0.6, 0.6, true).contains("index"));
-    QVERIFY(studio.hitAt(0.4, 0.6, true).contains("index"));
-    studio.clearSelection();
-    QVERIFY(studio.selectedAnnotation().isEmpty());
-    studio.select(studio.hitAt(0.4, 0.6).value("index").toInt());
-    QCOMPARE(studio.selectedAnnotation().value("type").toString(), QString("highlight"));
+    QVERIFY(studio.marks()->hitAt(0.6, 0.6).contains("index"));
+    QVERIFY(!studio.marks()->hitAt(0.6, 0.6, true).contains("index"));
+    QVERIFY(studio.marks()->hitAt(0.4, 0.6, true).contains("index"));
+    studio.marks()->clearSelection();
+    QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
+    studio.marks()->select(studio.marks()->hitAt(0.4, 0.6).value("index").toInt());
+    QCOMPARE(studio.marks()->selectedAnnotation().value("type").toString(), QString("highlight"));
     // Finish thumbnails wait until the editor closes.
     studio.setEditing(false);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
     studio.closeImage();
     QVERIFY(!studio.hasImage());
-    QVERIFY(studio.selectedAnnotation().isEmpty());
+    QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
   }
   void annotationsCanMoveResizeDeleteAndReframe() {
     ImageStore store;
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.edit("box", 0.1, 0.1, 0.3, 0.3);
+    studio.marks()->edit("box", 0.1, 0.1, 0.3, 0.3);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.2, 0.2) >= 0);
-    studio.moveSelected(0.2, 0.1);
+    QVERIFY(studio.marks()->selectAt(0.2, 0.2) >= 0);
+    studio.marks()->moveSelected(0.2, 0.1);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(qAbs(studio.selectedAnnotation().value("x1").toDouble() - 0.3) < 1e-8);
-    studio.undo();
+    QVERIFY(qAbs(studio.marks()->selectedAnnotation().value("x1").toDouble() - 0.3) < 1e-8);
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.2, 0.2) >= 0);
-    QVERIFY(qAbs(studio.selectedAnnotation().value("x1").toDouble() - 0.1) < 1e-8);
-    studio.redo();
+    QVERIFY(studio.marks()->selectAt(0.2, 0.2) >= 0);
+    QVERIFY(qAbs(studio.marks()->selectedAnnotation().value("x1").toDouble() - 0.1) < 1e-8);
+    studio.marks()->redo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.4, 0.3) >= 0);
-    studio.resizeSelected(2, 0.65, 0.55);
+    QVERIFY(studio.marks()->selectAt(0.4, 0.3) >= 0);
+    studio.marks()->resizeSelected(2, 0.65, 0.55);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(qAbs(studio.selectedAnnotation().value("x2").toDouble() - 0.65) < 1e-8);
-    studio.edit("crop", 0.25, 0.0, 0.75, 1.0);
+    QVERIFY(qAbs(studio.marks()->selectedAnnotation().value("x2").toDouble() - 0.65) < 1e-8);
+    studio.marks()->edit("crop", 0.25, 0.0, 0.75, 1.0);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.hasCrop());
-    QCOMPARE(studio.selectedAnnotation().size(), 0);
-    QVERIFY(studio.selectAt(0.5, 0.35) >= 0);
-    studio.deleteSelected();
+    QVERIFY(studio.marks()->hasCrop());
+    QCOMPARE(studio.marks()->selectedAnnotation().size(), 0);
+    QVERIFY(studio.marks()->selectAt(0.5, 0.35) >= 0);
+    studio.marks()->deleteSelected();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectAt(0.5, 0.35), -1);
-    studio.undo();
+    QCOMPARE(studio.marks()->selectAt(0.5, 0.35), -1);
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.5, 0.35) >= 0);
-    studio.clearCrop();
+    QVERIFY(studio.marks()->selectAt(0.5, 0.35) >= 0);
+    studio.marks()->clearCrop();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(!studio.hasCrop());
-    QVERIFY(studio.selectAt(0.5, 0.35) >= 0);
+    QVERIFY(!studio.marks()->hasCrop());
+    QVERIFY(studio.marks()->selectAt(0.5, 0.35) >= 0);
   }
   void annotationsCanDuplicateReorderAndKeepSelectionThroughHistory() {
     ImageStore store;
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.edit("box", 0.1, 0.1, 0.4, 0.4);
+    studio.marks()->edit("box", 0.1, 0.1, 0.4, 0.4);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.edit("box", 0.3, 0.3, 0.6, 0.6);
+    studio.marks()->edit("box", 0.3, 0.3, 0.6, 0.6);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.2, 0.2) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("layer").toInt(), 1);
-    studio.moveSelectedLayer(1);
+    QVERIFY(studio.marks()->selectAt(0.2, 0.2) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layer").toInt(), 1);
+    studio.marks()->moveSelectedLayer(1);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("layer").toInt(), 2);
-    QVERIFY(studio.selectAt(0.35, 0.35) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("x1").toDouble(), 0.1);
-    studio.undo();
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layer").toInt(), 2);
+    QVERIFY(studio.marks()->selectAt(0.35, 0.35) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("x1").toDouble(), 0.1);
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("layer").toInt(), 1);
-    QVERIFY(studio.selectAt(0.35, 0.35) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("x1").toDouble(), 0.3);
-    studio.redo();
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layer").toInt(), 1);
+    QVERIFY(studio.marks()->selectAt(0.35, 0.35) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("x1").toDouble(), 0.3);
+    studio.marks()->redo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("layer").toInt(), 2);
-    studio.duplicateSelected();
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layer").toInt(), 2);
+    studio.marks()->duplicateSelected();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("layers").toInt(), 3);
-    QVERIFY(studio.selectedAnnotation().value("x1").toDouble() > 0.1);
-    studio.deleteSelected();
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layers").toInt(), 3);
+    QVERIFY(studio.marks()->selectedAnnotation().value("x1").toDouble() > 0.1);
+    studio.marks()->deleteSelected();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().isEmpty());
-    studio.undo();
+    QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("layers").toInt(), 3);
-    QCOMPARE(studio.selectedAnnotation().value("layer").toInt(), 3);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layers").toInt(), 3);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("layer").toInt(), 3);
   }
   void textCanBeSelectedEditedMovedAndUndone() {
     ImageStore store;
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.edit("text", 0.2, 0.2, 0.2, 0.2, "First label");
+    studio.marks()->edit("text", 0.2, 0.2, 0.2, 0.2, "First label");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    auto selected = studio.selectedAnnotation();
+    auto selected = studio.marks()->selectedAnnotation();
     const double initialSize = selected.value("size").toDouble();
     const double beforeWidth = selected.value("boundW").toDouble();
     const double hitX = selected.value("boundX").toDouble() +
                         selected.value("boundW").toDouble() * 0.85;
     const double hitY = selected.value("boundY").toDouble() +
                         selected.value("boundH").toDouble() * 0.5;
-    QVERIFY(studio.selectAt(hitX, hitY) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("text").toString(),
+    QVERIFY(studio.marks()->selectAt(hitX, hitY) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("text").toString(),
              QString("First label"));
-    studio.updateSelectedText("A longer revised label");
+    studio.marks()->updateSelectedText("A longer revised label");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    selected = studio.selectedAnnotation();
+    selected = studio.marks()->selectedAnnotation();
     QCOMPARE(selected.value("text").toString(), QString("A longer revised label"));
     QVERIFY(selected.value("boundW").toDouble() > beforeWidth);
-    QVERIFY(studio.selectAt(selected.value("boundX").toDouble() +
+    QVERIFY(studio.marks()->selectAt(selected.value("boundX").toDouble() +
                                 selected.value("boundW").toDouble() * 0.9,
                             selected.value("boundY").toDouble() +
                                 selected.value("boundH").toDouble() * 0.5) >= 0);
-    studio.moveSelected(0.1, 0.1);
+    studio.marks()->moveSelected(0.1, 0.1);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    selected = studio.selectedAnnotation();
+    selected = studio.marks()->selectedAnnotation();
     QVERIFY(qAbs(selected.value("x1").toDouble() - 0.3) < 1e-8);
     const double movedWidth = selected.value("boundW").toDouble();
-    studio.resizeSelected(2, selected.value("boundX").toDouble() + movedWidth * 1.5,
+    studio.marks()->resizeSelected(2, selected.value("boundX").toDouble() + movedWidth * 1.5,
                           selected.value("boundY").toDouble() +
                               selected.value("boundH").toDouble() * 1.5);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().value("size").toDouble() > 1.3);
-    QVERIFY(studio.selectedAnnotation().value("boundW").toDouble() > movedWidth);
-    studio.setSelectedColor("#459ec7");
+    QVERIFY(studio.marks()->selectedAnnotation().value("size").toDouble() > 1.3);
+    QVERIFY(studio.marks()->selectedAnnotation().value("boundW").toDouble() > movedWidth);
+    studio.marks()->setSelectedColor("#459ec7");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("color").toString(),
+    QCOMPARE(studio.marks()->selectedAnnotation().value("color").toString(),
              QString("#459ec7"));
-    studio.undo();
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.31, 0.31) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("color").toString(),
+    QVERIFY(studio.marks()->selectAt(0.31, 0.31) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("color").toString(),
              QString("#ffffff"));
-    studio.undo();
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.31, 0.31) >= 0);
-    QVERIFY(qAbs(studio.selectedAnnotation().value("size").toDouble() - initialSize) < 1e-8);
-    studio.undo();
+    QVERIFY(studio.marks()->selectAt(0.31, 0.31) >= 0);
+    QVERIFY(qAbs(studio.marks()->selectedAnnotation().value("size").toDouble() - initialSize) < 1e-8);
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(hitX, hitY) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("text").toString(),
+    QVERIFY(studio.marks()->selectAt(hitX, hitY) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("text").toString(),
              QString("A longer revised label"));
-    studio.undo();
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(hitX, hitY) >= 0);
-    QCOMPARE(studio.selectedAnnotation().value("text").toString(),
+    QVERIFY(studio.marks()->selectAt(hitX, hitY) >= 0);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("text").toString(),
              QString("First label"));
   }
   void largeTextHasDirectSizeAndEditableStyles() {
     ImageStore store;
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.edit("text", 0.1, 0.2, 0.1, 0.2, "Go");
+    studio.marks()->edit("text", 0.1, 0.2, 0.1, 0.2, "Go");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    auto mark = studio.selectedAnnotation();
+    auto mark = studio.marks()->selectedAnnotation();
     const double right = mark.value("boundX").toDouble() + mark.value("boundW").toDouble();
     const double bottom = mark.value("boundY").toDouble() + mark.value("boundH").toDouble();
-    studio.resizeSelected(0, mark.value("boundX").toDouble() -
+    studio.marks()->resizeSelected(0, mark.value("boundX").toDouble() -
                                  mark.value("boundW").toDouble(),
                           mark.value("boundY").toDouble() -
                                  mark.value("boundH").toDouble());
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    mark = studio.selectedAnnotation();
+    mark = studio.marks()->selectedAnnotation();
     QVERIFY(mark.value("fontPx").toInt() > 30);
     QVERIFY(qAbs(mark.value("boundX").toDouble() +
                  mark.value("boundW").toDouble() - right) < 0.02);
     QVERIFY(qAbs(mark.value("boundY").toDouble() +
                  mark.value("boundH").toDouble() - bottom) < 0.02);
-    studio.setSelectedFontPixels(192);
+    studio.marks()->setSelectedFontPixels(192);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("fontPx").toInt(), 192);
-    studio.setSelectedTextStyle("shadow");
+    QCOMPARE(studio.marks()->selectedAnnotation().value("fontPx").toInt(), 192);
+    studio.marks()->setSelectedTextStyle("shadow");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("textStyle").toString(),
+    QCOMPARE(studio.marks()->selectedAnnotation().value("textStyle").toString(),
              QString("shadow"));
-    studio.setSelectedTextStyle("box");
+    studio.marks()->setSelectedTextStyle("box");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.setSelectedTextAlignment("left");
+    studio.marks()->setSelectedTextAlignment("left");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("textAlign").toString(),
+    QCOMPARE(studio.marks()->selectedAnnotation().value("textAlign").toString(),
              QString("left"));
-    studio.setSelectedBackground("#101044");
+    studio.marks()->setSelectedBackground("#101044");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.setSelectedBackgroundOpacity(0.5);
+    studio.marks()->setSelectedBackgroundOpacity(0.5);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("background").toString(),
+    QCOMPARE(studio.marks()->selectedAnnotation().value("background").toString(),
              QString("#101044"));
-    QCOMPARE(studio.selectedAnnotation().value("backgroundOpacity").toDouble(),
+    QCOMPARE(studio.marks()->selectedAnnotation().value("backgroundOpacity").toDouble(),
              0.5);
-    studio.setSelectedFontPixels(999);
+    studio.marks()->setSelectedFontPixels(999);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().value("fontPx").toInt() > 300);
-    QVERIFY(studio.selectedAnnotation().value("fontPx").toInt() <= 4096);
-    studio.updateSelectedText("A longer label that should wrap instead of running beyond the image");
+    QVERIFY(studio.marks()->selectedAnnotation().value("fontPx").toInt() > 300);
+    QVERIFY(studio.marks()->selectedAnnotation().value("fontPx").toInt() <= 4096);
+    studio.marks()->updateSelectedText("A longer label that should wrap instead of running beyond the image");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    mark = studio.selectedAnnotation();
+    mark = studio.marks()->selectedAnnotation();
     QVERIFY(mark.value("fontPx").toInt() < 999);
     QVERIFY(mark.value("boundW").toDouble() <= 0.86);
     QVERIFY(mark.value("boundH").toDouble() <= 1.0);
@@ -391,54 +391,54 @@ private slots:
     ImageStore store;
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.edit("step", 0.4, 0.4, 0.4, 0.4);
+    studio.marks()->edit("step", 0.4, 0.4, 0.4, 0.4);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    const double originalX = studio.selectedAnnotation().value("x1").toDouble();
-    studio.nudgeSelected(10, 0);
+    const double originalX = studio.marks()->selectedAnnotation().value("x1").toDouble();
+    studio.marks()->nudgeSelected(10, 0);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().value("x1").toDouble() > originalX);
-    const auto before = studio.selectedAnnotation();
-    studio.resizeSelected(2, before.value("boundX").toDouble() +
+    QVERIFY(studio.marks()->selectedAnnotation().value("x1").toDouble() > originalX);
+    const auto before = studio.marks()->selectedAnnotation();
+    studio.marks()->resizeSelected(2, before.value("boundX").toDouble() +
                                  before.value("boundW").toDouble() * 1.5,
                           before.value("boundY").toDouble() +
                                  before.value("boundH").toDouble() * 1.5);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().value("size").toDouble() > 1.0);
-    studio.setSelectedColor("#4ca782");
+    QVERIFY(studio.marks()->selectedAnnotation().value("size").toDouble() > 1.0);
+    studio.marks()->setSelectedColor("#4ca782");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("color").toString(),
+    QCOMPARE(studio.marks()->selectedAnnotation().value("color").toString(),
              QString("#4ca782"));
-    studio.deleteSelected();
+    studio.marks()->deleteSelected();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().isEmpty());
-    studio.undo();
+    QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.4, 0.4) >= 0);
+    QVERIFY(studio.marks()->selectAt(0.4, 0.4) >= 0);
   }
   void freehandStrokeCanBeSelectedMovedResizedAndUndone() {
     ImageStore store;
     Studio studio(&store);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.addStroke({QVariantMap{{"x", 0.2}, {"y", 0.2}},
+    studio.marks()->addStroke({QVariantMap{{"x", 0.2}, {"y", 0.2}},
                       QVariantMap{{"x", 0.4}, {"y", 0.4}},
                       QVariantMap{{"x", 0.6}, {"y", 0.2}}});
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("type").toString(), QString("pen"));
-    QVERIFY(studio.selectAt(0.4, 0.4) >= 0);
-    studio.moveSelected(0.1, 0.1);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("type").toString(), QString("pen"));
+    QVERIFY(studio.marks()->selectAt(0.4, 0.4) >= 0);
+    studio.marks()->moveSelected(0.1, 0.1);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(qAbs(studio.selectedAnnotation().value("boundX").toDouble() - 0.3) < 1e-8);
-    studio.resizeSelected(2, 0.8, 0.6);
+    QVERIFY(qAbs(studio.marks()->selectedAnnotation().value("boundX").toDouble() - 0.3) < 1e-8);
+    studio.marks()->resizeSelected(2, 0.8, 0.6);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectedAnnotation().value("boundW").toDouble() > 0.4);
-    studio.setSelectedColor("#459ec7");
+    QVERIFY(studio.marks()->selectedAnnotation().value("boundW").toDouble() > 0.4);
+    studio.marks()->setSelectedColor("#459ec7");
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QCOMPARE(studio.selectedAnnotation().value("color").toString(), QString("#459ec7"));
-    studio.deleteSelected();
+    QCOMPARE(studio.marks()->selectedAnnotation().value("color").toString(), QString("#459ec7"));
+    studio.marks()->deleteSelected();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    studio.undo();
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
-    QVERIFY(studio.selectAt(0.55, 0.6) >= 0);
+    QVERIFY(studio.marks()->selectAt(0.55, 0.6) >= 0);
   }
   void clipboardRetryUsesAlreadySavedPng() {
     const QByteArray originalPath = qgetenv("PATH");
@@ -558,9 +558,9 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!first.rendering(), 8000);
     first.saveDraftNow();
     QCOMPARE(first.drafts().size(), priorDrafts);
-    first.edit("text", 0.25, 0.3, 0.25, 0.3, "Editable again");
+    first.marks()->edit("text", 0.25, 0.3, 0.25, 0.3, "Editable again");
     QTRY_VERIFY_WITH_TIMEOUT(!first.rendering(), 8000);
-    first.setSelectedColor("#459ec7");
+    first.marks()->setSelectedColor("#459ec7");
     QTRY_VERIFY_WITH_TIMEOUT(!first.rendering(), 8000);
     first.saveDraftNow();
     QVERIFY(!first.drafts().isEmpty());
@@ -572,30 +572,30 @@ private slots:
     QVERIFY(metadata.exists());
     QVERIFY(!(image.permissions() & QFile::ReadGroup));
     QVERIFY(!(metadata.permissions() & QFile::ReadOther));
-    first.updateSelectedText("Latest edit");
+    first.marks()->updateSelectedText("Latest edit");
     QTRY_VERIFY_WITH_TIMEOUT(!first.rendering(), 8000);
     first.resumeDraft(id);
     QTRY_VERIFY_WITH_TIMEOUT(!first.rendering(), 8000);
-    QCOMPARE(first.selectedAnnotation().value("text").toString(),
+    QCOMPARE(first.marks()->selectedAnnotation().value("text").toString(),
              QString("Latest edit"));
 
     ImageStore reopenedStore;
     Studio reopened(&reopenedStore, false);
     reopened.resumeDraft(id);
     QTRY_VERIFY_WITH_TIMEOUT(!reopened.rendering(), 8000);
-    QCOMPARE(reopened.selectedAnnotation().value("text").toString(),
+    QCOMPARE(reopened.marks()->selectedAnnotation().value("text").toString(),
              QString("Latest edit"));
-    QCOMPARE(reopened.selectedAnnotation().value("color").toString(),
+    QCOMPARE(reopened.marks()->selectedAnnotation().value("color").toString(),
              QString("#459ec7"));
     QCOMPARE(reopened.style(), 1);
-    reopened.deleteSelected();
+    reopened.marks()->deleteSelected();
     QTRY_VERIFY_WITH_TIMEOUT(!reopened.rendering(), 8000);
     reopened.saveDraftNow();
     const QString secondInput = temp.filePath("another-draft.png");
     QVERIFY(source.save(secondInput));
     reopened.open(QUrl::fromLocalFile(secondInput));
     QTRY_VERIFY_WITH_TIMEOUT(!reopened.busy() && !reopened.rendering(), 8000);
-    reopened.edit("step", 0.5, 0.5, 0.5, 0.5);
+    reopened.marks()->edit("step", 0.5, 0.5, 0.5, 0.5);
     QTRY_VERIFY_WITH_TIMEOUT(!reopened.rendering(), 8000);
     reopened.saveDraftNow();
     QString secondId;
@@ -838,14 +838,14 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 8000);
     QCOMPARE(studio.quickState(), QString("choosing"));
     studio.openEditor();
-    studio.edit("redact", 0.1, 0.1, 0.4, 0.4);
+    studio.marks()->edit("redact", 0.1, 0.1, 0.4, 0.4);
     QTRY_VERIFY(!studio.rendering());
     QSize size;
     const auto edited = store.requestImage("source", &size, {});
     studio.showFinishes();
     studio.openEditor();
     QCOMPARE(store.requestImage("source", &size, {}), edited);
-    QVERIFY(studio.canUndo());
+    QVERIFY(studio.marks()->canUndo());
     studio.showFinishes();
     studio.chooseFinish(8);
     studio.chooseFinish(8);
