@@ -41,7 +41,7 @@ ApplicationWindow {
     readonly property bool videoLoaded: videoMode && video.source.toString().length > 0
     readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
-    readonly property bool typing: markCanvas.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
+    readonly property bool typing: markCanvas.typing || videoPane.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
     property bool shortcutsAllowed: !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
     property bool working: studio.busy || video.busy || (recorder.active && !studio.quickMode)
     property string currentStatus: videoMode ? video.status : studio.status
@@ -55,6 +55,7 @@ ApplicationWindow {
             markCanvas.commitText();
         root.contentItem.forceActiveFocus();
         if (videoMode) {
+            videoPane.commitText();
             videoPane.pause();
             if (recordingReview && (videoUnchanged || videoSavedCurrent))
                 video.finish();
@@ -1401,7 +1402,9 @@ ApplicationWindow {
             property bool muted: item ? item.muted : false
             property var cuts: item ? item.cuts : []
             property string signature: item ? item.signature : ""
+            property bool typing: item ? item.typing : false
             function pause() { if (item) item.pause() }
+            function commitText() { if (item) item.commitText() }
             onLoaded: {
                 item.shortcutsAllowed = Qt.binding(function() { return root.shortcutsAllowed });
                 item.savedCurrent = Qt.binding(function() { return root.videoSavedCurrent });

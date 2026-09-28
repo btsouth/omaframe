@@ -125,7 +125,10 @@ int main(int argc, char **argv) {
   Studio studio(store, false);
   QObject::connect(&app, &QCoreApplication::aboutToQuit, &studio,
                    &Studio::saveDraftNow);
+  // The engine owns both stores once they are added.
+  auto *videoMarks = new ImageStore;
   Video video;
+  video.setImageStore(videoMarks);
   Recorder recorder;
   ShortcutSetup shortcuts;
   // Setting up the recording shortcut also gives the recorder its stop key.
@@ -168,6 +171,7 @@ int main(int argc, char **argv) {
   QObject::connect(&theme, &OmarchyTheme::changed, &app, applyPalette);
   QQmlApplicationEngine engine;
   engine.addImageProvider("frames", store);
+  engine.addImageProvider("videomarks", videoMarks);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("studio", &studio);
   engine.rootContext()->setContextProperty("video", &video);
