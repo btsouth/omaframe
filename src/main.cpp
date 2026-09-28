@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
   mark("GUI application ready");
   app.setOrganizationName("Omaframe");
   app.setApplicationName("Omaframe");
-  app.setApplicationVersion("0.2.0");
+  app.setApplicationVersion("0.2.1");
   app.setDesktopFileName("io.github.btsouth.omaframe");
   app.setQuitOnLastWindowClosed(false);
   QThreadPool::globalInstance()->setMaxThreadCount(2);
@@ -213,12 +213,15 @@ int main(int argc, char **argv) {
   // A quick edit or a recording review is a short task. Float it at a
   // comfortable size on the display it came from instead of squeezing it
   // into a tile. Hyprland only; other compositors keep their own placement.
-  auto floatWindow = [&](QQuickWindow *surface, QScreen *screen) {
-    if (!surface || !screen)
+  // Omarchy keeps image and video tools opaque; Omaframe's editor is one, so
+  // the window behind never shows through a screenshot being edited. A quick
+  // edit or review also floats at a comfortable size on its display.
+  auto adjustWindow = [&](QQuickWindow *surface, bool floating) {
+    if (!surface)
       return;
     const qint64 pid = QCoreApplication::applicationPid();
     const QString title = surface->title();
-    (void)QtConcurrent::run([pid, title] {
+    (void)QtConcurrent::run([pid, title, floating] {
       auto hyprctl = [](const QStringList &args) {
         QProcess p;
         p.start("hyprctl", args);
@@ -261,6 +264,11 @@ int main(int argc, char **argv) {
             height = std::min(1020, qRound(usableH * 0.88));
           }
           const QString target = "address:" + client.value("address").toString();
+          dispatch(QString("hl.dsp.window.set_prop({ window = \"%1\", prop = \"opaque\", value = \"on\" })")
+                       .arg(target),
+                   {"setprop", target, "opaque", "1"});
+          if (!floating)
+            return;
           // A window that opens while a special workspace is shown (Omarchy's
           // screensaver, a scratchpad) would stay hidden there once it closes.
           if (client.value("workspace").toObject().value("name").toString().startsWith("special:") &&
@@ -381,8 +389,11 @@ int main(int argc, char **argv) {
       app.exit(1);
       return;
     }
+    const bool wasVisible = window->isVisible();
     window->show();
     window->requestActivate();
+    if (!wasVisible)
+      adjustWindow(window, false);
   };
   // A finished or cancelled capture returns to the studio if it started
   // there, and otherwise ends this short-lived process.
@@ -505,7 +516,7 @@ int main(int argc, char **argv) {
     window->setProperty("recordingReview", true);
     window->show();
     window->requestActivate();
-    floatWindow(window, screenFor(studio.captureMonitor()));
+    adjustWindow(window, true);
   };
   // A recording stopped while a screenshot is being selected, finished or
   // edited opens its review once that screenshot is done.
@@ -557,8 +568,8 @@ int main(int argc, char **argv) {
     window->setScreen(screenFor(studio.captureMonitor()));
     window->show();
     window->requestActivate();
-    if (studio.quickMode() && !wasVisible)
-      floatWindow(window, screenFor(studio.captureMonitor()));
+    if (!wasVisible)
+      adjustWindow(window, studio.quickMode());
   });
   QObject::connect(&studio, &Studio::dismissRequested, &app, [&] {
     const bool saved = studio.quickState() == "done" && !studio.savedPath().isEmpty();
@@ -685,14 +696,16 @@ int main(int argc, char **argv) {
           }
           if (cmd == "open")
             studio.open(QUrl::fromLocalFile(request.value("file").toString()));
-          window->show();
-          window->requestActivate();
+          showStudioWindow();
         }
       });
     }
   });
-  if (!captureStartup && !ensureWindow())
-    return 1;
+  if (!captureStartup) {
+    if (!ensureWindow())
+      return 1;
+    adjustWindow(window, false);
+  }
   if (!file.isEmpty())
     studio.open(QUrl::fromLocalFile(file));
   if (captureStartup)
