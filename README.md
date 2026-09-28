@@ -1,208 +1,115 @@
 # Omaframe
 
-Screenshots and screen recordings for Omarchy and Arch/Hyprland. Qt 6, C++20,
-QML. Local files, no accounts, no uploads, no watermark.
+Beautiful screenshots and clean screen recordings for Omarchy.
 
-This is version 0.2. Recording uses GPU Screen Recorder with
-Omaframe's own capture bar, Stop control and review.
+Omaframe is small on purpose. Press a key, pick how it looks, paste. When you
+need an arrow, a label or a blur, it is one key away. There is no big editor to
+learn, no account and no upload. Everything stays on your computer.
+
+<p align="center">
+  <img src="docs/media/hero.png" width="760" alt="A dashboard screenshot in Omaframe's Aurora finish, with a Best week label, an arrow to the tallest bar and a blurred list">
+</p>
 
 ## Install
 
-On Omarchy or Arch, one command installs the latest release and everything it
-needs:
+On Omarchy or Arch with Hyprland, one command installs the latest release and
+everything it needs:
 
 ```sh
 curl -fLo /tmp/omaframe.pkg.tar.zst https://github.com/btsouth/omaframe/releases/latest/download/omaframe-x86_64.pkg.tar.zst && sudo pacman -U /tmp/omaframe.pkg.tar.zst
 ```
 
-Then open Omaframe from the launcher and choose **Use Print and Alt+Print**.
-
-To build it yourself instead, download `PKGBUILD` from the
-[latest release](https://github.com/btsouth/omaframe/releases/latest) and run
-`makepkg -si` next to it.
-
-To uninstall, run `sudo pacman -R omaframe` and delete the block between
-`-- omaframe:shortcuts:start` and `-- omaframe:shortcuts:end` in
-`~/.config/hypr/bindings.lua`. Your screenshots, recordings and settings are
-left in place.
-
-## Try it from source
-
-```sh
-./run --studio          # the Omaframe window: start screen, editor, video review
-./run                   # select a window, area or display and take a screenshot
-./run --record          # the same selector, ready to record; again to stop
-./run --repeat          # screenshot the last area again
-./run --screen          # screenshot the focused display
-./run /path/to/image.png
-./run /path/to/recording.mp4
-```
-
-The launcher entry opens the Omaframe window. The first time, it explains the
-workflow and offers to set up the two shortcuts:
-
-| Key | Action |
-| --- | --- |
-| Print | Take a screenshot |
-| Alt+Print | Start recording, or stop the current recording |
-
-Setup replaces only Omarchy's stock Print and Alt+Print actions. It never
-touches a custom binding. It backs up `~/.config/hypr/bindings.lua`, appends a
-marked block, and activates the keys at once. Delete the block between
-`-- omaframe:shortcuts:start` and `-- omaframe:shortcuts:end` to restore
-Omarchy's defaults. Nothing is changed until you choose **Use Print and
-Alt+Print**, on the start screen, in Settings, or in recording options. To use
-other keys, bind them to `omaframe --capture` and `omaframe --record`;
-Omaframe recognizes any key bound to those commands.
+Open Omaframe from the launcher and click **Use Print and Alt+Print**. It only
+replaces Omarchy's default actions for those two keys, backs up your bindings
+first, and never touches a key you set up yourself.
 
 ## Take a screenshot
 
-Press Print. Every display freezes and a capture bar appears.
+Press Print Screen. Click a window, drag an area, or press F for the whole
+display. Pick a finish with 1 to 9 and it is copied and saved. Paste it
+anywhere.
 
-- Click a window to capture what is visible of it.
-- Drag an area.
-- Press **F**, or click **Whole display**, for the display under the bar.
-  Clicking empty desktop does the same.
-- **Tab** switches to video. **Esc** cancels without touching the clipboard.
-
-The finish picker opens next. Press **1–9** or click a card: Omaframe copies
-the full-resolution PNG and saves it to `~/Pictures/Omaframe`, then closes and
-shows a notification. **Enter** uses your last finish, **9** keeps the image
-without a border, **R** retakes, and **E** opens the editor first.
+<p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
 ## Mark it up
 
-The editor keeps its tools in one place on the right. Settings for the
-selected mark appear below them.
+Press E before you pick a finish. Press T and click to type a label right on
+the image, then add arrows, boxes, highlights, blur or redaction, or crop.
+Every mark stays movable and editable, and Esc takes you back to the finishes.
 
-- **Text**: click where the label goes and type on the image, in its real size
-  and colors. Enter adds a line. Esc or a click outside finishes it. Click a
-  label with the Text tool, double-click it with any tool, or press F2 to
-  change its words.
-- Every mark stays editable. With any tool, drag a mark to move it and drag a
-  handle to resize it. Drawing tools pick up filled areas (highlight, redact,
-  blur, box) by their edge, so you can still start a new mark inside one.
-  Right-click selects a mark.
-- Tools stay armed until you pick another one. **Esc** steps back one layer at
-  a time: finish typing, clear the selection, return to Select, then leave the
-  editor with your edits kept.
-- Tools: Select (V), Crop (C), Arrow (A), Line (L), Box (B), Oval (O),
-  Highlight (H), Redact (R), Blur (G), Pen (P), Steps (N), Text (T).
-- Selected marks: duplicate (Ctrl+D), delete, change layer, color (presets or
-  hex), thickness, blur strength. Labels: size 8–4096 px by field, slider or
-  corner handle, caption box or shadow, alignment, box color and opacity.
-  Arrow keys nudge by one pixel, Shift+arrows by ten.
-- Crop is reversible. Redaction replaces pixels with an opaque fill.
-- Undo and redo (Ctrl+Z, Ctrl+Shift+Z) keep the selected mark.
+<p align="center"><img src="docs/media/edit.gif" width="800" alt="Typing a label on a screenshot, drawing an arrow and blurring a list"></p>
 
-Annotated images autosave as editable drafts. They appear under **Recent
-edits** on the start screen with a preview. A draft keeps a private copy of the
-unedited capture so you can change your marks later; delete it there when you
-are done.
+## Record your screen
 
-## Record a video
+Press Alt+Print Screen, then click a window, drag an area, or press F. The Stop
+button always sits outside what you are recording, so it never ends up in the
+video. When you stop, trim the ends or cut out a slow part, then **Copy and
+close**. The video is on your clipboard.
 
-Press Alt+Print, or press Tab in the screenshot selector. The capture bar turns
-red and adds **Sound**, **Mic**, the countdown, and a button for more options.
-Click a window, drag an area, or press **F** for the whole display, and the
-recording starts after the countdown. **D** and **M** toggle sound and the
-microphone. Choices are remembered.
+<p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 
-Omaframe never puts its own controls in the video:
+[Watch the full 50-second demo](https://github.com/btsouth/omaframe/releases/download/v0.2.1/omaframe-demo.mp4)
 
-- For an area, the timer and Stop button sit just outside it, below, above,
-  right or left, whichever fits. They never cover the Omarchy bar.
-- For a whole display with another display connected, they sit on the other
-  display, at the edge that faces the recording.
-- When there is no place outside the recording, such as a whole display on a
-  single monitor, no Stop button is shown. A countdown says how to stop, then
-  disappears before the first frame. Omaframe checks that none of its surfaces
-  is over the recorded area before it starts. Stop with Alt+Print, or with
-  the recording icon in the Omarchy bar. This case requires a working stop
-  shortcut; recording options offer to set up Alt+Print.
+## Keys
 
-The Omarchy bar is part of the desktop, so a whole-display recording includes
-it, with its recording icon. Omaframe cannot hide anything on a recorded
-display: GPU Screen Recorder captures the composited screen. Clicking the bar
-icon stops Omaframe's recording normally; Omarchy's script then also posts its
-own generic "Screen recording saved" notification.
+| Where | Key | Does |
+| --- | --- | --- |
+| Anywhere | Print Screen | Take a screenshot |
+| Anywhere | Alt+Print Screen | Start a recording, or stop it |
+| Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
+| Choosing an area to record | D / M | Computer sound / microphone |
+| Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
+| Picking a finish | E / R | Mark it up / retake |
+| Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
+| Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
+| Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
+| Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
+| In the window | Ctrl+C or Ctrl+S | Copy and save |
 
-Stopping opens the review window. The recording is already saved in
-`~/Videos/Omaframe`. **Copy and close** puts it on the clipboard as a file,
-ready to paste into a chat or file manager, closes the review, and shows a
-notification with the folder. To shorten it first:
-
-- Drag the ends of the filmstrip, type start and end times, or press I and O.
-- Drag across the filmstrip to select a part, then choose **Remove this part**
-  (or press Delete). Removed parts stay visible and hatched. Click one to
-  change its times or restore it.
-- **Sound on/off** saves the video with or without sound.
-- Undo and redo cover every change.
-
-With changes, the button becomes **Save and copy**. It writes
-`Recording-…-edited.mp4` next to the original, which stays as it was, then
-copies the new file and closes the same way. If the save or the copy fails,
-review stays open with the error. A video opened in the Omaframe window with
-Open stays open after **Export video**, with **Copy file** and **Show file**.
-Exports that only shorten the end or remove sound copy the original video
-without re-encoding. Other edits re-encode with H.264 at CRF 16. Every export
-is probed and decoded before it is reported as saved.
-
-If you stop a recording while you are taking or editing a screenshot, the
-screenshot is left alone and the review opens once it is finished.
-
-If Omaframe exits during a recording, the recorder is told to finish its file.
-A start that produced no video leaves no file behind.
-
-There is no pause, webcam overlay, zoom or annotation on video yet. Webcam
-recording remains available in Omarchy's own menu.
-
-## Omarchy theme
-
-Omaframe follows the active Omarchy theme and updates live when it changes. It
-reads the theme's `colors.toml` and `shell.toml`, `~/.config/omarchy/shell.toml`,
-Hyprland's rounding and the `monospace` font alias. Finishes and exported images
-keep their own colors.
-
-## Files and privacy
+## Good to know
 
 Screenshots go to `~/Pictures/Omaframe` and recordings to `~/Videos/Omaframe`.
-Change either in **Settings**.
+Change either in Settings. Saved images contain only the rendered pixels, and
+redaction replaces pixels with a solid fill. Your originals are never changed.
 
-Exported images contain only rendered pixels, with source metadata removed.
-Original files are never overwritten.
+When you add marks, Omaframe keeps an editable draft with a private copy of the
+capture, listed under Recent edits so you can change it later. Delete a draft
+there when you are done with it.
 
-Settings has an optional **Keep an unedited private copy of each capture**,
-off by default. When it is on, each accepted capture also saves its unedited
-source, including anything you redacted, to
-`~/.local/share/Omaframe/Omaframe/originals` with owner-only permissions, until
-you delete them there. Drafts keep their own private source copies until you
-delete the draft.
+Recording a whole display on a single monitor leaves no room for a Stop button
+outside the video, so Omaframe shows a short countdown that tells you how to
+stop, and it is gone before the first frame. Stop with Alt+Print Screen or with
+the recording icon in the Omarchy bar. With a second monitor, the Stop button
+waits there, at the edge next to the one you are recording.
 
-## Shortcuts inside Omaframe
+A whole-display recording includes the Omarchy bar, because it is part of the
+screen. Stopping from the bar's icon works normally; Omarchy may also show its
+own "Screen recording saved" notice.
 
-| Shortcut | Action |
-| --- | --- |
-| F / Tab / Esc | Whole display / switch screenshot and video / cancel, in the capture bar |
-| D / M | Sound / microphone, in video mode |
-| 1–9, Enter | Pick a finish, or the last one, in the picker |
-| E / R | Edit / retake, in the picker |
-| Ctrl+O | Open an image or video |
-| Ctrl+C, Ctrl+S | Copy and save the image; copy, or save and copy, the video |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
-| V C A L B O H R G P N T | Editor tools |
-| Delete, Ctrl+D, F2 | Delete, duplicate, change the words of the selected mark |
-| Arrow keys | Nudge the selected mark (Shift: ten pixels) |
-| Space, I / O, Home / End | Play, set start / end, jump, in video review |
-| Left / Right | Step 0.1 s (Shift: 1 s) in video review |
+You can take and edit screenshots while you record. If you stop a recording in
+the middle of a screenshot, its review opens once the screenshot is done.
 
-## Build on Arch
+Omaframe follows your Omarchy theme and updates when you switch themes.
 
-Dependencies: `base-devel cmake ninja pkgconf qt6-base qt6-declarative
+There is no pause, webcam overlay, zoom or annotation on video yet.
+
+## Uninstall
+
+```sh
+sudo pacman -R omaframe
+```
+
+Then delete the block between `-- omaframe:shortcuts:start` and
+`-- omaframe:shortcuts:end` in `~/.config/hypr/bindings.lua` to give Print
+Screen and Alt+Print Screen back to Omarchy. Your screenshots, recordings and
+settings stay where they are.
+
+## Build from source
+
+Build dependencies: `base-devel cmake ninja pkgconf qt6-base qt6-declarative
 qt6-multimedia qt6-wayland layer-shell-qt wayland wayland-protocols
 wl-clipboard ffmpeg gpu-screen-recorder libpulse procps-ng xdg-utils`.
-`libnotify` is optional; without it there is no notification after a quick
-screenshot.
+`libnotify` is optional and adds a notification after a quick screenshot.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -210,12 +117,12 @@ cmake --build build -j 3
 ./build/omaframe --studio
 ```
 
-`cmake --install build --prefix ~/.local` installs a user-local copy. An Arch
-package can be built from a clean version tag with
-`packaging/build-package.sh`. Use `--working-tree` only for a local test
-package. See [RELEASING.md](RELEASING.md) for the release gates.
-
-## Validation
+`omaframe` with no options takes a screenshot, `--record` starts or stops a
+recording, `--repeat` captures the last area again, `--studio` opens the
+window, and a file path opens that image or video. You can also build the
+package yourself: download `PKGBUILD` from the
+[latest release](https://github.com/btsouth/omaframe/releases/latest) and run
+`makepkg -si`. See [RELEASING.md](RELEASING.md) for how releases are made.
 
 The capture, clipboard and recording tests talk to a Wayland compositor and the
 session bus, so run them in a throwaway nested desktop rather than your own
@@ -225,23 +132,13 @@ session. With [omabox](https://github.com/diogochaves/omabox), for example:
 omabox run --net isolated -- ctest --test-dir build --output-on-failure
 ```
 
-The suites cover rendering, redaction, edit ordering, undo/redo, inline label
-editing, mark hit testing, clipboard/save equality, metadata removal, drafts,
-video trimming and cuts, export naming, copy and trash, recording placement on
-one and two displays, the countdown that must leave before capture, stop
-shortcut detection and consented setup, and failure cleanup.
-
-See the [interface review](docs/interface-review.md), [recording
-validation](docs/recording-validation.md), [capture workflow
-validation](docs/capture-workflow-validation.md) and the [release
-tracker](docs/release-parity.md). Multi-monitor, fractional-scale, audio,
-fullscreen-game and real GPU capture behavior still need checks on real
-hardware.
+Test notes and hardware results are in [docs/](docs/), starting with the
+[recording validation](docs/recording-validation.md).
 
 ## License
 
-MIT. The native Wayland capture implementation is adapted from Omasnap at
-`acfb3b5772ccb041b57ccc76e16f1b72719f37e9`, copyright Tobi Lütke. Its license is
-retained in [docs/OMASNAP-LICENSE](docs/OMASNAP-LICENSE). MatteShot and Omaroll
-informed the workflow and style direction; this app has its own UI and
+MIT. The native Wayland capture code is adapted from Omasnap at
+`acfb3b5772ccb041b57ccc76e16f1b72719f37e9`, copyright Tobi Lütke, and its
+license is kept in [docs/OMASNAP-LICENSE](docs/OMASNAP-LICENSE). MatteShot and
+Omaroll informed the workflow and style; Omaframe has its own interface and
 renderer.
