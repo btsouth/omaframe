@@ -40,6 +40,11 @@ elif [ "$2" = binds ]; then
  elif [ -n "$OMAFRAME_TEST_NO_STOP_BIND" ]; then echo '[]';
  else echo '[{"key":"Print","modmask":8,"dispatcher":"exec","arg":"$HOME/.local/bin/omaframe --stop-recording || omaframe --record","submap":""}]'; fi
 elif [ "$1" = eval ] && [ -n "$OMAFRAME_TEST_AUTO_SHORTCUT" ]; then
+ if printf %s "$2" | grep -q "assert"; then
+  if [ -n "$OMAFRAME_TEST_NO_BIND_API" ]; then echo unavailable; exit 1; fi
+  echo ok; exit 0
+ fi
+ if printf %s "$2" | grep -q "o.rebind"; then echo unavailable; exit 1; fi
  : > "$OMAFRAME_TEST_AUTO_SHORTCUT"
  echo ok
 elif [ "$2" = layers ] && [ -n "$OMAFRAME_TEST_LAYERS" ]; then
@@ -203,8 +208,11 @@ while True: time.sleep(.05)
    QVERIFY(installed.startsWith("-- My other shortcuts\n"));
    QCOMPARE(installed.count("omaframe:shortcuts:start"),1);
    QVERIFY(!installed.contains("recording-shortcut"));
-   QVERIFY(installed.contains("o.rebind(\"PRINT\", \"Screenshot with Omaframe\", \"'/bin/true' --capture\")"));
-   QVERIFY(installed.contains("o.rebind(\"ALT + PRINT\", \"Record with Omaframe\", \"'/bin/true' --record\")"));
+   QVERIFY(!installed.contains("o.rebind"));
+   QVERIFY(installed.contains("hl.unbind(\"PRINT\")"));
+   QVERIFY(installed.contains("hl.unbind(\"ALT + PRINT\")"));
+   QVERIFY(installed.contains("o.bind(\"PRINT\", \"Screenshot with Omaframe\", \"'/bin/true' --capture\")"));
+   QVERIFY(installed.contains("o.bind(\"ALT + PRINT\", \"Record with Omaframe\", \"'/bin/true' --record\")"));
    // Installing again changes nothing and makes no second backup.
    QString again;
    QVERIFY(Shortcuts::install(config,"/bin/true",{Action::Screenshot,Action::Record},&error,&again));
@@ -255,6 +263,21 @@ while True: time.sleep(.05)
    QVERIFY(content.startsWith("-- existing user shortcuts\n"));
    QVERIFY(content.contains("Screenshot with Omaframe"));QVERIFY(content.contains("Record with Omaframe"));
    qunsetenv("OMAFRAME_TEST_AUTO_SHORTCUT");
+ }
+ void unsupportedShortcutApiDoesNotTouchConfig() {
+   const QString config=temp.filePath("config/hypr");
+   QVERIFY(QDir().mkpath(config));
+   QFile bindings(config+"/bindings.lua");
+   QVERIFY(bindings.open(QIODevice::WriteOnly));
+   const QByteArray original="-- user shortcuts must survive\n";
+   bindings.write(original);bindings.close();
+   qputenv("OMAFRAME_TEST_AUTO_SHORTCUT",temp.filePath("unsupported-api").toUtf8());
+   qputenv("OMAFRAME_TEST_NO_BIND_API","1");
+   ShortcutSetup s;s.refresh();QTRY_VERIFY(s.available()&&!s.checking());
+   QVERIFY(s.canSetUp());s.setUp();QTRY_VERIFY(!s.checking());
+   QVERIFY(!s.ready());QVERIFY(s.message().contains("left unchanged"));
+   QVERIFY(bindings.open(QIODevice::ReadOnly));QCOMPARE(bindings.readAll(),original);
+   qunsetenv("OMAFRAME_TEST_AUTO_SHORTCUT");qunsetenv("OMAFRAME_TEST_NO_BIND_API");
  }
  void unavailableAudioWarningClearsWhenTurnedOff() {
    qputenv("OMAFRAME_TEST_NO_SINK", "1");

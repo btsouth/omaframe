@@ -168,7 +168,7 @@ QString Shortcuts::command(Action action, const QString &executable) {
 }
 
 QString Shortcuts::luaLine(Action action, const QString &executable) {
-  return QString("o.rebind(%1, %2, %3)")
+  return QString("hl.unbind(%1)\no.bind(%1, %2, %3)")
       .arg(luaString(action == Action::Screenshot ? "PRINT" : "ALT + PRINT"),
            luaString(description(action)),
            luaString(command(action, executable)));
@@ -315,6 +315,16 @@ void ShortcutSetup::run(const QList<Shortcuts::Action> &actions) {
     r.binds = current.array();
     if (actions.isEmpty() || !r.available)
       return r;
+    // Check the running compositor before touching the user's config. Older
+    // Omarchy has o.bind and hl.unbind, but no o.rebind helper.
+    const auto capabilities = hyprctl({"eval",
+        "assert(type(hl.unbind) == 'function' and type(o.bind) == 'function', "
+        "'Omaframe shortcut API unavailable')"});
+    if (capabilities.trimmed() != "ok") {
+      r.message = "This Hyprland setup does not support automatic shortcut "
+                  "setup. Your bindings were left unchanged.";
+      return r;
+    }
     const QString configDir =
         QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
         "/hypr";
