@@ -1,10 +1,19 @@
 #pragma once
+#include "marks.hpp"
 #include <QObject>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QVariantList>
 #include <memory>
+
+/** FFmpeg filters that burn blur and redaction marks into video frames of
+ *  `size`, reading the stream `input` and writing `output`. `offset` is
+ *  subtracted from the marks' times, for input that starts that many seconds
+ *  into the source. Empty when no mark shows in the input. */
+QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
+                             double offset, const QString &input,
+                             const QString &output);
 
 class Video : public QObject {
   Q_OBJECT
@@ -24,6 +33,10 @@ class Video : public QObject {
   /** The saved clip's file name and a short "9.0 s · 8.1 MB" summary. */
   Q_PROPERTY(QString savedName READ savedName NOTIFY changed)
   Q_PROPERTY(QString savedSummary READ savedSummary NOTIFY changed)
+  /** Blur and redaction marks over the video, saved into the exported clip. */
+  Q_PROPERTY(MarkDocument *marks READ marks CONSTANT)
+  /** The video's frame size in pixels. */
+  Q_PROPERTY(QSize frameSize READ frameSize NOTIFY changed)
 public:
   static constexpr int ThumbnailCount = 16;
   explicit Video(QObject *parent = nullptr);
@@ -42,6 +55,8 @@ public:
   QStringList thumbnails() const { return m_thumbnails; }
   QString savedName() const;
   QString savedSummary() const { return m_savedSummary; }
+  MarkDocument *marks() { return &m_marks; }
+  QSize frameSize() const { return m_frameSize; }
   Q_INVOKABLE void open(const QUrl &url);
   Q_INVOKABLE void exportClip(double start, double end, bool mute);
   Q_INVOKABLE void exportEdited(double start, double end, bool mute,
@@ -67,6 +82,8 @@ signals:
 private:
   void makeThumbnails();
   QUrl m_source;
+  MarkDocument m_marks;
+  QSize m_frameSize;
   QStringList m_thumbnails;
   std::unique_ptr<QTemporaryDir> m_thumbnailDir;
   int m_generation = 0;

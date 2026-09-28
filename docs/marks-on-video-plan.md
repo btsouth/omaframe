@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: plan. Phase 0 is built on the `marks-document` branch; the rest is not started.
+Status: plan. Phases 0 and 1 are built on the `marks-document` branch; the rest is not started.
 
 ## Goal
 
@@ -41,7 +41,7 @@ This is the riskiest refactor in the plan. Keep it a pure move with no behavior 
 
 Add `start` and `end` (seconds on the source clip) to `Frame::Edit`. Screenshots ignore them. Video marks are stored in source time, so trims and cuts never move them.
 
-`Video` owns a second `MarkDocument`. Its base image is a frame grabbed from the recording when marking starts (ffmpeg, one frame, the same way the thumbnails are made). Coordinates are already normalized from 0 to 1, so the marks do not depend on the video's size.
+`Video` owns a second `MarkDocument`. Its base image is a blank image the size of the frame, since the marks only need the size (for text in phase 2). Coordinates are already normalized from 0 to 1, so the marks do not depend on the video's size.
 
 Marks live for the review session only. There are no drafts for video in this version.
 
@@ -72,7 +72,7 @@ Redact is a plain filled rectangle in QML. Blur previews with `MultiEffect` over
 - If there are any marks, skip the stream-copy path (`streamCopy` at `src/video.cpp:419`). Marked clips are always re-encoded.
 - Apply the marks to `[0:v:0]` first, before trim and concat, so the times in the filters are source times and cuts need no conversion.
 - Redact: `drawbox=x:y:w:h:color=0x151a20:t=fill:enable='between(t,START,END)'`, using the same color as the screenshot redaction.
-- Blur: `split` the stream, `crop` the rectangle, `boxblur` with a radius that follows the screenshot formula in `Frame::applyEdits`, and `overlay` it back with the same `enable` range. One chain per blur mark.
+- Blur: `split` the stream, `crop` the rectangle, `gblur` with a sigma of three times the screenshot radius (`Frame::blurRadius`), and `overlay` it back with the same `enable` range. One chain per blur mark. A sigma equal to the screenshot radius left the text in a 720p recording almost readable while the preview looked fully hidden, so the export is deliberately stronger than the preview.
 - The trims currently read `[0:v:0]` several times, which ffmpeg allows for inputs. After the mark filters, the result is a filter output, so it needs `split=N` before the trims.
 - Convert normalized coordinates to pixels using the probed video size, rounded to even numbers so the rectangles line up with yuv420p chroma.
 

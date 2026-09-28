@@ -17,6 +17,15 @@ class MarkDocument final : public QObject {
   Q_PROPERTY(QVariantMap selectedAnnotation READ selectedAnnotation NOTIFY changed)
   Q_PROPERTY(int newTextPixels READ newTextPixels NOTIFY changed)
   Q_PROPERTY(bool textEditing READ textEditing NOTIFY changed)
+  /** Every mark, for drawing them over a video: index, type, x1, y1, x2, y2,
+   *  start and end. */
+  Q_PROPERTY(QVariantList annotations READ annotations NOTIFY changed)
+  /** The length of the video in seconds, or 0 for a screenshot. Marks on a
+   *  video show only between their start and end. */
+  Q_PROPERTY(double duration READ duration WRITE setDuration NOTIFY changed)
+  /** Where the video is paused. New marks start here, and only marks showing
+   *  here can be picked up. */
+  Q_PROPERTY(double playhead READ playhead WRITE setPlayhead NOTIFY playheadChanged)
 public:
   static constexpr int MaxEdits = 100;
   explicit MarkDocument(QObject *parent = nullptr) : QObject(parent) {}
@@ -39,6 +48,11 @@ public:
   /** The font size a new label starts at, in source pixels. */
   int newTextPixels() const;
   bool textEditing() const { return m_hiddenEdit >= 0; }
+  QVariantList annotations() const;
+  double duration() const { return m_duration; }
+  void setDuration(double seconds);
+  double playhead() const { return m_playhead; }
+  void setPlayhead(double seconds);
 
   Q_INVOKABLE void edit(const QString &type, double x1, double y1, double x2,
                         double y2, const QString &text = {});
@@ -71,8 +85,11 @@ public:
   Q_INVOKABLE void setSelectedTextAlignment(const QString &alignment);
   Q_INVOKABLE void setSelectedBackground(const QString &color);
   Q_INVOKABLE void setSelectedBackgroundOpacity(double opacity);
+  /** When the selected mark shows on a video, in seconds. */
+  Q_INVOKABLE void setSelectedTimes(double start, double end);
 signals:
   void changed();
+  void playheadChanged();
   /** The preview needs rendering again. `modified` is false when only the
    *  label being typed was hidden or shown, with no change to the marks. */
   void edited(bool modified);
@@ -84,6 +101,9 @@ private:
   void saveHistory();
   void commit(bool modified = true);
   QPointF sourcePoint(double x, double y) const;
+  /** Gives a new mark its times on a video. */
+  void timeNewMark(Frame::Edit &edit) const;
+  bool showing(const Frame::Edit &edit) const;
   /** With `edgesOnly`, filled areas (boxes, highlights, redactions, blur)
    *  are hit only near their border, so a drawing tool can still start a
    *  new mark inside them. */
@@ -98,4 +118,5 @@ private:
   QVector<EditState> m_undoStates, m_redoStates;
   int m_selected = -1;
   int m_hiddenEdit = -1;
+  double m_duration = 0, m_playhead = 0;
 };

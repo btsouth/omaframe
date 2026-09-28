@@ -39,7 +39,7 @@ ApplicationWindow {
     property string tool: "select"
     property string savedSignature: ""
     readonly property bool videoLoaded: videoMode && video.source.toString().length > 0
-    readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0
+    readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
     readonly property bool typing: markCanvas.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
     property bool shortcutsAllowed: !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing

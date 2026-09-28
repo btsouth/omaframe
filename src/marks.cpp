@@ -32,6 +32,67 @@ int MarkDocument::newTextPixels() const {
   return std::clamp(
       qRound(std::min(m_base.width(), m_base.height()) * 0.06), 20, 64);
 }
+void MarkDocument::setDuration(double seconds) {
+  seconds = std::isfinite(seconds) ? std::max(0., seconds) : 0.;
+  if (qFuzzyCompare(seconds + 1, m_duration + 1))
+    return;
+  m_duration = seconds;
+  emit changed();
+}
+void MarkDocument::setPlayhead(double seconds) {
+  seconds = std::isfinite(seconds) ? std::max(0., seconds) : 0.;
+  if (seconds == m_playhead)
+    return;
+  m_playhead = seconds;
+  emit playheadChanged();
+}
+void MarkDocument::timeNewMark(Frame::Edit &edit) const {
+  if (m_duration <= 0)
+    return;
+  // Hiding something covers the whole clip: a secret on screen for a moment
+  // is easy to miss if the mark starts where it was drawn. Everything else
+  // starts at the playhead. Both run to the end.
+  const bool hides = edit.type == "blur" || edit.type == "redact";
+  edit.start = hides ? 0. : std::min(m_playhead, m_duration);
+  edit.end = m_duration;
+}
+bool MarkDocument::showing(const Frame::Edit &edit) const {
+  return m_duration <= 0 ||
+         (m_playhead >= edit.start && (edit.end < 0 || m_playhead < edit.end));
+}
+QVariantList MarkDocument::annotations() const {
+  QVariantList list;
+  for (int i = 0; i < m_edits.size(); ++i) {
+    const auto &edit = m_edits[i];
+    if (edit.type == "crop")
+      continue;
+    list.append(QVariantMap{{"index", i},
+                            {"type", edit.type},
+                            {"x1", std::min(edit.from.x(), edit.to.x())},
+                            {"y1", std::min(edit.from.y(), edit.to.y())},
+                            {"x2", std::max(edit.from.x(), edit.to.x())},
+                            {"y2", std::max(edit.from.y(), edit.to.y())},
+                            {"start", edit.start},
+                            {"end", edit.end < 0 ? m_duration : edit.end}});
+  }
+  return list;
+}
+void MarkDocument::setSelectedTimes(double start, double end) {
+  if (locked() || m_duration <= 0 || m_selected < 0 ||
+      m_selected >= m_edits.size() || !std::isfinite(start) ||
+      !std::isfinite(end))
+    return;
+  start = std::clamp(start, 0., std::max(0., m_duration - 0.1));
+  end = std::clamp(end, start + 0.1, m_duration);
+  const auto &edit = m_edits.at(m_selected);
+  const double currentEnd = edit.end < 0 ? m_duration : edit.end;
+  if (qAbs(edit.start - start) < 0.0005 && qAbs(currentEnd - end) < 0.0005)
+    return;
+  saveHistory();
+  m_edits[m_selected].start = start;
+  m_edits[m_selected].end = end;
+  commit();
+}
 void MarkDocument::commit(bool modified) {
   emit changed();
   emit edited(modified);
@@ -102,6 +163,7 @@ void MarkDocument::edit(const QString &type, double x1, double y1,
     edit.size = Frame::textSizeForPixels(newTextPixels(), m_base);
     fitTextToImage(edit, m_base);
   }
+  timeNewMark(edit);
   m_edits.append(edit);
   if (type != "crop")
     m_selected = m_edits.size() - 1;
@@ -138,6 +200,7 @@ void MarkDocument::addStroke(const QVariantList &points) {
   saveHistory();
   Frame::Edit stroke{"pen", {left, top}, {right, bottom}};
   stroke.points = std::move(path);
+  timeNewMark(stroke);
   m_edits.append(stroke);
   m_selected = m_edits.size() - 1;
   emit message("Stroke added. Select it to move, resize, or change color.");
@@ -174,7 +237,8 @@ QVariantMap MarkDocument::selectedAnnotation() const {
     if (i <= m_selected)
       ++layer;
   }
-  return {{"type", edit.type},
+  return {{"index", m_selected},
+          {"type", edit.type},
           {"layer", layer},
           {"layers", layers},
           {"text", edit.text},
@@ -192,7 +256,9 @@ QVariantMap MarkDocument::selectedAnnotation() const {
           {"boundX", (bounds.x() - crop.x()) / crop.width()},
           {"boundY", (bounds.y() - crop.y()) / crop.height()},
           {"boundW", bounds.width() / crop.width()},
-          {"boundH", bounds.height() / crop.height()}};
+          {"boundH", bounds.height() / crop.height()},
+          {"start", edit.start},
+          {"end", edit.end < 0 ? m_duration : edit.end}};
 }
 int MarkDocument::hitIndex(double x, double y, bool edgesOnly) const {
   const QRectF crop = cropBounds();
@@ -200,7 +266,7 @@ int MarkDocument::hitIndex(double x, double y, bool edgesOnly) const {
   const double tolerance = 0.018;
   for (int i = m_edits.size() - 1; i >= 0; --i) {
     const auto &edit = m_edits[i];
-    if (edit.type == "crop")
+    if (edit.type == "crop" || !showing(edit))
       continue;
     const QPointF a((edit.from.x() - crop.x()) / crop.width(),
                     (edit.from.y() - crop.y()) / crop.height());

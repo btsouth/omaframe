@@ -36,7 +36,72 @@ static bool decodesVideoFrame(const QString &path, const QStringList &seek = {})
          decode.exitCode() == 0 && frame;
 }
 
+static QString seconds(double value) { return QString::number(value, 'f', 3); }
+
+QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
+                             double offset, const QString &input,
+                             const QString &output) {
+  QStringList chains;
+  QString current = input;
+  int index = 0;
+  for (const auto &edit : edits) {
+    if ((edit.type != "blur" && edit.type != "redact") || size.isEmpty())
+      continue;
+    const bool untilEnd = edit.end < 0;
+    const double start = std::max(0., edit.start - offset);
+    const double end = edit.end - offset;
+    if (!untilEnd && end <= start)
+      continue;
+    // Even edges line up with the half-size colour planes of yuv420p, so the
+    // covered area never leaves a fringe of the original colour.
+    const QRectF area =
+        QRectF(QPointF(edit.from.x() * size.width(), edit.from.y() * size.height()),
+               QPointF(edit.to.x() * size.width(), edit.to.y() * size.height()))
+            .normalized();
+    const int left = std::clamp(int(std::floor(area.left() / 2)) * 2, 0, size.width());
+    const int top = std::clamp(int(std::floor(area.top() / 2)) * 2, 0, size.height());
+    const int right = std::clamp(int(std::ceil(area.right() / 2)) * 2, 0, size.width());
+    const int bottom = std::clamp(int(std::ceil(area.bottom() / 2)) * 2, 0, size.height());
+    const int width = right - left, height = bottom - top;
+    if (width < 2 || height < 2)
+      continue;
+    const QString enable =
+        untilEnd ? QString(":enable='gte(t,%1)'").arg(seconds(start))
+                : QString(":enable='between(t,%1,%2)'").arg(seconds(start), seconds(end));
+    const QString next = QString("[mark%1]").arg(index);
+    const QString rect = QString("%1:%2:%3:%4").arg(width).arg(height).arg(left).arg(top);
+    if (edit.type == "redact") {
+      // The same solid colour as a redacted screenshot.
+      chains << QString("%1drawbox=x=%2:y=%3:w=%4:h=%5:color=0x151a20@1:t=fill%6%7")
+                    .arg(current).arg(left).arg(top).arg(width).arg(height)
+                    .arg(enable, next);
+    } else {
+      // Three times the screenshot's radius: at that strength text in a
+      // recording is gone, not just soft, and the saved video is never easier
+      // to read than the preview in review.
+      const int sigma = 3 * Frame::blurRadius(edit, size);
+      chains << QString("%1split[mark%2base][mark%2area]").arg(current).arg(index)
+             << QString("[mark%1area]crop=%2,gblur=sigma=%3[mark%1soft]")
+                    .arg(index).arg(rect).arg(sigma)
+             << QString("[mark%1base][mark%1soft]overlay=%2:%3%4%5")
+                    .arg(index).arg(left).arg(top).arg(enable, next);
+    }
+    current = next;
+    ++index;
+  }
+  if (chains.isEmpty())
+    return {};
+  chains.last().chop(current.size());
+  chains.last() += output;
+  return chains;
+}
+
 Video::Video(QObject *parent) : QObject(parent) {
+  m_marks.setLockCheck([this] { return m_busy; });
+  connect(&m_marks, &MarkDocument::message, this, [this](const QString &text) {
+    m_status = text;
+    emit changed();
+  });
   m_directory =
       QSettings()
           .value("videoDirectory", QStandardPaths::writableLocation(
@@ -186,6 +251,7 @@ void Video::open(const QUrl &url) {
   struct Result {
     double duration = 0;
     QString dimensions, error;
+    QSize frameSize;
     int audioTracks = 0;
     bool copyCompatible = false;
   };
@@ -204,6 +270,13 @@ void Video::open(const QUrl &url) {
             m_name = QFileInfo(url.toLocalFile()).fileName();
             m_duration = r.duration;
             m_dimensions = r.dimensions;
+            m_frameSize = r.frameSize;
+            // The marks only need the frame's size, for placing labels.
+            QImage frame(m_frameSize, QImage::Format_ARGB32_Premultiplied);
+            frame.fill(Qt::transparent);
+            m_marks.reset(frame);
+            m_marks.setDuration(m_duration);
+            m_marks.setPlayhead(0);
             m_audioTracks = r.audioTracks;
             m_copyCompatible = r.copyCompatible;
             m_saved.clear();
@@ -241,9 +314,11 @@ void Video::open(const QUrl &url) {
       if (type == "video" && !hasVideo) {
         hasVideo = true;
         h264 = stream.value("codec_name").toString() == "h264";
+        r.frameSize = QSize(stream.value("width").toInt(),
+                            stream.value("height").toInt());
         r.dimensions = QString("%1 × %2")
-                           .arg(stream.value("width").toInt())
-                           .arg(stream.value("height").toInt());
+                           .arg(r.frameSize.width())
+                           .arg(r.frameSize.height());
         r.duration = stream.value("duration").toString().toDouble();
       }
     }
@@ -414,9 +489,15 @@ void Video::exportEdited(double start, double end, bool mute,
   m_saved.clear();
   m_savedSummary.clear();
   m_status = "Exporting a clean MP4…";
+  // Marks are drawn on the source before any trim or cut, so their times are
+  // always times in the recording.
+  const QVector<Frame::Edit> marks = m_marks.edits();
+  const bool marked =
+      !videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]").isEmpty();
   // A clip beginning at the first frame can be shortened at the end without
-  // re-encoding. Start trims and middle cuts still need exact frame removal.
-  const bool streamCopy = kept.size() == 1 && m_copyCompatible && start <= 0.001;
+  // re-encoding. Start trims, middle cuts and marks need new frames.
+  const bool streamCopy =
+      !marked && kept.size() == 1 && m_copyCompatible && start <= 0.001;
   if (streamCopy)
     m_status = "Saving the original quality without re-encoding…";
   emit changed();
@@ -437,13 +518,21 @@ void Video::exportEdited(double start, double end, bool mute,
   if (kept.size() > 1) {
     QStringList filters;
     QString videoInputs;
+    if (marked) {
+      filters << videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]");
+      QString copies;
+      for (int i = 0; i < kept.size(); ++i)
+        copies += QString("[part%1]").arg(i);
+      filters << QString("[marked]split=%1%2").arg(kept.size()).arg(copies);
+    }
     for (int i = 0; i < kept.size(); ++i) {
       const auto &range = kept[i];
       const QString times = QString("start=%1:end=%2")
                                 .arg(range.first, 0, 'f', 3)
                                 .arg(range.second, 0, 'f', 3);
-      filters << QString("[0:v:0]trim=%1,setpts=PTS-STARTPTS,"
-                         "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v%2]")
+      filters << QString("%1trim=%2,setpts=PTS-STARTPTS,"
+                         "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v%3]")
+                     .arg(marked ? QString("[part%1]").arg(i) : QString("[0:v:0]"))
                      .arg(times).arg(i);
       videoInputs += QString("[v%1]").arg(i);
       if (!mute) {
@@ -491,14 +580,24 @@ void Video::exportEdited(double start, double end, bool mute,
                    "-i",
                    m_source.toLocalFile(),
                    "-t",
-                   QString::number(m_exportDuration, 'f', 3),
-                   "-map",
-                   "0:v:0"};
+                   QString::number(m_exportDuration, 'f', 3)};
+  // Seeking the input makes its first frame time zero, so the marks move
+  // back by the same amount.
+  QStringList markFilters =
+      videoMarkFilters(marks, m_frameSize, start, "[0:v:0]", "[marked]");
+  if (markFilters.isEmpty()) {
+    args << "-map" << "0:v:0";
+  } else {
+    markFilters << "[marked]scale=trunc(iw/2)*2:trunc(ih/2)*2[v]";
+    args << "-filter_complex" << markFilters.join(';') << "-map" << "[v]";
+  }
   if (mute)
     args << "-an";
   else
     args << "-map" << "0:a?" << "-c:a" << "aac" << "-b:a" << "192k";
-  args << "-vf" << "scale=trunc(iw/2)*2:trunc(ih/2)*2" << "-c:v" << "libx264"
+  if (markFilters.isEmpty())
+    args << "-vf" << "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+  args << "-c:v" << "libx264"
        << "-preset" << "veryfast" << "-crf" << "16" << "-pix_fmt" << "yuv420p"
        << "-map_metadata" << "-1" << "-movflags"
        << "+faststart" << "-progress" << "pipe:1" << m_temporary;

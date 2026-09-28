@@ -1,12 +1,14 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Effects
 import QtMultimedia
 
 // The clip editor: one stage, one transport row, and one timeline where the
 // filmstrip, trim handles, removed parts and playhead live together.
 // Clicking the filmstrip moves the playhead. Dragging across it selects a
-// part, which can then be removed. Nothing here changes the source file.
+// part, which can then be removed. While paused, G and R draw a blur or a
+// redaction over the video. Nothing here changes the source file.
 Item {
     id: pane
     property bool shortcutsAllowed: true
@@ -27,7 +29,16 @@ Item {
     readonly property bool loaded: video.source.toString().length > 0
     readonly property bool editable: loaded && !video.busy
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
-    readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)])])
+    readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations])
+    // The mark tool: select, blur or redact.
+    property string tool: "select"
+    readonly property var selectedMark: video.marks.selectedAnnotation
+    readonly property bool markSelected: selectedMark.type !== undefined
+    readonly property bool hasMarks: video.marks.annotations.length > 0
+    // What the bar above the timeline describes.
+    readonly property string barMode: markSelected ? "mark" : tool !== "select" ? "tool" : hasSelection ? "part" : selectedCut >= 0 ? "cut" : "none"
+    // Set while undo or redo replays a mark change, so it is not recorded again.
+    property bool replaying: false
     readonly property real outputDuration: {
         let remaining = clipEnd - clipStart;
         for (const cut of cuts)
@@ -83,19 +94,71 @@ Item {
         cuts = state.cuts;
         clearSelection();
     }
+    // Marks keep their own history. Their place in the order is recorded
+    // here as a "marks" entry, so one Ctrl+Z steps back through both.
     function undo() {
         if (undoStack.length === 0)
             return;
-        redoStack = redoStack.concat([snapshot()]);
-        restore(undoStack[undoStack.length - 1]);
+        const last = undoStack[undoStack.length - 1];
+        if (last === "marks") {
+            redoStack = redoStack.concat(["marks"]);
+            replaying = true;
+            video.marks.undo();
+            replaying = false;
+        } else {
+            redoStack = redoStack.concat([snapshot()]);
+            restore(last);
+        }
         undoStack = undoStack.slice(0, -1);
     }
     function redo() {
         if (redoStack.length === 0)
             return;
-        undoStack = undoStack.concat([snapshot()]);
-        restore(redoStack[redoStack.length - 1]);
+        const next = redoStack[redoStack.length - 1];
+        if (next === "marks") {
+            undoStack = undoStack.concat(["marks"]);
+            replaying = true;
+            video.marks.redo();
+            replaying = false;
+        } else {
+            undoStack = undoStack.concat([snapshot()]);
+            restore(next);
+        }
         redoStack = redoStack.slice(0, -1);
+    }
+    function useTool(key) {
+        if (!editable)
+            return;
+        player.pause();
+        clearSelection();
+        tool = key;
+    }
+    // Esc steps back one layer: a drag, the selected mark, the mark tool,
+    // then the selected part of the timeline.
+    function stepBack() {
+        if (markCanvas.dragging) markCanvas.cancelDrag();
+        else if (markSelected) video.marks.clearSelection();
+        else if (tool !== "select") tool = "select";
+        else clearSelection();
+    }
+    function deleteSelected() {
+        if (markSelected) video.marks.deleteSelected();
+        else removeSelection();
+    }
+    // With a mark selected, I and O set when it shows instead of trimming.
+    function setIn() {
+        if (markSelected) video.marks.setSelectedTimes(head, selectedMark.end);
+        else setStart(player.position / 1000, true);
+    }
+    function setOut() {
+        if (markSelected) video.marks.setSelectedTimes(selectedMark.start, head);
+        else setEnd(player.position / 1000, true);
+    }
+    function selectMark(index, start, end) {
+        player.pause();
+        if (head < start || head >= end)
+            seek(start);
+        video.marks.select(index);
     }
     function takePendingUndo() {
         if (!pendingUndo)
@@ -142,6 +205,7 @@ Item {
         notice = "";
     }
     function select(from, to) {
+        video.marks.clearSelection();
         selStart = Math.max(clipStart, Math.min(from, to));
         selEnd = Math.min(clipEnd, Math.max(from, to));
         hasSelection = selEnd - selStart >= 0.1;
@@ -189,6 +253,7 @@ Item {
         seek(end);
     }
     function selectCut(index) {
+        video.marks.clearSelection();
         hasSelection = false;
         selectedCut = index;
         notice = "";
@@ -243,6 +308,25 @@ Item {
 
     onVisibleChanged: if (!visible)
         player.pause()
+    onMarkSelectedChanged: if (markSelected) {
+        hasSelection = false;
+        selectedCut = -1;
+        notice = "";
+    }
+    onPlayingChanged: if (playing) {
+        tool = "select";
+        markCanvas.commitText();
+    }
+    Binding { target: video.marks; property: "playhead"; value: pane.head }
+    Connections {
+        target: video.marks
+        function onEdited(modified) {
+            if (modified && !pane.replaying) {
+                pane.undoStack = pane.undoStack.concat(["marks"]);
+                pane.redoStack = [];
+            }
+        }
+    }
     MediaPlayer {
         id: player
         source: video.source
@@ -288,19 +372,29 @@ Item {
             pane.muted = false;
             pane.undoStack = [];
             pane.redoStack = [];
+            pane.tool = "select";
             pane.clearSelection();
         }
     }
     readonly property bool keys: visible && editable && shortcutsAllowed
     Shortcut { sequence: "Space"; enabled: pane.keys; onActivated: pane.togglePlay() }
-    Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setStart(player.position / 1000, true) }
-    Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setEnd(player.position / 1000, true) }
-    Shortcut { sequence: "Escape"; enabled: pane.keys && (pane.hasSelection || pane.selectedCut >= 0); onActivated: pane.clearSelection() }
-    Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && pane.hasSelection; onActivated: pane.removeSelection() }
-    Shortcut { sequence: "Left"; enabled: pane.keys; onActivated: pane.nudge(-0.1) }
-    Shortcut { sequence: "Right"; enabled: pane.keys; onActivated: pane.nudge(0.1) }
-    Shortcut { sequence: "Shift+Left"; enabled: pane.keys; onActivated: pane.nudge(-1) }
-    Shortcut { sequence: "Shift+Right"; enabled: pane.keys; onActivated: pane.nudge(1) }
+    Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setIn() }
+    Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setOut() }
+    Shortcut { sequence: "Escape"; enabled: pane.keys && (pane.barMode !== "none" || markCanvas.dragging); onActivated: pane.stepBack() }
+    Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && (pane.hasSelection || pane.markSelected); onActivated: pane.deleteSelected() }
+    Shortcut { sequence: "G"; enabled: pane.keys; onActivated: pane.useTool("blur") }
+    Shortcut { sequence: "R"; enabled: pane.keys; onActivated: pane.useTool("redact") }
+    Shortcut { sequence: "V"; enabled: pane.keys; onActivated: pane.tool = "select" }
+    // Arrow keys move a selected mark, like the screenshot editor, and
+    // otherwise step through time.
+    Shortcut { sequence: "Left"; enabled: pane.keys; onActivated: pane.markSelected ? video.marks.nudgeSelected(-1, 0) : pane.nudge(-0.1) }
+    Shortcut { sequence: "Right"; enabled: pane.keys; onActivated: pane.markSelected ? video.marks.nudgeSelected(1, 0) : pane.nudge(0.1) }
+    Shortcut { sequence: "Shift+Left"; enabled: pane.keys; onActivated: pane.markSelected ? video.marks.nudgeSelected(-10, 0) : pane.nudge(-1) }
+    Shortcut { sequence: "Shift+Right"; enabled: pane.keys; onActivated: pane.markSelected ? video.marks.nudgeSelected(10, 0) : pane.nudge(1) }
+    Shortcut { sequence: "Up"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.nudgeSelected(0, -1) }
+    Shortcut { sequence: "Down"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.nudgeSelected(0, 1) }
+    Shortcut { sequence: "Shift+Up"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.nudgeSelected(0, -10) }
+    Shortcut { sequence: "Shift+Down"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.nudgeSelected(0, 10) }
     Shortcut { sequence: "Home"; enabled: pane.keys; onActivated: { player.pause(); pane.seek(pane.clipStart); } }
     Shortcut { sequence: "End"; enabled: pane.keys; onActivated: { player.pause(); pane.seek(Math.max(pane.clipStart, pane.clipEnd - 0.1)); } }
     Shortcut { sequence: "Ctrl+Z"; enabled: pane.keys && pane.undoStack.length > 0; onActivated: pane.undo() }
@@ -356,6 +450,7 @@ Item {
         property string label
         signal dragged(real edge)
         signal grabbed()
+        signal released()
         height: lane.height
         y: lane.y
         radius: theme.radius
@@ -387,6 +482,7 @@ Item {
                 if (pressed)
                     handle.dragged(mapToItem(handle.lane, mouse.x, 0).x + offset);
             }
+            onReleased: handle.released()
         }
     }
     component Divider: Rectangle {
@@ -459,6 +555,64 @@ Item {
                 cursorShape: pane.editable ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: pane.togglePlay()
             }
+            // The picture itself, inside the letterbox. Marks are placed in it.
+            Item {
+                id: picture
+                x: output.contentRect.x
+                y: output.contentRect.y
+                width: output.contentRect.width
+                height: output.contentRect.height
+                visible: pane.loaded
+                // What the saved video will show: blur and redactions while
+                // they are on at the playhead.
+                Repeater {
+                    model: video.marks.annotations
+                    Item {
+                        id: preview
+                        required property var modelData
+                        x: modelData.x1 * picture.width
+                        y: modelData.y1 * picture.height
+                        width: Math.max(1, (modelData.x2 - modelData.x1) * picture.width)
+                        height: Math.max(1, (modelData.y2 - modelData.y1) * picture.height)
+                        visible: pane.head >= modelData.start && pane.head < modelData.end
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: preview.modelData.type === "redact"
+                            color: "#151a20"
+                        }
+                        ShaderEffectSource {
+                            id: area
+                            anchors.fill: parent
+                            visible: false
+                            live: true
+                            sourceItem: preview.modelData.type === "blur" && preview.visible ? output : null
+                            sourceRect: Qt.rect(picture.x + preview.x, picture.y + preview.y, preview.width, preview.height)
+                        }
+                        MultiEffect {
+                            anchors.fill: parent
+                            visible: preview.modelData.type === "blur"
+                            source: area
+                            autoPaddingEnabled: false
+                            blurEnabled: true
+                            blurMax: 64
+                            blur: 1
+                        }
+                    }
+                }
+                MarkCanvas {
+                    id: markCanvas
+                    anchors.fill: parent
+                    visible: pane.editable && !pane.playing
+                    doc: video.marks
+                    tool: pane.tool
+                    locked: video.busy
+                    workingSize: video.frameSize
+                    sourceSize: video.frameSize
+                    time: pane.head
+                    onToolRequested: key => pane.tool = key
+                    onEmptyClicked: hadSelection => { if (!hadSelection) pane.togglePlay(); }
+                }
+            }
             Rectangle {
                 anchors.centerIn: parent
                 width: 64
@@ -467,7 +621,7 @@ Item {
                 color: theme.alpha(theme.background, 0.78)
                 border.width: 1
                 border.color: theme.alpha(theme.text, 0.14)
-                opacity: pane.editable && !pane.playing && stageMouse.containsMouse ? 1 : 0
+                opacity: pane.editable && !pane.playing && pane.tool === "select" && !markCanvas.dragging && (stageMouse.containsMouse || markCanvas.hovered) ? 1 : 0
                 visible: opacity > 0
                 Behavior on opacity {
                     NumberAnimation { duration: 140 }
@@ -649,6 +803,30 @@ Item {
                 hint: pane.muted ? "The saved video will be silent. Click to keep the sound." : "Click to save the video without sound"
                 onClicked: pane.toggleSound()
             }
+            Divider {
+                Layout.leftMargin: 2
+                Layout.rightMargin: 2
+            }
+            StudioButton {
+                text: "Blur"
+                glyph: "blur"
+                quiet: pane.tool !== "blur"
+                selected: pane.tool === "blur"
+                implicitHeight: 36
+                enabled: pane.editable
+                hint: "Drag over something to blur it in the saved video · G"
+                onClicked: pane.tool === "blur" ? pane.tool = "select" : pane.useTool("blur")
+            }
+            StudioButton {
+                text: "Redact"
+                glyph: "redact"
+                quiet: pane.tool !== "redact"
+                selected: pane.tool === "redact"
+                implicitHeight: 36
+                enabled: pane.editable
+                hint: "Drag over something private to cover it in the saved video · R"
+                onClicked: pane.tool === "redact" ? pane.tool = "select" : pane.useTool("redact")
+            }
         }
 
         // One fixed-height bar that describes the selection, so choosing a
@@ -659,7 +837,70 @@ Item {
             Layout.preferredHeight: 36
             spacing: 8
             Text {
-                visible: !pane.hasSelection && pane.selectedCut < 0
+                visible: pane.barMode === "tool"
+                Layout.fillWidth: true
+                text: pane.tool === "blur" ? "Drag over what to blur. It stays blurred for the whole clip; I and O change that. Use Redact for anything private."
+                    : "Drag over what to cover. It is covered for the whole clip; I and O change that."
+                color: theme.muted
+                font.pixelSize: 12
+                elide: Text.ElideRight
+            }
+            Caption {
+                visible: pane.barMode === "mark"
+                text: pane.selectedMark.type === "redact" ? "REDACTION" : "BLUR"
+                color: theme.selectedText
+            }
+            TimeField {
+                visible: pane.barMode === "mark"
+                display: pane.time(pane.selectedMark.start || 0)
+                enabled: pane.editable
+                onCommitted: seconds => video.marks.setSelectedTimes(seconds, pane.selectedMark.end)
+                ToolTip.visible: hovered && !activeFocus
+                ToolTip.delay: 600
+                ToolTip.text: "When it starts · I sets it at the playhead"
+            }
+            Text {
+                visible: pane.barMode === "mark"
+                text: "to"
+                color: theme.muted
+                font.pixelSize: 12
+            }
+            TimeField {
+                visible: pane.barMode === "mark"
+                display: pane.time(pane.selectedMark.end || 0)
+                enabled: pane.editable
+                onCommitted: seconds => video.marks.setSelectedTimes(pane.selectedMark.start, seconds)
+                ToolTip.visible: hovered && !activeFocus
+                ToolTip.delay: 600
+                ToolTip.text: "When it ends · O sets it at the playhead"
+            }
+            Text {
+                visible: pane.barMode === "mark"
+                Layout.fillWidth: true
+                text: pane.selectedMark.start <= 0.0005 && pane.selectedMark.end >= video.duration - 0.0005 ? "Covers the whole clip. I and O set where it starts and ends." : "(" + ((pane.selectedMark.end || 0) - (pane.selectedMark.start || 0)).toFixed(1) + " s)"
+                color: theme.faint
+                font.pixelSize: 11
+                elide: Text.ElideRight
+            }
+            StudioButton {
+                visible: pane.barMode === "mark"
+                text: "Delete"
+                glyph: "trash"
+                implicitHeight: 32
+                enabled: pane.editable
+                hint: "Take this mark off the video · Delete"
+                onClicked: video.marks.deleteSelected()
+            }
+            StudioButton {
+                visible: pane.barMode === "mark"
+                glyph: "close"
+                quiet: true
+                implicitHeight: 32
+                hint: "Clear the selection · Esc"
+                onClicked: video.marks.clearSelection()
+            }
+            Text {
+                visible: pane.barMode === "none"
                 Layout.fillWidth: true
                 text: pane.notice.length ? pane.notice
                     : pane.cuts.length ? pane.cuts.length + (pane.cuts.length === 1 ? " part removed. Click it on the filmstrip to change or restore it." : " parts removed. Click one on the filmstrip to change or restore it.")
@@ -669,36 +910,36 @@ Item {
                 elide: Text.ElideRight
             }
             Caption {
-                visible: pane.hasSelection || pane.selectedCut >= 0
+                visible: pane.barMode === "part" || pane.barMode === "cut"
                 text: pane.hasSelection ? "SELECTED" : "REMOVED PART"
                 color: pane.hasSelection ? theme.selectedText : theme.urgent
             }
             TimeField {
-                visible: pane.hasSelection || pane.selectedCut >= 0
+                visible: pane.barMode === "part" || pane.barMode === "cut"
                 display: pane.time(pane.hasSelection ? pane.selStart : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].start : 0)
                 enabled: pane.editable
                 onCommitted: seconds => pane.hasSelection ? pane.setSelectionStart(seconds) : pane.setCutTimes(pane.selectedCut, seconds, pane.cuts[pane.selectedCut].end)
             }
             Text {
-                visible: pane.hasSelection || pane.selectedCut >= 0
+                visible: pane.barMode === "part" || pane.barMode === "cut"
                 text: "to"
                 color: theme.muted
                 font.pixelSize: 12
             }
             TimeField {
-                visible: pane.hasSelection || pane.selectedCut >= 0
+                visible: pane.barMode === "part" || pane.barMode === "cut"
                 display: pane.time(pane.hasSelection ? pane.selEnd : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].end : 0)
                 enabled: pane.editable
                 onCommitted: seconds => pane.hasSelection ? pane.setSelectionEnd(seconds) : pane.setCutTimes(pane.selectedCut, pane.cuts[pane.selectedCut].start, seconds)
             }
             Text {
-                visible: pane.hasSelection || pane.selectedCut >= 0
+                visible: pane.barMode === "part" || pane.barMode === "cut"
                 text: "(" + ((pane.hasSelection ? pane.selEnd - pane.selStart : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].end - pane.cuts[pane.selectedCut].start : 0)).toFixed(1) + " s)"
                 color: theme.faint
                 font.pixelSize: 11
             }
             StudioButton {
-                visible: pane.hasSelection
+                visible: pane.barMode === "part"
                 text: "Remove this part"
                 glyph: "cut"
                 implicitHeight: 32
@@ -707,7 +948,7 @@ Item {
                 onClicked: pane.removeSelection()
             }
             StudioButton {
-                visible: pane.selectedCut >= 0
+                visible: pane.barMode === "cut"
                 text: "Restore"
                 glyph: "undo"
                 implicitHeight: 32
@@ -716,7 +957,7 @@ Item {
                 onClicked: pane.restoreCut(pane.selectedCut)
             }
             StudioButton {
-                visible: pane.hasSelection || pane.selectedCut >= 0
+                visible: pane.barMode === "part" || pane.barMode === "cut"
                 glyph: "close"
                 quiet: true
                 implicitHeight: 32
@@ -724,14 +965,14 @@ Item {
                 onClicked: pane.clearSelection()
             }
             Text {
-                visible: pane.notice.length > 0 && (pane.hasSelection || pane.selectedCut >= 0)
+                visible: pane.notice.length > 0 && (pane.barMode === "part" || pane.barMode === "cut")
                 Layout.fillWidth: true
                 text: pane.notice
                 color: theme.urgent
                 font.pixelSize: 11
                 elide: Text.ElideRight
             }
-            Item { Layout.fillWidth: pane.hasSelection || pane.selectedCut >= 0 }
+            Item { Layout.fillWidth: pane.barMode === "part" || pane.barMode === "cut" }
             StudioButton {
                 glyph: "undo"
                 quiet: true
@@ -755,7 +996,7 @@ Item {
             readonly property real gutter: 12
             Layout.fillWidth: true
             Layout.topMargin: 8
-            Layout.preferredHeight: track.y + track.height + 26
+            Layout.preferredHeight: ruler.y + ruler.height + 2
             enabled: pane.editable
             opacity: pane.loaded ? 1 : 0.35
 
@@ -980,11 +1221,88 @@ Item {
                 onDragged: edge => pane.setEnd(Math.round(track.secondsAt(edge) * 10) / 10, false)
             }
 
+            // One bar per mark, for when it shows. Click one to select it; the
+            // selected one has handles.
+            Item {
+                id: markLane
+                x: track.x
+                y: track.y + track.height + 6
+                width: track.width
+                height: pane.hasMarks ? 12 : 0
+                visible: pane.hasMarks
+                // The new times while a handle is dragged, applied on release
+                // so the whole drag is one undo step.
+                property real draftStart: -1
+                property real draftEnd: -1
+                readonly property real shownStart: draftStart >= 0 ? draftStart : pane.selectedMark.start || 0
+                readonly property real shownEnd: draftEnd >= 0 ? draftEnd : pane.selectedMark.end || 0
+                function grab() {
+                    player.pause();
+                    draftStart = pane.selectedMark.start;
+                    draftEnd = pane.selectedMark.end;
+                }
+                function commit() {
+                    if (draftStart >= 0)
+                        video.marks.setSelectedTimes(draftStart, draftEnd);
+                    draftStart = draftEnd = -1;
+                }
+                Repeater {
+                    model: video.marks.annotations
+                    Rectangle {
+                        required property var modelData
+                        readonly property bool chosen: modelData.index === pane.selectedMark.index
+                        x: track.xFor(chosen ? markLane.shownStart : modelData.start)
+                        width: Math.max(4, track.xFor(chosen ? markLane.shownEnd : modelData.end) - x)
+                        height: markLane.height
+                        radius: theme.radius > 0 ? height / 2 : 0
+                        z: chosen ? 1 : 0
+                        color: chosen ? theme.accent : theme.alpha(theme.text, 0.22)
+                        border.width: 1
+                        border.color: chosen ? theme.accent : theme.alpha(theme.background, 0.8)
+                        Accessible.role: Accessible.Button
+                        Accessible.name: (modelData.type === "redact" ? "Redaction" : "Blur") + " from " + pane.time(modelData.start) + " to " + pane.time(modelData.end)
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: pane.selectMark(parent.modelData.index, parent.modelData.start, parent.modelData.end)
+                        }
+                    }
+                }
+            }
+            TrimHandle {
+                lane: markLane
+                visible: pane.markSelected
+                label: "Mark start"
+                edge: track.xFor(markLane.shownStart)
+                x: markLane.x + edge - width
+                width: 10
+                onGrabbed: markLane.grab()
+                onDragged: edge => {
+                    markLane.draftStart = Math.max(0, Math.min(markLane.draftEnd - 0.1, Math.round(track.secondsAt(edge) * 10) / 10));
+                    pane.seek(markLane.draftStart);
+                }
+                onReleased: markLane.commit()
+            }
+            TrimHandle {
+                lane: markLane
+                visible: pane.markSelected
+                label: "Mark end"
+                edge: track.xFor(markLane.shownEnd)
+                x: markLane.x + edge
+                width: 10
+                onGrabbed: markLane.grab()
+                onDragged: edge => {
+                    markLane.draftEnd = Math.min(video.duration, Math.max(markLane.draftStart + 0.1, Math.round(track.secondsAt(edge) * 10) / 10));
+                    pane.seek(Math.max(markLane.draftStart, markLane.draftEnd - 0.1));
+                }
+                onReleased: markLane.commit()
+            }
+
             // The time ruler doubles as a scrub strip.
             Item {
                 id: ruler
                 x: track.x
-                y: track.y + track.height + 4
+                y: markLane.y + markLane.height + (pane.hasMarks ? 4 : -2)
                 width: track.width
                 height: 20
                 readonly property real step: {
