@@ -13,7 +13,7 @@ Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 | Capture and finish | Window, area or display; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
 | Screenshot editing | Movable and resizable marks, inline multiline labels, crop, blur/redaction, layers, undo/redo and editable drafts | Pinning, scrolling capture, curved arrows |
 | Screenshot text | Copy text with T; hide possible secrets with H in the picker or Shift+H in the editor; optional local Tesseract | Selectable OCR regions |
-| Record and stop | Display or region, computer sound and selected microphone, countdown; Stop outside the capture or hotkey/bar stop when no safe placement exists | Pause/resume next; window-follow capture and camera later |
+| Record and stop | Display or region, computer sound and selected microphone, countdown; Stop outside the capture or hotkey/bar stop when no safe placement exists | Pause/resume in source builds after 0.3.0; window-follow capture and camera later |
 | Video review | Playback, trim and middle cuts, sound on/off, timed blur/redaction, arrows, boxes, labels and steps, undo/redo, copy/save MP4 | Crop/zoom, speed sections and GIF export |
 | Distribution | Published Arch package, source archive, PKGBUILD, checksums, desktop entry and license notices | Optional sharing and updates need their own design |
 
@@ -28,12 +28,22 @@ MatteShot excludes its recording control through Windows capture APIs.
 Omaframe's KMS capture includes the composited display, so it places Stop
 outside the capture or uses the configured stop key and Omarchy bar.
 
-## Next work
+## Since 0.3.0
 
-Recording pause/resume is the next feature. Verify recorder support and
-audio/video timing, keep the control
-compact, and cover pause, resume, stop while paused and finalized output with
-regression tests. Pause/resume is planned, not part of 0.3.0.
+Source builds add Pause/Resume to the recording control, a timer that excludes
+paused intervals, and instance-specific pause/resume commands for recordings
+without a visible control. Stop works while paused. The recorder suite covers
+repeated transitions, rejected or lost replies, and normal finalization.
+This is not part of the published 0.3.0 package.
+
+GPU Screen Recorder 6.1.0 already supports the private `set-paused` control and
+a shared pause-aware video/audio clock. See its [6.1.0 control documentation](https://git.dec05eba.com/gpu-screen-recorder/tree/README.md?h=6.1.0).
+Omaframe waits for the backend's reply before changing its displayed state.
+If a sent request loses its reply, it saves the recording because the pause
+state cannot be confirmed. Fixture and isolated UI checks do not measure
+physical microphone quality or GPU-specific capture timing.
+
+## Possible next work
 
 Manual crop/zoom is a possible later addition. Camera, automatic focus,
 captions, clip assembly and other large editor features remain backlog.

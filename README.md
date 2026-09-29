@@ -120,7 +120,18 @@ keeps the capture exactly as it was.
 
 Omaframe follows your Omarchy theme and updates when you switch themes.
 
-There is no pause, webcam overlay or zoom yet. Marks on a video stay in place:
+Source builds after 0.3.0 add Pause and Resume beside Stop. Pausing keeps the
+same recording open and leaves the paused interval out of the saved video
+and audio. The timer counts recorded time. You can still take screenshots
+while paused, and Stop saves the clip normally.
+
+When a whole-display recording has no visible control, use
+`omaframe --pause-recording`, `omaframe --resume-recording`, or bind
+`omaframe --toggle-recording-pause` to a key of your choice. These commands
+control only the current Omaframe recording and fail if it is not ready.
+Print and Alt+Print keep their existing behavior.
+
+There is no webcam overlay or zoom yet. Marks on a video stay in place:
 they do not follow something that moves or scrolls.
 
 ## Uninstall

@@ -67,6 +67,12 @@ int main(int argc, char **argv) {
        "Omaframe recording."});
   parser.addOption({"stop-recording",
                     "Stop an Omaframe recording; fail if none is active."});
+  parser.addOption(
+      {"pause-recording", "Pause the current Omaframe recording."});
+  parser.addOption(
+      {"resume-recording", "Resume the current Omaframe recording."});
+  parser.addOption({"toggle-recording-pause",
+                    "Pause or resume the current Omaframe recording."});
   parser.addOption({"studio", "Open the Omaframe window."});
   parser.addOption({"capture", "Capture a region immediately."});
   parser.addOption({"repeat", "Capture the last selected screen area again."});
@@ -79,13 +85,20 @@ int main(int argc, char **argv) {
       parser.positionalArguments().isEmpty()
           ? QString()
           : QFileInfo(parser.positionalArguments().first()).absoluteFilePath();
-  const QString command = parser.isSet("stop-recording") ? "stop-recording"
-                          : parser.isSet("record")       ? "record"
-                          : !file.isEmpty()              ? "open"
-                          : parser.isSet("studio")       ? "studio"
-                          : parser.isSet("repeat")       ? "repeat"
-                          : parser.isSet("screen")       ? "screen"
-                                                         : "capture";
+  const QString command =
+      parser.isSet("stop-recording")           ? "stop-recording"
+      : parser.isSet("pause-recording")        ? "pause-recording"
+      : parser.isSet("resume-recording")       ? "resume-recording"
+      : parser.isSet("toggle-recording-pause") ? "toggle-recording-pause"
+      : parser.isSet("record")                 ? "record"
+      : !file.isEmpty()                        ? "open"
+      : parser.isSet("studio")                 ? "studio"
+      : parser.isSet("repeat")                 ? "repeat"
+      : parser.isSet("screen")                 ? "screen"
+                                               : "capture";
+  const bool recordingControl =
+      command == "stop-recording" || command == "pause-recording" ||
+      command == "resume-recording" || command == "toggle-recording-pause";
   const QString socketName =
       QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) +
       "/omaframe-" +
@@ -106,14 +119,14 @@ int main(int argc, char **argv) {
             .toJson(QJsonDocument::Compact) +
         '\n');
     client.waitForBytesWritten(1000);
-    if (command == "stop-recording") {
-      if (client.bytesAvailable() == 0 && !client.waitForReadyRead(2000))
+    if (recordingControl) {
+      if (client.bytesAvailable() == 0 && !client.waitForReadyRead(4000))
         return 1;
       return client.readAll().trimmed() == "ok" ? 0 : 1;
     }
     return 0;
   }
-  if (command == "stop-recording")
+  if (recordingControl)
     return 1;
   QLocalServer::removeServer(socketName);
   QLocalServer server;
@@ -652,6 +665,22 @@ int main(int argc, char **argv) {
         const auto request =
             QJsonDocument::fromJson(client->readLine()).object();
         const auto cmd = request.value("command").toString();
+        if (cmd == "pause-recording" || cmd == "resume-recording" ||
+            cmd == "toggle-recording-pause") {
+          QObject::connect(&recorder, &Recorder::pauseFinished, client,
+                           [client](bool success) {
+                             client->write(success ? "ok\n" : "unhandled\n");
+                             client->disconnectFromServer();
+                           });
+          const bool paused =
+              cmd == "pause-recording" ||
+              (cmd == "toggle-recording-pause" && recorder.state() != "paused");
+          if (!recorder.setPaused(paused)) {
+            client->write("unhandled\n");
+            client->disconnectFromServer();
+          }
+          return;
+        }
         const bool stopping =
             cmd == "stop-recording" || (cmd == "record" && recorder.active());
         if (stopping) {

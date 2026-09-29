@@ -1,14 +1,17 @@
 #pragma once
 #include <QElapsedTimer>
 #include <QJsonArray>
+#include <QLocalSocket>
 #include <QMargins>
 #include <QObject>
 #include <QProcess>
 #include <QRect>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
+#include <memory>
 
 namespace Recording {
 struct Display {
@@ -51,6 +54,7 @@ class Recorder final : public QObject {
   Q_PROPERTY(QString status READ status NOTIFY changed)
   Q_PROPERTY(bool active READ active NOTIFY changed)
   Q_PROPERTY(QString elapsed READ elapsed NOTIFY changed)
+  Q_PROPERTY(bool pausePending READ pausePending NOTIFY changed)
   Q_PROPERTY(int remaining READ remaining NOTIFY changed)
   Q_PROPERTY(QStringList displays READ displays NOTIFY changed)
   Q_PROPERTY(QVariantList microphones READ microphones NOTIFY changed)
@@ -74,10 +78,12 @@ class Recorder final : public QObject {
   Q_PROPERTY(QString savedPath READ savedPath NOTIFY changed)
 public:
   explicit Recorder(QObject *parent = nullptr);
+  ~Recorder() override;
   QString state() const { return m_state; }
   QString status() const { return m_status; }
   bool active() const;
   QString elapsed() const;
+  bool pausePending() const { return m_pausePending; }
   int remaining() const { return m_remaining; }
   QStringList displays() const;
   QVariantList microphones() const { return m_mics; }
@@ -125,6 +131,11 @@ public:
                       bool startAfterSelection = false);
   Q_INVOKABLE void start();
   Q_INVOKABLE void stop();
+  /** Returns false when recording is not ready or another request is pending.
+   *  pauseFinished reports the backend's reply, including idempotent requests.
+   */
+  Q_INVOKABLE bool setPaused(bool paused);
+  Q_INVOKABLE void togglePause() { setPaused(m_state != "paused"); }
   Q_INVOKABLE void cancel();
   /** Shows setup for the current target, e.g. from the capture bar. */
   Q_INVOKABLE void showSetup();
@@ -140,6 +151,7 @@ signals:
   void controlRequested();
   void dismissRequested();
   void completed(const QUrl &path);
+  void pauseFinished(bool success);
 
 private:
   void setTarget(const QString &, const QRect &, bool full);
@@ -151,6 +163,9 @@ private:
   void refreshBar() const;
   void fail(const QString &);
   void validateResult(int exitCode, QProcess::ExitStatus status);
+  void finishPause(bool success, const QString &error = {},
+                   bool uncertain = false);
+  void freezeClock();
   QString m_state = "idle", m_status, m_screen, m_target, m_path, m_error,
           m_defaultSink, m_preferredMic, m_stopKey;
   QList<Recording::Display> m_displays;
@@ -160,6 +175,11 @@ private:
   QProcess m_process;
   QTimer m_tick, m_countdownTick, m_startupCheck;
   QElapsedTimer m_clock;
+  QLocalSocket m_pauseSocket;
+  QTimer m_pauseTimeout;
+  std::unique_ptr<QTemporaryDir> m_controlDir;
+  qint64 m_recordedMs = 0;
+  bool m_pausePending = false, m_pauseTarget = false, m_pauseSent = false;
   const bool m_barStop =
       !QStandardPaths::findExecutable("omarchy-shell").isEmpty();
   bool m_desktop = false, m_microphone = false, m_cursor = true, m_full = false;
