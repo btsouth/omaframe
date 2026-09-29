@@ -40,7 +40,7 @@ Window {
         RowLayout {
             anchors.fill: parent
             anchors.margins: 7
-            spacing: 8
+            spacing: 6
             Rectangle {
                 id: dot
                 width: 8; height: 8
@@ -56,54 +56,63 @@ Window {
                     onStopped: dot.opacity = 1
                 }
             }
-            Text {
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: control.countdownOnly
-                      ? "Recording in " + recorder.remaining + (recorder.stopKey.length ? " · " + recorder.stopKey + " stops it" : "")
-                      : recorder.state === "countdown" ? "Starting in " + recorder.remaining
-                      : recorder.state === "starting" ? "Starting…"
-                      : recorder.state === "stopping" ? "Saving…"
-                      : control.paused ? "Paused" : recorder.elapsed
-                elide: Text.ElideRight
-                font.pixelSize: 13
-                font.family: theme.fontFamily
-                color: theme.text
-                ToolTip.visible: !control.countdownOnly && (timerHover.hovered || recorder.status.indexOf("Could not") === 0)
-                ToolTip.text: recorder.status.indexOf("Could not") === 0 ? recorder.status
-                              : control.paused ? "Paused at " + recorder.elapsed : recorder.status
-                ToolTip.delay: 500
-                HoverHandler { id: timerHover }
+                spacing: 1
+                Text {
+                    Layout.fillWidth: true
+                    text: control.countdownOnly
+                          ? "Recording in " + recorder.remaining
+                          : recorder.state === "countdown" ? "Starting in " + recorder.remaining
+                          : recorder.state === "starting" ? "Starting…"
+                          : recorder.state === "stopping" ? "Saving…"
+                          : control.paused ? "Paused" : recorder.elapsed
+                    elide: Text.ElideRight
+                    font.pixelSize: 13
+                    font.family: theme.fontFamily
+                    color: theme.text
+                    ToolTip.visible: !control.countdownOnly && recorder.status.indexOf("Could not") === 0
+                    ToolTip.text: recorder.status
+                    ToolTip.delay: 500
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: control.countdownOnly
+                    text: recorder.stopKey + " stops" + (recorder.pauseKey.length ? " · " + recorder.pauseKey + " pauses" : "")
+                    color: theme.muted
+                    font.family: theme.fontFamily
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
             }
             StudioButton {
                 objectName: "recordingPause"
                 visible: control.live || control.paused
                 enabled: !recorder.pausePending
-                implicitWidth: 32
+                implicitWidth: 74
                 implicitHeight: 32
                 padding: 7
-                glyph: control.paused ? "play" : "pause"
-                hint: control.paused ? "Resume recording" : "Pause recording"
+                text: control.paused ? "Resume" : "Pause"
                 onClicked: recorder.togglePause()
             }
             Button {
                 id: stop
                 text: recorder.state === "countdown" ? "Cancel" : "Stop"
                 enabled: recorder.state !== "stopping"
-                implicitWidth: 72; implicitHeight: 32
+                implicitWidth: 60; implicitHeight: 32
                 hoverEnabled: true
                 onClicked: recorder.stop()
                 Accessible.name: recorder.state === "countdown" ? "Cancel recording" : "Stop recording"
-                ToolTip.visible: hovered && recorder.stopKey.length > 0 && !control.countdownOnly
-                ToolTip.text: recorder.stopKey + " also stops"
-                ToolTip.delay: 500
+                Accessible.description: recorder.stopKey.length ? recorder.stopKey + " also stops" : ""
                 readonly property color fill: stop.down ? theme.mix(theme.recording, theme.background, 0.2) : stop.hovered ? theme.mix(theme.recording, theme.text, 0.14) : theme.recording
                 background: Rectangle {radius: theme.radius; color: stop.fill}
-                contentItem: RowLayout {
-                    spacing: 7
-                    Item {Layout.fillWidth: true}
-                    Rectangle {visible: recorder.state !== "countdown"; width: 9; height: 9; color: theme.readableOn(stop.fill)}
-                    Text {text: stop.text; color: theme.readableOn(stop.fill); font.family: theme.fontFamily; font.bold: true; font.pixelSize: 13}
-                    Item {Layout.fillWidth: true}
+                contentItem: Item {
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Rectangle {visible: recorder.state !== "countdown"; width: 9; height: 9; anchors.verticalCenter: parent.verticalCenter; color: theme.readableOn(stop.fill)}
+                        Text {text: stop.text; color: theme.readableOn(stop.fill); font.family: theme.fontFamily; font.bold: true; font.pixelSize: 13}
+                    }
                 }
             }
         }

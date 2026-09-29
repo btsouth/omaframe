@@ -1,8 +1,8 @@
-/** @fileoverview Omaframe's two global shortcuts on Omarchy/Hyprland.
+/** @fileoverview Omaframe's capture shortcuts on Omarchy/Hyprland.
  *
- * Print takes a screenshot and Alt+Print starts or stops a recording. Setup
- * replaces only Omarchy's stock bindings for those keys, and only when the
- * user asks. Custom bindings are always left alone. */
+ * Print takes a screenshot, Alt+Print starts or stops recording, and
+ * Alt+Shift+Print pauses or resumes. Setup changes free keys or stock capture
+ * bindings only when the user asks. Custom bindings are always left alone. */
 #pragma once
 #include <QJsonArray>
 #include <QJsonObject>
@@ -10,14 +10,14 @@
 #include <QString>
 
 namespace Shortcuts {
-enum class Action { Screenshot, Record };
+enum class Action { Screenshot, Record, Pause };
 /** A readable key combination, e.g. "Alt+Print" or "Super+Shift+S". */
 QString keyLabel(const QJsonObject &bind);
 /** Whether `bind` runs Omaframe for `action`. */
 bool runsOmaframe(const QJsonObject &bind, Action action);
 /** The key that runs Omaframe for `action`, or empty when none does. */
 QString omaframeKey(const QJsonArray &binds, Action action);
-/** The default key for `action`: Print, or Alt+Print. */
+/** The default key for `action`: Print, Alt+Print, or Alt+Shift+Print. */
 QString defaultKey(Action action);
 /** What the default key does now: "omaframe", "stock" (Omarchy's own
  *  action, safe to replace), "none", or "custom". */
@@ -40,8 +40,10 @@ class ShortcutSetup final : public QObject {
   Q_OBJECT
   Q_PROPERTY(QString screenshotKey READ screenshotKey NOTIFY changed)
   Q_PROPERTY(QString recordKey READ recordKey NOTIFY changed)
+  Q_PROPERTY(QString pauseKey READ pauseKey NOTIFY changed)
   Q_PROPERTY(QString screenshotState READ screenshotState NOTIFY changed)
   Q_PROPERTY(QString recordState READ recordState NOTIFY changed)
+  Q_PROPERTY(QString pauseState READ pauseState NOTIFY changed)
   Q_PROPERTY(bool canSetUp READ canSetUp NOTIFY changed)
   Q_PROPERTY(bool ready READ ready NOTIFY changed)
   Q_PROPERTY(bool checking READ checking NOTIFY changed)
@@ -51,11 +53,14 @@ public:
   explicit ShortcutSetup(QObject *parent = nullptr);
   QString screenshotKey() const { return m_screenshotKey; }
   QString recordKey() const { return m_recordKey; }
+  QString pauseKey() const { return m_pauseKey; }
   QString screenshotState() const { return m_screenshotState; }
   QString recordState() const { return m_recordState; }
+  QString pauseState() const { return m_pauseState; }
   bool canSetUp() const;
   bool ready() const {
-    return !m_screenshotKey.isEmpty() && !m_recordKey.isEmpty();
+    return !m_screenshotKey.isEmpty() && !m_recordKey.isEmpty() &&
+           !m_pauseKey.isEmpty();
   }
   bool checking() const { return m_checking; }
   /** False when Hyprland could not be asked for its bindings. */
@@ -64,15 +69,16 @@ public:
   Q_INVOKABLE void refresh();
   /** Binds every default key that is free or still Omarchy's stock action. */
   Q_INVOKABLE void setUp();
-  /** Binds only the recording key, for recording setup. */
+  /** Binds free start/stop and pause keys, for recording setup. */
   Q_INVOKABLE void setUpRecording();
 signals:
   void changed();
 
 private:
   void run(const QList<Shortcuts::Action> &actions);
-  QString m_screenshotKey, m_recordKey, m_screenshotState = "unknown",
-      m_recordState = "unknown", m_message;
+  QString m_screenshotKey, m_recordKey, m_pauseKey,
+      m_screenshotState = "unknown", m_recordState = "unknown",
+      m_pauseState = "unknown", m_message;
   bool m_checking = false, m_available = false;
   int m_generation = 0;
 };

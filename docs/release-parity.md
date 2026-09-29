@@ -30,10 +30,12 @@ outside the capture or uses the configured stop key and Omarchy bar.
 
 ## Since 0.3.0
 
-Source builds add Pause/Resume to the recording control, a timer that excludes
-paused intervals, and instance-specific pause/resume commands for recordings
-without a visible control. Stop works while paused. The recorder suite covers
-repeated transitions, rejected or lost replies, and normal finalization.
+Source builds add labeled Pause/Resume controls and a timer that excludes
+paused intervals. Optional shortcut setup adds Alt+Shift+Print for pause/resume
+when that key is free, including recordings without a visible control.
+Instance-specific commands remain available for scripts and custom keys.
+Stop works while paused. The recorder suite covers repeated transitions,
+rejected or lost replies, normal finalization and preserving custom shortcuts.
 This is not part of the published 0.3.0 package.
 
 GPU Screen Recorder 6.1.0 already supports the private `set-paused` control and

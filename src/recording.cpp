@@ -362,6 +362,9 @@ bool Recorder::canStart() const {
          (!m_desktop || !m_defaultSink.isEmpty());
 }
 QString Recorder::controlLocation() const {
+  const QString pause = m_pauseKey.isEmpty()
+                            ? QString()
+                            : " " + m_pauseKey + " pauses or resumes.";
   const QString also =
       stopShortcut() ? " " + m_stopKey + " also stops it." : QString();
   if (!hasTarget())
@@ -375,8 +378,10 @@ QString Recorder::controlLocation() const {
            also;
   if (stopShortcut())
     return "No Stop button is shown, so nothing from Omaframe is in the "
-           "video. Stop with " + m_stopKey +
-           (m_barStop ? " or the recording icon in the Omarchy bar." : ".");
+           "video. Stop with " +
+           m_stopKey +
+           (m_barStop ? " or the recording icon in the Omarchy bar." : ".") +
+           pause;
   if (m_full)
     return "With the whole display recorded, no Stop button is shown so none "
            "ends up in the video. Set up a stop shortcut to record it.";
@@ -407,6 +412,12 @@ void Recorder::setStopKey(const QString &key) {
   updateSetupStatus();
   emit changed();
 }
+void Recorder::setPauseKey(const QString &key) {
+  if (m_pauseKey != key) {
+    m_pauseKey = key;
+    emit changed();
+  }
+}
 void Recorder::prepare(bool showSetup) {
   if (active())
     return;
@@ -432,7 +443,7 @@ void Recorder::prepare(bool showSetup) {
   struct Result {
     QList<Recording::Display> displays;
     QVariantList mics;
-    QString sink, defaultMic, stopKey;
+    QString sink, defaultMic, stopKey, pauseKey;
     bool other = false;
   };
   auto *watcher = new QFutureWatcher<Result>(this);
@@ -447,6 +458,7 @@ void Recorder::prepare(bool showSetup) {
             m_defaultSink = r.sink;
             m_otherRecorder = r.other;
             m_stopKey = r.stopKey;
+            m_pauseKey = r.pauseKey;
             m_mic = -1;
             QString wanted = m_preferredMic;
             if (wanted.isEmpty()) {
@@ -511,9 +523,10 @@ void Recorder::prepare(bool showSetup) {
       r.sink = sink + ".monitor";
     r.other = !command("pgrep", {"-f", "^([^ ]*/)?gpu-screen-recorder( |$)"})
                    .isEmpty();
-    r.stopKey = Shortcuts::omaframeKey(
-        QJsonDocument::fromJson(command("hyprctl", {"-j", "binds"})).array(),
-        Shortcuts::Action::Record);
+    const auto binds =
+        QJsonDocument::fromJson(command("hyprctl", {"-j", "binds"})).array();
+    r.stopKey = Shortcuts::omaframeKey(binds, Shortcuts::Action::Record);
+    r.pauseKey = Shortcuts::omaframeKey(binds, Shortcuts::Action::Pause);
     return r;
   }));
 }

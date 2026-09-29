@@ -146,8 +146,10 @@ int main(int argc, char **argv) {
   ShortcutSetup shortcuts;
   // Setting up the recording shortcut also gives the recorder its stop key.
   QObject::connect(&shortcuts, &ShortcutSetup::changed, &recorder, [&] {
-    if (shortcuts.available() && !shortcuts.checking())
+    if (shortcuts.available() && !shortcuts.checking()) {
       recorder.setStopKey(shortcuts.recordKey());
+      recorder.setPauseKey(shortcuts.pauseKey());
+    }
   });
   QObject::connect(&studio, &Studio::videoRequested, &video, &Video::open);
   // Chrome follows the live Omarchy theme and the `monospace` font alias,
