@@ -5,8 +5,10 @@ import QtQuick.Controls.Basic
 // Hyprland corners are rounded and square when they are sharp.
 CheckBox {
     id: control
-    implicitHeight: 36
-    implicitWidth: label.implicitWidth + 58
+    implicitHeight: Math.max(36, label.implicitHeight)
+    implicitWidth: label.implicitWidth + 6
+    padding: 0
+    rightPadding: 6
     hoverEnabled: true
     font.family: theme.fontFamily
     font.pixelSize: 13
@@ -36,6 +38,7 @@ CheckBox {
         id: label
         leftPadding: 52
         text: control.text
+        wrapMode: Text.Wrap
         verticalAlignment: Text.AlignVCenter
         color: theme.text
         font: control.font

@@ -9,7 +9,7 @@ ApplicationWindow {
     width: 1360
     height: 900
     minimumWidth: 900
-    minimumHeight: 620
+    minimumHeight: 520
     title: "Omaframe"
     color: theme.alpha(theme.background, 1)
     font.family: theme.fontFamily
@@ -260,7 +260,7 @@ ApplicationWindow {
         id: action
         property string detail: ""
         Layout.fillWidth: true
-        implicitHeight: detail.length ? 52 : 40
+        implicitHeight: Math.max(detail.length ? 52 : 40, implicitContentHeight + topPadding + bottomPadding)
         contentItem: RowLayout {
             spacing: 10
             Glyph {
@@ -273,6 +273,7 @@ ApplicationWindow {
                 spacing: 2
                 Layout.fillWidth: true
                 Text {
+                    Layout.fillWidth: true
                     text: action.text
                     color: action.ink
                     font.family: theme.fontFamily
@@ -280,11 +281,13 @@ ApplicationWindow {
                     font.weight: action.primary ? Font.DemiBold : Font.Normal
                 }
                 Text {
+                    Layout.fillWidth: true
                     visible: text.length > 0
                     text: action.detail
                     color: action.primary ? theme.alpha(theme.onAccent, 0.8) : theme.muted
                     font.family: theme.fontFamily
                     font.pixelSize: 11
+                    wrapMode: Text.Wrap
                 }
             }
         }
@@ -296,6 +299,7 @@ ApplicationWindow {
         width: 340
         padding: 14
         modal: true
+        focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         Overlay.modal: Rectangle { color: "transparent" }
         background: Rectangle {
@@ -352,6 +356,7 @@ ApplicationWindow {
         height: Math.min(settingsColumn.implicitHeight + 36, root.height - 90)
         padding: 18
         modal: true
+        focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         Overlay.modal: Rectangle { color: "transparent" }
         onOpened: shortcuts.refresh()
@@ -401,6 +406,8 @@ ApplicationWindow {
                 Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
                 SectionLabel { text: "AFTER A CAPTURE IS COPIED" }
                 RecordToggle {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: "Show a notification with the save folder"
                     checked: notificationSetting.enabled
                     onToggled: notificationSetting.enabled = checked
@@ -408,6 +415,8 @@ ApplicationWindow {
                 Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
                 SectionLabel { text: "PRIVACY" }
                 RecordToggle {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: "Keep an unedited private copy of each capture"
                     checked: studio.keepOriginals
                     onToggled: studio.keepOriginals = checked
@@ -430,7 +439,7 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     Layout.topMargin: 4
-                    text: "Omaframe 0.2 · Everything stays on this computer. No accounts, uploads or telemetry."
+                    text: "Omaframe " + Qt.application.version + " · Everything stays on this computer. No accounts, uploads or telemetry."
                     color: theme.faint
                     font.family: theme.fontFamily
                     font.pixelSize: 11
@@ -657,7 +666,7 @@ ApplicationWindow {
                         Text { text: "How it works"; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
                         Repeater {
                             model: [
-                                "Press Print. The screen freezes. Click a window, drag an area, or press F for the display. Tab switches to video.",
+                                "Choose Screenshot above, then click a window, drag an area, or press F for the display. Tab switches to video.",
                                 "Press a number to pick a finish. It is copied and saved at once. Press E first to crop, blur or add labels.",
                                 "Paste anywhere. Screenshots go to " + root.home(studio.outputDirectory) + ", recordings to " + root.home(video.outputDirectory) + "."
                             ]
@@ -702,8 +711,14 @@ ApplicationWindow {
                                 Layout.preferredHeight: 64
                                 radius: theme.radius
                                 color: draftMouse.containsMouse ? theme.hoverFill : theme.controlFill
-                                border.width: 1
-                                border.color: theme.controlBorder
+                                border.width: activeFocus ? 2 : 1
+                                border.color: activeFocus ? theme.focusBorder : theme.controlBorder
+                                activeFocusOnTab: true
+                                Accessible.role: Accessible.Button
+                                Accessible.name: modelData.name + ". Resume edit"
+                                Accessible.onPressAction: studio.resumeDraft(modelData.id)
+                                Keys.onReturnPressed: studio.resumeDraft(modelData.id)
+                                Keys.onSpacePressed: studio.resumeDraft(modelData.id)
                                 MouseArea {
                                     id: draftMouse
                                     anchors.fill: parent
@@ -765,7 +780,8 @@ ApplicationWindow {
                     text: "Try the editor on a sample image"
                     glyph: "spark"
                     quiet: true
-                    onClicked: studio.loadDemo(0)
+                    enabled: !root.working
+                    onClicked: { studio.loadDemo(0); root.editing = true; root.tool = "select"; }
                 }
             }
         }
@@ -814,21 +830,17 @@ ApplicationWindow {
                             }
                         }
                     }
-                    Text {
+                    ColumnLayout {
                         Layout.leftMargin: 6
-                        text: studio.name
-                        elide: Text.ElideMiddle
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
                         Layout.maximumWidth: 260
-                        color: theme.text
-                        font.pixelSize: 12
-                    }
-                    Text {
-                        text: studio.dimensions
-                        color: theme.faint
-                        font.pixelSize: 12
+                        spacing: 2
+                        Text { Layout.fillWidth: true; text: studio.name; elide: Text.ElideMiddle; color: theme.text; font.pixelSize: 12 }
+                        Text { text: studio.dimensions; color: theme.faint; font.pixelSize: 10 }
                     }
                     Rectangle {
-                        visible: studio.demo
+                        visible: studio.demo && !root.narrow
                         width: 58
                         height: 19
                         radius: theme.radius
@@ -933,9 +945,11 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignHCenter
-                    text: root.editing ? (markCanvas.typing ? "Typing a label. Enter adds a line; Esc or a click outside finishes it." : root.toolDescription) : studio.rendering ? "Refining the preview…" : "Saved at full resolution · " + studio.outputDimensions + " · PNG"
+                    text: root.editing ? (markCanvas.typing ? "Typing a label. Enter adds a line; Esc or a click outside finishes it." : root.toolDescription) : studio.rendering ? "Refining the preview…" : "Output: " + studio.outputDimensions + " · PNG · full resolution"
                     font.pixelSize: 11
                     color: theme.faint
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
                     elide: Text.ElideRight
                 }
             }
@@ -947,17 +961,20 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillHeight: true
                 Layout.preferredWidth: root.narrow ? 250 : 286
+                Layout.minimumWidth: Layout.preferredWidth
+                Layout.maximumWidth: Layout.preferredWidth
                 color: theme.alpha(theme.background, 1)
                 // Edit sidebar: tools stay in one place; the selected mark's
                 // settings appear below them.
                 ScrollView {
+                    id: editSidebar
                     visible: root.editing
                     anchors.fill: parent
                     clip: true
                     contentWidth: availableWidth
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ColumnLayout {
-                        width: parent.width
+                        width: editSidebar.availableWidth
                         spacing: 10
                         Item { Layout.preferredHeight: 6 }
                         SectionLabel { Layout.leftMargin: 18; text: "TOOLS" }
@@ -975,6 +992,7 @@ ApplicationWindow {
                                     required property var modelData
                                     Layout.fillWidth: true
                                     implicitHeight: 34
+                                    padding: root.narrow ? 9 : 11
                                     text: modelData.label
                                     glyph: modelData.key
                                     selected: root.tool === modelData.key
@@ -984,8 +1002,8 @@ ApplicationWindow {
                                     contentItem: RowLayout {
                                         spacing: 8
                                         Glyph { name: toolButton.glyph; ink: toolButton.ink; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
-                                        Text { text: toolButton.text; color: toolButton.ink; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true }
-                                        Text { text: toolButton.modelData.shortcut; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 10 }
+                                        Text { text: toolButton.text; color: toolButton.ink; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+                                        Text { visible: !root.narrow; text: toolButton.modelData.shortcut; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 10 }
                                     }
                                 }
                             }
@@ -1051,8 +1069,8 @@ ApplicationWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 4
-                                StudioButton { text: "Send back"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; enabled: !studio.busy && selectedInspector.mark.layer > 1; onClicked: studio.marks.moveSelectedLayer(-1) }
-                                StudioButton { text: "Bring forward"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; enabled: !studio.busy && selectedInspector.mark.layer < selectedInspector.mark.layers; onClicked: studio.marks.moveSelectedLayer(1) }
+                                StudioButton { text: "Backward"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Move this mark one layer backward"; enabled: !studio.busy && selectedInspector.mark.layer > 1; onClicked: studio.marks.moveSelectedLayer(-1) }
+                                StudioButton { text: "Forward"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Move this mark one layer forward"; enabled: !studio.busy && selectedInspector.mark.layer < selectedInspector.mark.layers; onClicked: studio.marks.moveSelectedLayer(1) }
                             }
                             Text {
                                 visible: selectedInspector.mark.type === "text"
@@ -1092,8 +1110,9 @@ ApplicationWindow {
                                 color: theme.text
                                 font.pixelSize: 12
                             }
-                            RowLayout {
+                            Flow {
                                 visible: selectedInspector.colored
+                                Layout.fillWidth: true
                                 spacing: 6
                                 Repeater {
                                     model: ["#ffffff", "#151a20", "#e75439", "#eab841", "#459ec7", "#4ca782"]
@@ -1115,8 +1134,8 @@ ApplicationWindow {
                                 }
                                 TextField {
                                     id: colorInput
-                                    Layout.preferredWidth: 78
-                                    Layout.preferredHeight: 28
+                                    width: 78
+                                    height: 28
                                     property bool validColor: /^#[0-9a-fA-F]{6}$/.test(text)
                                     text: selectedInspector.mark.color || ""
                                     placeholderText: "#RRGGBB"
@@ -1159,7 +1178,7 @@ ApplicationWindow {
                                 visible: selectedInspector.mark.type === "text"
                                 Layout.fillWidth: true
                                 spacing: 4
-                                StudioButton { text: "Caption box"; selected: studio.marks.selectedAnnotation.textStyle === "box"; quiet: !selected; Layout.fillWidth: true; implicitHeight: 32; onClicked: studio.marks.setSelectedTextStyle("box") }
+                                StudioButton { text: "Box"; selected: studio.marks.selectedAnnotation.textStyle === "box"; quiet: !selected; Layout.fillWidth: true; implicitHeight: 32; onClicked: studio.marks.setSelectedTextStyle("box") }
                                 StudioButton { text: "Shadow"; selected: studio.marks.selectedAnnotation.textStyle === "shadow"; quiet: !selected; Layout.fillWidth: true; implicitHeight: 32; onClicked: studio.marks.setSelectedTextStyle("shadow") }
                             }
                             RowLayout {
@@ -1187,8 +1206,9 @@ ApplicationWindow {
                                 color: theme.text
                                 font.pixelSize: 12
                             }
-                            RowLayout {
+                            Flow {
                                 visible: selectedInspector.mark.type === "text" && selectedInspector.mark.textStyle === "box"
+                                Layout.fillWidth: true
                                 spacing: 6
                                 Repeater {
                                     model: ["#151a20", "#ffffff", "#e75439", "#eab841", "#459ec7", "#4ca782"]
@@ -1210,8 +1230,8 @@ ApplicationWindow {
                                 }
                                 TextField {
                                     id: boxColorInput
-                                    Layout.preferredWidth: 78
-                                    Layout.preferredHeight: 28
+                                    width: 78
+                                    height: 28
                                     property bool validColor: /^#[0-9a-fA-F]{6}$/.test(text)
                                     text: selectedInspector.mark.background || ""
                                     placeholderText: "#RRGGBB"
@@ -1264,13 +1284,14 @@ ApplicationWindow {
                 }
                 // Finish sidebar
                 ScrollView {
+                    id: finishSidebar
                     visible: !root.editing
                     anchors.fill: parent
                     clip: true
                     contentWidth: availableWidth
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ColumnLayout {
-                        width: parent.width
+                        width: finishSidebar.availableWidth
                         spacing: 14
                         Item { Layout.preferredHeight: 4 }
                         SectionLabel { Layout.leftMargin: 20; text: "FINISH" }
@@ -1478,17 +1499,14 @@ ApplicationWindow {
                             elide: Text.ElideMiddle
                             Layout.maximumWidth: 320
                         }
-                        Text {
+                        StudioButton {
                             text: "Change"
-                            color: theme.selectedText
+                            quiet: true
+                            implicitHeight: 24
+                            padding: 6
                             font.pixelSize: 10
-                            Accessible.role: Accessible.Button
                             Accessible.name: root.videoMode ? "Change the recordings folder" : "Change the screenshots folder"
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.videoMode ? videoFolderDialog.open() : imageFolderDialog.open()
-                            }
+                            onClicked: root.videoMode ? videoFolderDialog.open() : imageFolderDialog.open()
                         }
                     }
                 }
@@ -1519,7 +1537,7 @@ ApplicationWindow {
                 }
                 StudioButton {
                     readonly property string label: root.working ? "Working…"
-                        : root.videoMode ? (root.recordingReview ? (root.videoUnchanged || root.videoSavedCurrent ? "Copy and close" : "Save and copy") : root.videoSavedCurrent ? "Saved" : "Export video")
+                        : root.videoMode ? (root.recordingReview ? (root.videoUnchanged || root.videoSavedCurrent ? "Copy and close" : "Save and copy") : root.videoSavedCurrent ? "Saved" : root.videoUnchanged ? "No edits yet" : "Export video")
                         : studio.recoveryAction.length ? studio.recoveryAction : "Copy and save"
                     text: label
                     hint: root.videoMode ? (root.recordingReview && (root.videoUnchanged || root.videoSavedCurrent) ? "The video is saved in " + root.home(video.outputDirectory) + ". Copy it to the clipboard and close · Ctrl+S" : root.recordingReview ? "Save a new MP4 with your changes, copy it and close · Ctrl+S" : "Save a new MP4 with your changes · Ctrl+S") : "Copy to the clipboard and save a PNG · Ctrl+C"

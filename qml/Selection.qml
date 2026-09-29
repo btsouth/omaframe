@@ -248,6 +248,7 @@ Window {
         property string label
         property string glyph
         property bool on: false
+        property bool checkable: true
         property string hint
         signal activated()
         Layout.fillHeight: true
@@ -256,8 +257,8 @@ Window {
         color: toggleMouse.pressed ? theme.pressedFill : on ? theme.selectedFill : toggleMouse.containsMouse ? theme.hoverFill : "transparent"
         border.width: on ? 0 : 1
         border.color: theme.controlBorder
-        Accessible.role: Accessible.CheckBox
-        Accessible.name: label
+        Accessible.role: checkable ? Accessible.CheckBox : Accessible.Button
+        Accessible.name: label.length ? label : hint
         Accessible.checked: on
         RowLayout {
             id: toggleRow
@@ -329,6 +330,7 @@ Window {
             BarToggle {
                 label: "Whole display"
                 glyph: "display"
+                checkable: false
                 hint: (studio.recordingSelection ? "Record" : "Capture") + " this entire display · F"
                 onActivated: studio.finishSelection(window.monitorName, 0, 0, 1, 1)
             }
@@ -352,15 +354,17 @@ Window {
                 visible: studio.recordingSelection
                 label: recorder.countdown === 0 ? "No delay" : recorder.countdown + " s"
                 glyph: "timer"
+                checkable: false
                 on: recorder.countdown > 0
                 hint: "Countdown before recording starts"
                 onActivated: window.cycleCountdown()
             }
             BarToggle {
                 visible: studio.recordingSelection
-                label: ""
+                label: window.width >= 900 ? "Options" : ""
                 glyph: "settings"
-                implicitWidth: 34
+                implicitWidth: window.width >= 900 ? 90 : 34
+                checkable: false
                 hint: "More recording options"
                 onActivated: studio.recordingOptions(window.monitorName)
             }
@@ -372,6 +376,24 @@ Window {
                 MouseArea {anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studio.cancelSelection()}
             }
             Text {visible: bar.showHints; text: "Cancel"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
+        }
+    }
+    Rectangle {
+        visible: !bar.showPrompt && !(studio.recordingSelection && recorder.state === "loading")
+        anchors.horizontalCenter: bar.horizontalCenter
+        anchors.top: bar.bottom
+        anchors.topMargin: 8
+        width: Math.min(window.width - 32, selectionHint.implicitWidth + 24)
+        height: 30
+        radius: theme.radius
+        color: theme.alpha(theme.background, 1)
+        Text {
+            id: selectionHint
+            anchors.centerIn: parent
+            text: studio.recordingSelection ? "Click a window or drag an area to record" : "Click a window or drag an area"
+            color: theme.text
+            font.family: theme.fontFamily
+            font.pixelSize: 12
         }
     }
     // Recording options load in the background; say so if they are slow.
