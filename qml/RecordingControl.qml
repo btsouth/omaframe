@@ -71,11 +71,9 @@ Window {
                     font.pixelSize: 13
                     font.family: theme.fontFamily
                     color: theme.text
-                    ToolTip.visible: !control.countdownOnly && (timerHover.hovered || recorder.status.indexOf("Could not") === 0)
-                    ToolTip.text: recorder.status.indexOf("Could not") === 0 ? recorder.status
-                                  : control.paused ? "Paused at " + recorder.elapsed : recorder.status
+                    ToolTip.visible: !control.countdownOnly && recorder.status.indexOf("Could not") === 0
+                    ToolTip.text: recorder.status
                     ToolTip.delay: 500
-                    HoverHandler { id: timerHover }
                 }
                 Text {
                     Layout.fillWidth: true
@@ -95,7 +93,6 @@ Window {
                 implicitHeight: 32
                 padding: 7
                 text: control.paused ? "Resume" : "Pause"
-                hint: control.paused ? "Resume recording" : "Pause recording"
                 onClicked: recorder.togglePause()
             }
             Button {
@@ -106,9 +103,7 @@ Window {
                 hoverEnabled: true
                 onClicked: recorder.stop()
                 Accessible.name: recorder.state === "countdown" ? "Cancel recording" : "Stop recording"
-                ToolTip.visible: hovered && recorder.stopKey.length > 0 && !control.countdownOnly
-                ToolTip.text: recorder.stopKey + " also stops"
-                ToolTip.delay: 500
+                Accessible.description: recorder.stopKey.length ? recorder.stopKey + " also stops" : ""
                 readonly property color fill: stop.down ? theme.mix(theme.recording, theme.background, 0.2) : stop.hovered ? theme.mix(theme.recording, theme.text, 0.14) : theme.recording
                 background: Rectangle {radius: theme.radius; color: stop.fill}
                 contentItem: Item {
