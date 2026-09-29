@@ -10,7 +10,9 @@ depends=('hyprland' 'qt6-base' 'qt6-declarative' 'qt6-multimedia'
          'qt6-wayland' 'layer-shell-qt' 'wayland' 'wl-clipboard' 'ffmpeg'
          'libpulse' 'procps-ng' 'xdg-utils' 'hicolor-icon-theme'
          'gpu-screen-recorder>=6.1.0')
-optdepends=('libnotify: notification after a quick screenshot')
+optdepends=('libnotify: notification after a quick screenshot'
+            'tesseract: spot possible secrets and copy the text in a screenshot'
+            'tesseract-data-eng: English text for tesseract')
 makedepends=('cmake' 'ninja' 'pkgconf' 'wayland-protocols')
 options=('!debug')
 source=("https://github.com/btsouth/omaframe/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.gz")

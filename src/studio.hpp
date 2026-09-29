@@ -8,6 +8,8 @@
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
+#include <atomic>
+#include <memory>
 
 class ImageStore final : public QQuickImageProvider {
 public:
@@ -61,8 +63,16 @@ class Studio final : public QObject {
   /** Notify after a quick screenshot is copied and saved. */
   Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
   Q_PROPERTY(QSize sourceSize READ sourceSize NOTIFY changed)
+  /** Whether the text in this image can be read: tesseract is installed and
+   *  the image is not a sample. */
+  Q_PROPERTY(bool canReadText READ canReadText NOTIFY changed)
+  /** Possible secrets that no redaction or blur covers yet. */
+  Q_PROPERTY(int secretCount READ secretCount NOTIFY changed)
+  /** A short note about reading or copying the text, or empty. */
+  Q_PROPERTY(QString textNote READ textNote NOTIFY changed)
 public:
   explicit Studio(ImageStore *store, bool withDemo = true);
+  ~Studio() override;
   int revision() const { return m_revision; }
   bool hasImage() const { return !m_original.isNull(); }
   int style() const { return m_options.style; }
@@ -97,6 +107,9 @@ public:
   /** The cropped image the editor shows, and the whole capture, in pixels. */
   QSize workingSize() const { return m_workingSize; }
   QSize sourceSize() const { return m_original.size(); }
+  bool canReadText() const { return m_reading || m_textRead; }
+  int secretCount() const { return uncoveredSecrets().size(); }
+  QString textNote() const;
   QString originalsFolder() const;
   QString pointerMonitor() const { return m_pointerMonitor; }
   void setPointerMonitor(const QString &name) {
@@ -162,6 +175,10 @@ public:
   Q_INVOKABLE void openEditor();
   Q_INVOKABLE void showFinishes();
   Q_INVOKABLE void dismissQuick();
+  /** Redacts every possible secret that is not covered yet. */
+  Q_INVOKABLE void hideSecrets();
+  /** Copies the text in the image, once it has been read. */
+  Q_INVOKABLE void copyText();
 signals:
   void changed();
   void hideStudio();
@@ -187,6 +204,12 @@ private:
   void refreshDrafts();
   void invalidateSaved();
   void captureImpl(bool region, int monitor, bool repeat);
+  /** Starts reading the text in the current image in the background, and
+   *  forgets what was read from the previous one. */
+  void startReading();
+  void stopReading();
+  QVector<QRectF> uncoveredSecrets() const;
+  void writeText();
   ImageStore *m_store;
   QImage m_original;
   QHash<QString, QImage> m_frozen;
@@ -211,4 +234,11 @@ private:
   QString m_quickState = "idle", m_captureMonitor, m_pointerMonitor;
   int m_pendingFinish = -1;
   bool m_editing = false, m_thumbnailsStale = false, m_returnToStudio = false;
+  // What OCR found, only ever kept in memory. Secrets are fractions of the
+  // whole image, already grown to cover their edges.
+  QVector<QRectF> m_secrets;
+  QString m_text, m_textNote;
+  bool m_reading = false, m_textRead = false, m_copyTextPending = false;
+  int m_readGeneration = 0;
+  std::shared_ptr<std::atomic_bool> m_readCancel;
 };

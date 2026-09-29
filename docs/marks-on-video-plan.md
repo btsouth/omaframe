@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: plan. Phases 0 to 2 are built on the `marks-document` branch; the rest is not started.
+Status: phases 0 to 3 are built. Phase 4 is next. Where the build differs from this plan, a note in the phase says why.
 
 ## Goal
 
@@ -131,6 +131,15 @@ The OCR result is already there, so Ctrl+Shift+C in the picker copies the text a
 
 - OCR text and match results stay in memory. They are never written to disk or into drafts.
 - `tesseract` and `tesseract-data-eng` become optional dependencies in the PKGBUILD. Without them, the feature is simply absent: no hint and no error.
+
+### As built
+
+- Keys: H in the picker, Shift+H in the editor (H is already the highlight tool there), and T in the picker for copying text. Ctrl+Shift+C already means "copy and save" in the main window, so using it for text in the picker would have meant two things in two windows.
+- The picker shows a "Hide N possible secrets" button with an H key label, like the Edit button and its E, rather than a line of text.
+- Tesseract runs with `--psm 6`, as `omarchy-capture-text` does. Automatic layout read aligned terminal output column by column and dropped private key headers.
+- Captures up to about 4 megapixels are doubled before reading, and tall ones are read in up to four overlapping bands at once. Numbers are in `docs/capture-workflow-validation.md`.
+- Besides the header rule, two or more lines in a row of one long base64 run (not hex) count as a private key body, for keys whose header is off screen.
+- A secret counts as hidden once a redaction or blur covers 90 percent of it, so undoing the redactions brings the button back.
 
 ### Tests
 

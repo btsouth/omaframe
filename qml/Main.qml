@@ -189,6 +189,12 @@ ApplicationWindow {
         }
     }
     Shortcut {
+        // H is the highlight tool here.
+        sequence: "Shift+H"
+        enabled: root.shortcutsAllowed && root.editing && !root.videoMode && studio.secretCount > 0
+        onActivated: studio.hideSecrets()
+    }
+    Shortcut {
         sequences: ["Delete", "Backspace"]
         enabled: root.shortcutsAllowed && root.editing && !root.videoMode && studio.marks.selectedAnnotation.type !== undefined
         onActivated: studio.marks.deleteSelected()
@@ -992,6 +998,17 @@ ApplicationWindow {
                             text: "Clear crop"
                             quiet: true
                             onClicked: studio.marks.clearCrop()
+                        }
+                        StudioButton {
+                            visible: studio.secretCount > 0
+                            Layout.leftMargin: 14
+                            Layout.rightMargin: 14
+                            Layout.fillWidth: true
+                            text: "Hide " + studio.secretCount + (studio.secretCount === 1 ? " possible secret" : " possible secrets")
+                            glyph: "redact"
+                            hint: "Redact what looks like keys, tokens, emails and card numbers · Shift+H"
+                            enabled: !studio.busy
+                            onClicked: studio.hideSecrets()
                         }
                         Rectangle {
                             Layout.leftMargin: 14

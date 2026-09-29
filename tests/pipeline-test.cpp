@@ -9,6 +9,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFontDatabase>
+#include <QPainter>
 #include <QProcess>
 #include <QScreen>
 #include <QSettings>
@@ -610,6 +612,64 @@ private slots:
     reopened.deleteDraft(secondId);
     QVERIFY(!QFileInfo::exists(image.absoluteFilePath()));
     QVERIFY(!QFileInfo::exists(metadata.absoluteFilePath()));
+  }
+  void possibleSecretsCanBeHiddenAndTextCopied() {
+    if (QStandardPaths::findExecutable("tesseract").isEmpty())
+      QSKIP("tesseract is not installed");
+    QImage source(900, 150, QImage::Format_RGB32);
+    source.fill(QColor("#1e1e2e"));
+    {
+      QPainter painter(&source);
+      QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+      font.setPixelSize(18);
+      painter.setFont(font);
+      painter.setPen(QColor("#cdd6f4"));
+      painter.drawText(24, 50, "export TOKEN=ghp_R8x2KqLm4Vn7Pz9Wt3Ys6Bd1Fh5Jc0Ae2Gk");
+      painter.drawText(24, 100, "Build finished in 4 seconds");
+    }
+    const QString path = temp.filePath("secret.png");
+    QVERIFY(source.save(path));
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.open(QUrl::fromLocalFile(path));
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy(), 8000);
+    QVERIFY(studio.canReadText());
+    // Asked before the text is read: it waits, then copies.
+    studio.copyText();
+    QVERIFY(studio.textNote() == "Reading text…" ||
+            studio.textNote() == "Copied the text.");
+    QTRY_VERIFY_WITH_TIMEOUT(studio.textNote() == "Copied the text.", 20000);
+    QProcess paste;
+    paste.start("wl-paste", {"--no-newline"});
+    QVERIFY(paste.waitForFinished(3000));
+    QVERIFY(QString::fromUtf8(paste.readAllStandardOutput())
+                .contains("Build finished in 4 seconds"));
+    QCOMPARE(studio.secretCount(), 1);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 8000);
+    studio.hideSecrets();
+    QCOMPARE(studio.secretCount(), 0);
+    QCOMPARE(studio.marks()->edits().size(), 1);
+    QCOMPARE(studio.marks()->edits().first().type, QString("redact"));
+    QVERIFY(studio.textNote().startsWith("Hid 1 possible secret."));
+    // An ordinary mark: one undo brings the secret back.
+    studio.marks()->undo();
+    QCOMPARE(studio.secretCount(), 1);
+    studio.marks()->redo();
+    QCOMPARE(studio.secretCount(), 0);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 8000);
+    studio.saveDraftNow();
+    // What was read never reaches the disk.
+    const QDir drafts(QStandardPaths::writableLocation(
+                          QStandardPaths::AppLocalDataLocation) + "/drafts");
+    for (const QString &name : drafts.entryList({"*.json"}, QDir::Files)) {
+      const QByteArray draft = contents(drafts.filePath(name));
+      QVERIFY(!draft.contains("Build finished"));
+      QVERIFY(!draft.contains("ghp_"));
+    }
+    studio.accept();
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy(), 15000);
+    const QImage saved(studio.savedPath());
+    QVERIFY(!saved.isNull());
   }
   void trimPreservesTracksMuteRemovesThem() {
     QByteArray originalHash = QCryptographicHash::hash(

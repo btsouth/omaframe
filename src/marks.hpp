@@ -59,6 +59,9 @@ public:
   Q_INVOKABLE void edit(const QString &type, double x1, double y1, double x2,
                         double y2, const QString &text = {});
   Q_INVOKABLE void addStroke(const QVariantList &points);
+  /** Redacts each area, given as fractions of the whole image, in one step
+   *  that a single undo takes back. */
+  void redactAreas(const QVector<QRectF> &areas);
   Q_INVOKABLE void undo();
   Q_INVOKABLE void redo();
   Q_INVOKABLE void resetEdits();

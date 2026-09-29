@@ -174,3 +174,40 @@ On the owner's two displays at scale 1.25 (DP-2 2560×1440 left, HDMI-A-1
 Each capture exited the process after saving. F now captures the display
 under the pointer; before that fix it used the display whose selector had
 keyboard focus.
+
+## Possible secrets and copy text, 2026-09-28
+
+Reading runs `tesseract --psm 6` with TSV output at nice 10, one thread per
+process. Captures up to about 4.2 megapixels are doubled first: at 1x, 15 px
+screen text lost dots in IP addresses and ran card digit groups together.
+Tall images are read in up to four overlapping bands side by side (half the
+cores at most). Automatic layout (`--psm 3`) was dropped because it read
+aligned terminal output column by column and skipped lines of dashes such as
+a private key's header.
+
+`Ocr::read` on this 28-core machine, worst cases filled edge to edge with 15 px
+monospace text, and one ordinary UI screenshot:
+
+| Capture | Before bands | With bands |
+| --- | --- | --- |
+| 1920×1080, full of text | 11.6 s | 4.9 s |
+| 2560×1440, full of text | 20.0 s | 7.7 s |
+| 3840×2160, 28 px text (scale 2) | 14.1 s | 5.7 s |
+| 3840×2160, 15 px text (scale 1) | 31.0 s | 10.5 s |
+| 1416×952 Omaframe window | 1.3 s | 0.8 s |
+
+Matching the words for secrets took 0 to 16 ms in every case.
+
+The picker never waits for this. In a 1920×1080 omabox with a terminal full of
+text, three `--screen` launches with tesseract on the PATH took 345, 290 and
+312 ms to show the picker and 108 to 110 ms from Enter to the saved PNG.
+Without tesseract: 304, 297 and 266 ms, and 108 ms. No tesseract process was
+left after the app quit. A dense full screen can take several seconds before
+the Hide button appears; a region or a normal window is under a second.
+
+Checked in omabox: a terminal showing a GitHub token, an AWS key, an email and
+a public IP gave "Hide 4 possible secrets" in the picker; H covered all four in
+the saved Raw PNG, and the note said "Hid 4 possible secrets. OCR can miss
+some, so check before sharing." T put the terminal's text on the clipboard. In
+the editor the same capture showed "Hide 8 possible secrets" (two terminals),
+and Shift+H redacted them in one undo step.
