@@ -76,6 +76,18 @@ private slots:
     QCOMPARE(right.value("x").toDouble(), 7.0 / 1536.0);
     QCOMPARE(right.value("w").toDouble(), 1522.0 / 1536.0);
   }
+  void poweredOffDisplaysAreLeftOut() {
+    // A desk monitor turned off while streaming from a virtual display.
+    const auto monitors = QJsonDocument::fromJson(R"([
+      {"id":1,"name":"DP-1","x":0,"y":0,"width":3440,"height":1440,"dpmsStatus":false},
+      {"id":2,"name":"SUNVD","x":20000,"y":0,"width":2560,"height":1080,"dpmsStatus":true},
+      {"id":3,"name":"HDMI-A-1","x":3440,"y":0,"width":1920,"height":1080}
+    ])").array();
+    QCOMPARE(WindowTargets::awake(monitors, {"DP-1", "SUNVD", "HDMI-A-1"}),
+             QStringList({"SUNVD", "HDMI-A-1"}));
+    QCOMPARE(WindowTargets::awake(monitors, {"DP-1"}), QStringList({"DP-1"}));
+    QCOMPARE(WindowTargets::awake({}, {"DP-1"}), QStringList({"DP-1"}));
+  }
 };
 QTEST_APPLESS_MAIN(DisplaysTest)
 #include "displays-test.moc"
