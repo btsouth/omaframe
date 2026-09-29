@@ -1,5 +1,6 @@
 #include "video.hpp"
 #include "studio.hpp"
+#include <QDataStream>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -491,31 +492,54 @@ void Video::makeThumbnails() {
     return result;
   }));
 }
+// What a mark looks like on its own, leaving out when it shows.
+static QByteArray markLook(const QVector<Frame::Edit> &edits, int index,
+                           QSize size) {
+  const Frame::Edit &edit = edits[index];
+  int number = 0;
+  if (edit.type == "step")
+    for (int i = 0; i <= index; ++i)
+      number += edits[i].type == "step";
+  QByteArray key;
+  QDataStream out(&key, QIODevice::WriteOnly);
+  out << size << edit.type << edit.from << edit.to << edit.text << edit.color
+      << edit.size << edit.textStyle << edit.textAlign << edit.background
+      << edit.backgroundOpacity << edit.points << number;
+  return key;
+}
 void Video::renderOverlays() {
-  ++m_overlayRevision;
   QVariantList list;
+  QHash<QByteArray, DrawnMark> drawn;
   const auto &edits = m_marks.edits();
   for (int i = 0; i < edits.size(); ++i) {
-    QRect area;
-    const QImage image = i == m_marks.hiddenIndex()
-                             ? QImage()
-                             : renderVideoMark(edits, i, m_frameSize, &area);
-    if (image.isNull())
+    if (i == m_marks.hiddenIndex() || !pointsInVideo(edits[i]))
       continue;
+    const QByteArray look = markLook(edits, i, m_frameSize);
+    DrawnMark mark = drawn.value(look, m_drawnMarks.value(look));
+    if (mark.image.isNull())
+      mark.image = renderVideoMark(edits, i, m_frameSize, &mark.area);
+    if (mark.image.isNull())
+      continue;
+    drawn.insert(look, mark);
     const QString name = QString("mark%1").arg(i);
     if (m_store)
-      m_store->put(name, image);
+      m_store->put(name, mark.image);
     const double width = m_frameSize.width(), height = m_frameSize.height();
     list.append(QVariantMap{
         {"index", i},
         {"start", edits[i].start},
         {"end", edits[i].end < 0 ? m_duration : edits[i].end},
-        {"x", area.x() / width},
-        {"y", area.y() / height},
-        {"w", area.width() / width},
-        {"h", area.height() / height},
-        {"source", QString("image://videomarks/%1?%2").arg(name).arg(m_overlayRevision)}});
+        {"x", mark.area.x() / width},
+        {"y", mark.area.y() / height},
+        {"w", mark.area.width() / width},
+        {"h", mark.area.height() / height},
+        // The same picture keeps the same address, so QML only reloads
+        // the marks that changed.
+        {"source", QString("image://videomarks/%1?%2")
+                       .arg(name)
+                       .arg(qHash(look), 0, 16)}});
   }
+  m_drawnMarks = drawn;
   m_overlays = list;
   emit overlaysChanged();
 }

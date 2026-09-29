@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QProcess>
 #include <QTemporaryDir>
+#include <QHash>
+#include <QImage>
 #include <QUrl>
 #include <QVariantList>
 #include <memory>
@@ -118,7 +120,13 @@ private:
   QSize m_frameSize;
   ImageStore *m_store = nullptr;
   QVariantList m_overlays;
-  int m_overlayRevision = 0;
+  // Each mark's picture, keyed by everything that changes how it looks, so
+  // moving one mark redraws only that one.
+  struct DrawnMark {
+    QImage image;
+    QRect area;
+  };
+  QHash<QByteArray, DrawnMark> m_drawnMarks;
   std::unique_ptr<QTemporaryDir> m_overlayDir;
   QStringList m_thumbnails;
   std::unique_ptr<QTemporaryDir> m_thumbnailDir;

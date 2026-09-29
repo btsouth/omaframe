@@ -190,6 +190,23 @@ private slots:
     QCOMPARE(still.selectedAnnotation().value("start").toDouble(), 0.);
   }
 
+  void rewordingALabelChangesTheMarks() {
+    // The review compares the marks to what was exported. New words on a
+    // label that did not move are still a change.
+    MarkDocument marks;
+    QImage frame(320, 240, QImage::Format_ARGB32_Premultiplied);
+    frame.fill(Qt::transparent);
+    marks.reset(frame);
+    marks.setDuration(8);
+    marks.edit("text", 0.3, 0.3, 0.3, 0.3, "Wrong");
+    const QVariantList exported = marks.annotations();
+    marks.beginTextEdit();
+    marks.endTextEdit("Right", true);
+    QVERIFY(marks.annotations() != exported);
+    marks.undo();
+    QCOMPARE(marks.annotations(), exported);
+  }
+
   void trimmedExportRedactsOnlyWhileTheMarkShows() {
     Video video;
     openRedacted(video, "trimmed");
@@ -224,6 +241,26 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 20000);
     QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
     QVERIFY(redacted(frameAt(video.savedPath(), 1.5, {320, 240}), 120, 90));
+  }
+  void movingOneMarkRedrawsOnlyThatOne() {
+    Video video;
+    video.open(QUrl::fromLocalFile(plain));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.marks()->edit("box", 0.1, 0.1, 0.3, 0.3);
+    video.marks()->edit("arrow", 0.5, 0.5, 0.8, 0.8);
+    const auto before = video.overlays();
+    QCOMPARE(before.size(), 2);
+    video.marks()->nudgeSelected(4, 0);
+    const auto after = video.overlays();
+    QCOMPARE(after.size(), 2);
+    const auto source = [](const QVariant &mark) {
+      return mark.toMap().value("source").toString();
+    };
+    QCOMPARE(source(after[0]), source(before[0]));
+    QVERIFY(source(after[1]) != source(before[1]));
+    // Back where it was, it is the same picture again.
+    video.marks()->undo();
+    QCOMPARE(source(video.overlays()[1]), source(before[1]));
   }
   void exportLaysPicturesOverTheVideo() {
     Video video;

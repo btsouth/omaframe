@@ -18,7 +18,7 @@ class MarkDocument final : public QObject {
   Q_PROPERTY(int newTextPixels READ newTextPixels NOTIFY changed)
   Q_PROPERTY(bool textEditing READ textEditing NOTIFY changed)
   /** Every mark, for drawing them over a video: index, type, x1, y1, x2, y2,
-   *  start and end. */
+   *  start, end, text, color and size. */
   Q_PROPERTY(QVariantList annotations READ annotations NOTIFY changed)
   /** The length of the video in seconds, or 0 for a screenshot. Marks on a
    *  video show only between their start and end. */
