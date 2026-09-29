@@ -43,6 +43,8 @@ Window {
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {chooser.choose(studio.style); event.accepted = true}
             else if (event.key === Qt.Key_E) {if(chooser.ready) studio.openEditor(); event.accepted = true}
             else if (event.key === Qt.Key_R) {if(!studio.busy) studio.capture(true); event.accepted = true}
+            else if (event.key === Qt.Key_H) {if(chooser.ready) studio.hideSecrets(); event.accepted = true}
+            else if (event.key === Qt.Key_T) {if(!chooser.captureError) studio.copyText(); event.accepted = true}
             else if (event.key === Qt.Key_Escape) {studio.dismissQuick(); event.accepted = true}
         }
         Rectangle {
@@ -67,10 +69,13 @@ Window {
                     ColumnLayout {
                         spacing: 3
                         Layout.fillWidth: true
-                    Text {text: chooser.captureError ? "Capture needs attention" : chooser.accepting ? "Finishing your screenshot…" : studio.recoveryAction.length ? "Screenshot saved" : "Choose a finish"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 20; font.weight: Font.Medium}
-                    Text {text: chooser.captureError ? "Your clipboard is unchanged." : studio.recoveryAction.length ? "Retry the unfinished step, or choose another finish." : studio.dimensions + "   ·   Click a card or press 1–9. Press E to mark it up first."; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12}
+                    Text {text: chooser.captureError ? "Capture needs attention" : chooser.accepting ? "Finishing your screenshot…" : studio.recoveryAction.length ? "Screenshot saved" : "Choose a finish"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 20; font.weight: Font.Medium; Layout.fillWidth: true; elide: Text.ElideRight}
+                    Text {text: chooser.captureError ? "Your clipboard is unchanged." : studio.recoveryAction.length ? "Retry the unfinished step, or choose another finish." : studio.textNote.length ? studio.textNote : studio.dimensions + "   ·   Click a card or press 1–9. Press E to mark it up first."; color: studio.textNote.length && !chooser.captureError && !studio.recoveryAction.length ? theme.text : theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight}
                     }
-                    Item {Layout.fillWidth: true}
+                    // Only there when OCR found something. Never "all secrets":
+                    // OCR misses things.
+                    StudioButton {visible: studio.secretCount > 0 && !chooser.captureError; text: "Hide " + studio.secretCount + (studio.secretCount === 1 ? " possible secret" : " possible secrets"); glyph: "redact"; primary: true; enabled: chooser.ready; hint: "Redact what looks like keys, tokens, emails and card numbers · H"; onClicked: studio.hideSecrets()}
+                    Text {visible: studio.secretCount > 0 && !chooser.captureError; text: "H"; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 10}
                     StudioButton {text: "Edit"; glyph: "crop"; enabled: chooser.ready; hint: "Crop, annotate, redact · E"; onClicked: studio.openEditor()}
                     Text {text: "E"; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 10}
                     StudioButton {glyph: "close"; quiet: true; enabled: !studio.busy; hint: "Cancel · Esc"; onClicked: studio.dismissQuick()}
@@ -139,6 +144,7 @@ Window {
                 RowLayout {
                     Layout.fillWidth: true
                     Text {text: chooser.accepting ? "Saving and copying. One moment…" : studio.recoveryAction.length ? "The finished PNG is already saved" : "A finish is copied and saved to " + studio.outputDirectory.replace(/^\/home\/[^/]+/, "~"); color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideMiddle}
+                    Text {text: "T  Copy text"; visible: studio.canReadText && !chooser.captureError; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 11; Layout.rightMargin: 12}
                     Text {text: "↵  Last finish"; visible: !chooser.captureError; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 11; Layout.rightMargin: 12}
                     StudioButton {visible: studio.recoveryAction.length > 0; text: studio.recoveryAction; glyph: "copy"; primary: true; enabled: !studio.busy; implicitHeight: 32; onClicked: studio.retryOutput()}
                     StudioButton {text: chooser.captureError ? "Try capture again" : "Retake"; glyph: "capture"; quiet: !chooser.captureError; enabled: !studio.busy; hint: "Select a new region · R"; implicitHeight: 32; onClicked: studio.capture(true)}

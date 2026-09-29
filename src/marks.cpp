@@ -176,6 +176,24 @@ void MarkDocument::edit(const QString &type, double x1, double y1,
                    : "Edit applied. Undo is always available.");
   commit();
 }
+void MarkDocument::redactAreas(const QVector<QRectF> &areas) {
+  if (locked() || areas.isEmpty())
+    return;
+  const qsizetype room = MaxEdits - m_edits.size();
+  if (room < areas.size()) {
+    emit message("This image has reached the 100-edit limit.");
+    return;
+  }
+  saveHistory();
+  for (const QRectF &area : areas) {
+    const QRectF inside = area.normalized().intersected(QRectF(0, 0, 1, 1));
+    Frame::Edit edit{"redact", inside.topLeft(), inside.bottomRight()};
+    timeNewMark(edit);
+    m_edits.append(edit);
+  }
+  m_selected = -1;
+  commit();
+}
 void MarkDocument::addStroke(const QVariantList &points) {
   if (locked() || points.size() < 2 || m_edits.size() >= MaxEdits)
     return;

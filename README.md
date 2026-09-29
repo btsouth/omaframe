@@ -35,6 +35,13 @@ anywhere.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
+While you pick, Omaframe reads the text in the screenshot. If it spots
+something that looks like a secret, such as an API key, a token, an email
+address or a card number, a **Hide possible secrets** button appears. Press H
+and each one gets a redaction you can still move or undo in the editor. It can
+miss things, so look before you share. Press T to copy the text in the
+screenshot instead.
+
 ## Mark it up
 
 Press E before you pick a finish. Press T and click to type a label right on
@@ -70,7 +77,9 @@ any mark and press I and O to set where it starts and stops.
 | Choosing an area to record | D / M | Computer sound / microphone |
 | Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
 | Picking a finish | E / R | Mark it up / retake |
+| Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
+| Marking up | Shift+H | Hide possible secrets |
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
@@ -82,6 +91,11 @@ any mark and press I and O to set where it starts and stops.
 Screenshots go to `~/Pictures/Omaframe` and recordings to `~/Videos/Omaframe`.
 Change either in Settings. Saved images contain only the rendered pixels, and
 redaction replaces pixels with a solid fill. Your originals are never changed.
+
+The text Omaframe reads for H and T stays in memory. It is never saved, not
+even in drafts. Reading needs `tesseract` and `tesseract-data-eng`; without
+them the button and T are simply not there. Set `OMARCHY_OCR_LANGS` (for
+example `eng+deu`) to read other languages, as Omarchy's own text capture does.
 
 When you add marks, Omaframe keeps an editable draft with a private copy of the
 capture, listed under Recent edits so you can change it later. Delete a draft
@@ -122,6 +136,8 @@ Build dependencies: `base-devel cmake ninja pkgconf qt6-base qt6-declarative
 qt6-multimedia qt6-wayland layer-shell-qt wayland wayland-protocols
 wl-clipboard ffmpeg gpu-screen-recorder libpulse procps-ng xdg-utils`.
 `libnotify` is optional and adds a notification after a quick screenshot.
+`tesseract` and `tesseract-data-eng` are optional and add secret hiding and
+copying text.
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo

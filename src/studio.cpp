@@ -2,6 +2,7 @@
 #include "capture-session.hpp"
 #include "capture.hpp"
 #include "displays.hpp"
+#include "ocr.hpp"
 #include "window-targets.hpp"
 #include <QBuffer>
 #include <QDateTime>
@@ -168,6 +169,7 @@ Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
   if (withDemo)
     loadDemo();
 }
+Studio::~Studio() { stopReading(); }
 QStringList Studio::monitors() const {
   QStringList result{"All displays"};
   for (const auto &names : Displays::describe(Displays::fromScreens()))
@@ -349,6 +351,7 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
   m_draftId.clear();
   m_status = demo ? "Sample image. Try a finish or the editor."
                   : "Ready when you are.";
+  startReading();
   scheduleRender();
   emit sourceChanged();
 }
@@ -361,6 +364,7 @@ void Studio::closeImage() {
   m_workingSize = {};
   m_name.clear();
   m_marks.reset({});
+  stopReading();
   m_draftId.clear();
   m_draftDirty = false;
   m_rendering = false;
@@ -570,6 +574,7 @@ void Studio::resumeDraft(const QString &id) {
   m_draftDirty = false;
   m_draftTimer.stop();
   m_status = "Editable draft reopened.";
+  startReading();
   scheduleRender();
   emit sourceChanged();
   emit editorRequested();
@@ -1072,6 +1077,148 @@ void Studio::dismissQuick() {
   m_quickState = "cancelled";
   emit changed();
   emit dismissRequested();
+}
+
+struct ReadResult {
+  bool ok = false;
+  QString text;
+  QVector<QRectF> secrets;
+};
+void Studio::stopReading() {
+  if (m_readCancel)
+    m_readCancel->store(true);
+  m_readCancel.reset();
+  ++m_readGeneration;
+  m_reading = m_textRead = m_copyTextPending = false;
+  m_secrets.clear();
+  m_text.clear();
+  m_textNote.clear();
+}
+void Studio::startReading() {
+  stopReading();
+  static const bool installed = Ocr::available();
+  if (!installed || m_demo || m_original.isNull())
+    return;
+  m_reading = true;
+  m_readCancel = std::make_shared<std::atomic_bool>(false);
+  const int generation = m_readGeneration;
+  auto *watcher = new QFutureWatcher<ReadResult>(this);
+  connect(watcher, &QFutureWatcher<ReadResult>::finished, this,
+          [this, watcher, generation] {
+            const ReadResult result = watcher->result();
+            watcher->deleteLater();
+            if (generation != m_readGeneration)
+              return;
+            m_reading = false;
+            m_textRead = result.ok;
+            m_text = result.text;
+            m_secrets = result.secrets;
+            if (m_copyTextPending) {
+              m_copyTextPending = false;
+              if (result.ok)
+                writeText();
+              else
+                m_textNote = "Could not read the text.";
+            }
+            emit changed();
+          });
+  // The picker never waits for this. A finish chosen first is saved as
+  // usual, and a new image cancels the read.
+  watcher->setFuture(QtConcurrent::run(
+      [image = m_original, cancel = m_readCancel] {
+        ReadResult result;
+        const auto words = Ocr::read(image, cancel.get());
+        if (!words)
+          return result;
+        result.ok = true;
+        result.text = Ocr::text(*words);
+        const QSizeF size = image.size();
+        for (const QRect &found : Ocr::findSecrets(*words)) {
+          // A little room past the letters, so no edge of one shows.
+          const double grow = 3 + found.height() * 0.15;
+          const QRectF area = QRectF(found).adjusted(-grow, -grow, grow, grow);
+          result.secrets << QRectF(area.x() / size.width(),
+                                   area.y() / size.height(),
+                                   area.width() / size.width(),
+                                   area.height() / size.height())
+                                .intersected(QRectF(0, 0, 1, 1));
+        }
+        return result;
+      }));
+}
+QVector<QRectF> Studio::uncoveredSecrets() const {
+  QVector<QRectF> open;
+  const auto &edits = m_marks.edits();
+  for (const QRectF &secret : m_secrets) {
+    const double area = secret.width() * secret.height();
+    const bool hidden =
+        std::any_of(edits.cbegin(), edits.cend(), [&](const Frame::Edit &e) {
+          if (e.type != "redact" && e.type != "blur")
+            return false;
+          const QRectF part =
+              QRectF(e.from, e.to).normalized().intersected(secret);
+          return part.width() * part.height() >= area * 0.9;
+        });
+    if (!hidden)
+      open << secret;
+  }
+  return open;
+}
+QString Studio::textNote() const {
+  return m_copyTextPending ? QString("Reading text…") : m_textNote;
+}
+void Studio::hideSecrets() {
+  if (m_busy)
+    return;
+  const QVector<QRectF> open = uncoveredSecrets();
+  if (open.isEmpty())
+    return;
+  const qsizetype before = m_marks.edits().size();
+  m_marks.redactAreas(open);
+  if (m_marks.edits().size() == before)
+    return;
+  // Never claim the image is clean: OCR misses things.
+  m_textNote = open.size() == 1
+                   ? "Hid 1 possible secret. OCR can miss some, so check "
+                     "before sharing."
+                   : QString("Hid %1 possible secrets. OCR can miss some, so "
+                             "check before sharing.")
+                         .arg(open.size());
+  m_status = m_textNote;
+  emit changed();
+}
+void Studio::copyText() {
+  if (!canReadText())
+    return;
+  if (m_reading) {
+    m_copyTextPending = true;
+    emit changed();
+    return;
+  }
+  writeText();
+  emit changed();
+}
+void Studio::writeText() {
+  const QString text = m_text.trimmed();
+  if (text.isEmpty()) {
+    m_textNote = "No text found.";
+    return;
+  }
+  QProcess clipboard;
+  clipboard.start("wl-copy", {"--type", "text/plain;charset=utf-8"});
+  bool copied = clipboard.waitForStarted(3000);
+  if (copied) {
+    clipboard.write(text.toUtf8());
+    clipboard.closeWriteChannel();
+    copied = clipboard.waitForFinished(3000) &&
+             clipboard.exitStatus() == QProcess::NormalExit &&
+             clipboard.exitCode() == 0;
+  }
+  if (clipboard.state() != QProcess::NotRunning) {
+    clipboard.kill();
+    clipboard.waitForFinished();
+  }
+  m_textNote = copied ? "Copied the text." : "Could not copy the text.";
 }
 
 void Studio::recordInstead(const QString &monitor) {
