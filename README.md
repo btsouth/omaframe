@@ -77,7 +77,7 @@ capture or close Omaframe before saving, choose **Save and continue**,
 | --- | --- | --- |
 | Anywhere | Print Screen | Take a screenshot |
 | Anywhere | Alt+Print Screen | Start a recording, or stop it |
-| Anywhere, source builds after 0.3.0 | Alt+Shift+Print Screen | Pause or resume recording, after enabling capture shortcuts in Settings |
+| Anywhere | Alt+Shift+Print Screen | Pause or resume recording, after enabling capture shortcuts in Settings |
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
 | Choosing an area to record | D / M | Computer sound / microphone |
 | Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
@@ -125,7 +125,7 @@ keeps the capture exactly as it was.
 
 Omaframe follows your Omarchy theme and updates when you switch themes.
 
-Source builds after 0.3.0 add Pause and Resume beside Stop. Pausing keeps the
+Pause and Resume sit beside Stop. Pausing keeps the
 same recording open and leaves the paused interval out of the saved video
 and audio. The timer counts recorded time. You can still take screenshots
 while paused, and Stop saves the clip normally.
