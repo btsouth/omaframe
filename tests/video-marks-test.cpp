@@ -1,7 +1,9 @@
 #include "marks.hpp"
 #include "video.hpp"
+#include <QFile>
 #include <QProcess>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -83,6 +85,58 @@ private slots:
     QVERIFY(makeClip("testsrc2=size=320x240:rate=25", pattern));
   }
 
+  void rejectedExportSignalsFailureAndKeepsMarks() {
+    Video video;
+    openRedacted(video, "rejected-export");
+    QSignalSpy failed(&video, &Video::exportFailed);
+    QSignalSpy saved(&video, &Video::exported);
+    const auto marks = video.marks()->annotations();
+    video.exportEdited(0, 0.01, false, {});
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(saved.count(), 0);
+    QCOMPARE(video.marks()->annotations(), marks);
+    QVERIFY(!video.busy());
+    QFile blocked(temp.filePath("blocked-folder"));
+    QVERIFY(blocked.open(QIODevice::WriteOnly));
+    blocked.close();
+    video.setOutputDirectory(QUrl::fromLocalFile(blocked.fileName() + "/clips"));
+    video.exportEdited(0, video.duration(), false, {});
+    QCOMPARE(failed.count(), 2);
+    QCOMPARE(saved.count(), 0);
+    QCOMPARE(video.marks()->annotations(), marks);
+    QVERIFY(!video.busy());
+  }
+  void encoderFailureSignalsFailureAndKeepsMarks() {
+    const QString source = temp.filePath("removed-source.mp4");
+    QVERIFY(QFile::copy(plain, source));
+    Video video;
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("failed-encode")));
+    video.open(QUrl::fromLocalFile(source));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.marks()->edit("redact", 0.25, 0.25, 0.5, 0.5);
+    const auto marks = video.marks()->annotations();
+    QVERIFY(QFile::remove(source));
+    QSignalSpy failed(&video, &Video::exportFailed);
+    QSignalSpy saved(&video, &Video::exported);
+    video.exportEdited(0, video.duration(), false, {});
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 12000);
+    QCOMPARE(saved.count(), 0);
+    QVERIFY(!video.busy() && video.savedPath().isEmpty());
+    QCOMPARE(video.marks()->annotations(), marks);
+  }
+  void cancelledExportSignalsFailureAndKeepsMarks() {
+    Video video;
+    openRedacted(video, "cancelled-export");
+    const auto marks = video.marks()->annotations();
+    QSignalSpy failed(&video, &Video::exportFailed);
+    QSignalSpy saved(&video, &Video::exported);
+    video.exportEdited(0, video.duration(), false, {});
+    video.cancel();
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 12000);
+    QCOMPARE(saved.count(), 0);
+    QVERIFY(!video.busy() && video.savedPath().isEmpty());
+    QCOMPARE(video.marks()->annotations(), marks);
+  }
   void noMarksGiveNoFilters() {
     QVERIFY(videoMarkFilters({}, {320, 240}, 0, "[0:v:0]", "[out]").isEmpty());
     // Arrows and the like come in as pictures, so without one there is
