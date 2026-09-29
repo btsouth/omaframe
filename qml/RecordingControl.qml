@@ -86,6 +86,7 @@ Window {
                 }
             }
             StudioButton {
+                id: pause
                 objectName: "recordingPause"
                 visible: control.live || control.paused
                 enabled: !recorder.pausePending
@@ -93,6 +94,13 @@ Window {
                 implicitHeight: 32
                 padding: 7
                 text: control.paused ? "Resume" : "Pause"
+                contentItem: Text {
+                    text: pause.text
+                    color: pause.ink
+                    font: pause.font
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
                 onClicked: recorder.togglePause()
             }
             Button {
