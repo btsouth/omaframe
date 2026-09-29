@@ -114,6 +114,10 @@ own "Screen recording saved" notice.
 You can take and edit screenshots while you record. If you stop a recording in
 the middle of a screenshot, its review opens once the screenshot is done.
 
+When a capture stops right at a plain background, the finishes carry that
+background out a little so the content is not pressed against the edge. Raw
+keeps the capture exactly as it was.
+
 Omaframe follows your Omarchy theme and updates when you switch themes.
 
 There is no pause, webcam overlay or zoom yet. Marks on a video stay in place:

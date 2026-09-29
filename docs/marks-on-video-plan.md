@@ -2,7 +2,7 @@
 
 Date: 2026-09-28
 
-Status: phases 0 to 3 are built. Phase 4 is next. Where the build differs from this plan, a note in the phase says why.
+Status: all phases are built. Where the build differs from this plan, a note in the phase says why.
 
 ## Goal
 
@@ -155,6 +155,13 @@ Some window captures end right at their content, which looks cramped inside a fr
 - Extend flat edges only, by an amount tied to the image size (start around 3 percent of the short side, capped), and never on Raw.
 - No setting. If it looks wrong on real captures, tune the threshold instead of adding a control.
 - Renderer tests: a flat-edged image gets wider, a photo-edged image does not, and Raw is unchanged.
+
+### As built
+
+- An edge only gets what it is missing: the room is 4 percent of the short side, at least 12 and at most 48 pixels, minus how far the flat color already runs inward. A capture that already has room, or is one color throughout, keeps its size. At 3 percent a 300 pixel dialog gained 9 pixels, too little to notice.
+- The first and last 16 pixels of each edge (a tenth on short edges) are left out of the flatness check, so a rounded window corner showing the wallpaper does not make the edge busy.
+- Captures shorter than 120 pixels are left alone.
+- `Frame::outputSize` takes the room, so the size shown before saving and the 80 megapixel check match the saved file.
 
 ## Left out on purpose
 
