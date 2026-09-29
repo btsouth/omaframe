@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include <QLinearGradient>
 #include <QPainter>
 #include <QTest>
 
@@ -57,6 +58,63 @@ private slots:
                QColor("#e21c87"));
       QVERIFY(result.pixelColor(0, 0) != QColor("#e21c87"));
     }
+  }
+  // A dialog cropped tight: flat background, text a few pixels from the
+  // left and top edges.
+  static QImage crampedCapture() {
+    QImage source(800, 500, QImage::Format_ARGB32_Premultiplied);
+    source.fill(QColor("#1e1e2e"));
+    QPainter p(&source);
+    p.fillRect(4, 4, 300, 20, QColor("#cdd6f4"));
+    p.fillRect(4, 200, 700, 20, QColor("#cdd6f4"));
+    return source;
+  }
+  void crampedFlatEdgesGetRoom() {
+    const QImage source = crampedCapture();
+    // Room is 4 percent of the short side, less what the edge already has.
+    const QMargins room = Frame::edgeRoom(source);
+    QCOMPARE(room.left(), 16);
+    QCOMPARE(room.top(), 16);
+    // Right and bottom already have more than enough flat space.
+    QCOMPARE(room.right(), 0);
+    QCOMPARE(room.bottom(), 0);
+    const Frame::Options options{};
+    const QImage framed = Frame::compose(source, options);
+    QCOMPARE(framed.size(), Frame::outputSize(source.size(), options, room));
+    QVERIFY(framed.width() > Frame::outputSize(source.size(), options).width());
+    // Raw is the capture, untouched.
+    QCOMPARE(Frame::compose(source, {8, 0.05, 0}), source);
+  }
+  void busyEdgesGetNoRoom() {
+    // A photo or a gradient reaches the edge; nothing can be carried out.
+    QImage source(800, 500, QImage::Format_ARGB32_Premultiplied);
+    QPainter p(&source);
+    QLinearGradient gradient(0, 0, 800, 500);
+    gradient.setColorAt(0, Qt::darkBlue);
+    gradient.setColorAt(1, QColor("#e8b6d3"));
+    p.fillRect(source.rect(), gradient);
+    p.end();
+    QVERIFY(Frame::edgeRoom(source).isNull());
+    // Text that touches the edge makes it busy too.
+    QImage touching = crampedCapture();
+    QPainter t(&touching);
+    for (int x = 0; x < 800; x += 6)
+      t.fillRect(x, 0, 3, 12, QColor("#cdd6f4"));
+    t.end();
+    QCOMPARE(Frame::edgeRoom(touching).top(), 0);
+    // A capture that already has room, or is one color, keeps its size.
+    QImage solid(800, 500, QImage::Format_ARGB32_Premultiplied);
+    solid.fill(QColor("#e21c87"));
+    QVERIFY(Frame::edgeRoom(solid).isNull());
+  }
+  void roundedCornersDoNotHideAFlatEdge() {
+    QImage source = crampedCapture();
+    QPainter p(&source);
+    // The wallpaper behind a rounded window corner.
+    for (QPoint corner : {QPoint(0, 0), QPoint(790, 0), QPoint(0, 490), QPoint(790, 490)})
+      p.fillRect(QRect(corner, QSize(10, 10)), Qt::green);
+    p.end();
+    QCOMPARE(Frame::edgeRoom(source).left(), 16);
   }
   void paddingFitsSmallAndLargeCaptures() {
     const auto options = Frame::Options{};

@@ -192,7 +192,7 @@ QString Studio::dimensions() const {
       .arg(m_workingSize.height());
 }
 QString Studio::outputDimensions() const {
-  const QSize s = Frame::outputSize(m_workingSize, m_options);
+  const QSize s = Frame::outputSize(m_workingSize, m_options, m_edgeRoom);
   return QString("%1 × %2").arg(s.width()).arg(s.height());
 }
 QString Studio::recoveryAction() const {
@@ -283,6 +283,7 @@ struct PreviewResult {
   QImage source, uncropped, preview;
   QVector<QImage> thumbnails;
   QSize workingSize;
+  QMargins edgeRoom;
 };
 void Studio::scheduleRender() {
   if (m_draftDirty)
@@ -303,6 +304,7 @@ void Studio::scheduleRender() {
             for (int i = 0; i < result.thumbnails.size(); ++i)
               m_store->put(QString("style%1").arg(i), result.thumbnails[i]);
             m_workingSize = result.workingSize;
+            m_edgeRoom = result.edgeRoom;
             m_rendering = false;
             ++m_revision;
             emit changed();
@@ -322,6 +324,7 @@ void Studio::scheduleRender() {
         const QImage uncropped = Frame::applyEdits(source, edits, false);
         const QImage working = Frame::cropImage(uncropped, edits);
         result.workingSize = working.size();
+        result.edgeRoom = Frame::edgeRoom(working);
         result.uncropped = uncropped.scaled(1800, 1800, Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation);
         result.source = working.scaled(1800, 1800, Qt::KeepAspectRatio,
@@ -342,6 +345,7 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
   image.setDevicePixelRatio(1);
   m_original = std::move(image);
   m_workingSize = m_original.size();
+  m_edgeRoom = {};
   m_name = std::move(name);
   m_demo = demo;
   m_marks.reset(m_original);
@@ -362,6 +366,7 @@ void Studio::closeImage() {
   ++m_generation;
   m_original = {};
   m_workingSize = {};
+  m_edgeRoom = {};
   m_name.clear();
   m_marks.reset({});
   stopReading();
@@ -558,6 +563,7 @@ void Studio::resumeDraft(const QString &id) {
   }
   m_original = std::move(image);
   m_workingSize = m_original.size();
+  m_edgeRoom = {};
   m_marks.restore(m_original, std::move(edits),
                   document.value("selected").toInt(-1));
   m_options.style = std::clamp(document.value("style").toInt(), 0, 8);
@@ -684,7 +690,7 @@ void Studio::accept() {
   if (m_busy || m_rendering || m_original.isNull())
     return;
   saveDraftNow();
-  const QSize output = Frame::outputSize(m_workingSize, m_options);
+  const QSize output = Frame::outputSize(m_workingSize, m_options, m_edgeRoom);
   if (qint64(output.width()) * output.height() > 80000000) {
     if (m_quickMode)
       m_quickState = "failed";

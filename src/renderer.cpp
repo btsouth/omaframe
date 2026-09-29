@@ -306,9 +306,10 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
   return applyCrop ? cropImage(img, edits) : img;
 }
 
-QSize outputSize(QSize source, const Options &o) {
+QSize outputSize(QSize source, const Options &o, QMargins room) {
   if (source.isEmpty() || o.style == 8)
     return source;
+  source = source.grownBy(room);
   const double rate = std::clamp(o.padding, 0.02, 0.22) *
                       (o.style == 5 ? 0.6 : 1.0);
   // Base the frame on the shorter edge so wide windows do not gain a huge
@@ -413,14 +414,113 @@ static QImage shadowMask(QSize size, QRectF rect, double radius, int blur) {
   return img;
 }
 
-QImage compose(const QImage &source, const Options &o, int maxEdge) {
+
+// One line of pixels along an edge, `depth` lines in from it. Corners are
+// left out, since a window's rounded corner shows what is behind it.
+static QVector<QRgb> edgeLine(const QImage &image, int edge, int depth) {
+  const bool across = edge == 0 || edge == 2; // top or bottom: a row
+  const int length = across ? image.width() : image.height();
+  const int corner = std::min(16, length / 10);
+  QVector<QRgb> line;
+  line.reserve(length - 2 * corner);
+  for (int i = corner; i < length - corner; ++i) {
+    const int x = across ? i : edge == 3 ? depth : image.width() - 1 - depth;
+    const int y = across ? (edge == 0 ? depth : image.height() - 1 - depth) : i;
+    line << image.pixel(x, y);
+  }
+  return line;
+}
+static QRgb median(const QVector<QRgb> &pixels) {
+  std::array<std::array<int, 256>, 3> counts{};
+  for (QRgb pixel : pixels) {
+    ++counts[0][qRed(pixel)];
+    ++counts[1][qGreen(pixel)];
+    ++counts[2][qBlue(pixel)];
+  }
+  int channel[3];
+  for (int c = 0; c < 3; ++c) {
+    int seen = 0, value = 0;
+    while (value < 255 && (seen += counts[c][value]) * 2 < pixels.size())
+      ++value;
+    channel[c] = value;
+  }
+  return qRgb(channel[0], channel[1], channel[2]);
+}
+// Nearly every pixel of the line is within a small distance of `color`.
+static bool flat(const QVector<QRgb> &line, QRgb color) {
+  if (line.isEmpty())
+    return false;
+  int close = 0;
+  for (QRgb pixel : line)
+    close += qAlpha(pixel) == 255 &&
+             std::max({std::abs(qRed(pixel) - qRed(color)),
+                       std::abs(qGreen(pixel) - qGreen(color)),
+                       std::abs(qBlue(pixel) - qBlue(color))}) <= 8;
+  return close >= line.size() * 0.98;
+}
+static QRgb edgeColor(const QImage &image, int edge) {
+  return median(edgeLine(image, edge, 0));
+}
+
+QMargins edgeRoom(const QImage &source) {
   if (source.isNull())
     return {};
+  const QImage image = source.format() == QImage::Format_ARGB32 ||
+                               source.format() == QImage::Format_RGB32
+                           ? source
+                           : source.convertToFormat(QImage::Format_ARGB32);
+  // About 4 percent of the short side, at least 12 pixels: enough to read
+  // as breathing room without changing the shape of the capture.
+  const int shortSide = std::min(image.width(), image.height());
+  if (shortSide < 120)
+    return {};
+  const int room = std::clamp(qRound(shortSide * 0.04), 12, 48);
+  int add[4] = {0, 0, 0, 0}; // top, right, bottom, left
+  for (int edge = 0; edge < 4; ++edge) {
+    const QRgb color = edgeColor(image, edge);
+    // A strip a few pixels wide has to be flat before it counts.
+    int depth = 0;
+    while (depth < room && flat(edgeLine(image, edge, depth), color))
+      ++depth;
+    if (depth >= 3)
+      add[edge] = room - depth;
+  }
+  return {add[3], add[0], add[1], add[2]};
+}
+// The capture with its flat edges carried outward in their own color.
+static QImage withEdgeRoom(const QImage &source, QMargins room) {
+  if (room.isNull())
+    return source;
+  QImage image = source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+  QImage result(image.size().grownBy(room), image.format());
+  QPainter p(&result);
+  const QRect inside(room.left(), room.top(), image.width(), image.height());
+  // Sides first, then top and bottom across the full width, so corners
+  // take the top or bottom color.
+  if (room.left())
+    p.fillRect(0, 0, room.left(), result.height(), QColor(edgeColor(image, 3)));
+  if (room.right())
+    p.fillRect(inside.right() + 1, 0, room.right(), result.height(),
+               QColor(edgeColor(image, 1)));
+  if (room.top())
+    p.fillRect(0, 0, result.width(), room.top(), QColor(edgeColor(image, 0)));
+  if (room.bottom())
+    p.fillRect(0, inside.bottom() + 1, result.width(), room.bottom(),
+               QColor(edgeColor(image, 2)));
+  p.setCompositionMode(QPainter::CompositionMode_Source);
+  p.drawImage(inside.topLeft(), image);
+  return result;
+}
+
+QImage compose(const QImage &capture, const Options &o, int maxEdge) {
+  if (capture.isNull())
+    return {};
   if (o.style == 8)
-    return maxEdge > 0 && std::max(source.width(), source.height()) > maxEdge
-               ? source.scaled(QSize(maxEdge, maxEdge), Qt::KeepAspectRatio,
-                               Qt::SmoothTransformation)
-               : source;
+    return maxEdge > 0 && std::max(capture.width(), capture.height()) > maxEdge
+               ? capture.scaled(QSize(maxEdge, maxEdge), Qt::KeepAspectRatio,
+                                Qt::SmoothTransformation)
+               : capture;
+  const QImage source = withEdgeRoom(capture, edgeRoom(capture));
   QSize full = outputSize(source.size(), o), target = full;
   if (maxEdge > 0 && std::max(full.width(), full.height()) > maxEdge)
     target.scale(maxEdge, maxEdge, Qt::KeepAspectRatio);

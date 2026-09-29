@@ -218,6 +218,7 @@ private:
   QSize m_lastAreaPixels;
   QString m_lastAreaMonitor;
   QSize m_workingSize;
+  QMargins m_edgeRoom;
   MarkDocument m_marks;
   QVariantList m_drafts;
   QTimer m_draftTimer;
