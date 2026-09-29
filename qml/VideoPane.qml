@@ -326,16 +326,28 @@ Item {
         selectedCut = -1;
         notice = "";
     }
+    // A mark whose outline is hidden lets go of the keys: while playing, or
+    // once the playhead leaves its time, I, O, Delete and the arrows are
+    // back on the clip.
     onPlayingChanged: if (playing) {
         tool = "select";
         markCanvas.commitText();
+        video.marks.clearSelection();
     }
+    // A twentieth of a second of slack: a seek can land a frame early.
+    onHeadChanged: if (markSelected && (head < selectedMark.start - 0.05 || (head > selectedMark.end + 0.05 && selectedMark.end < video.duration)))
+        video.marks.clearSelection()
     Binding { target: video.marks; property: "playhead"; value: pane.head }
     Connections {
         target: video.marks
         function onEdited(modified) {
             if (modified && !pane.replaying) {
-                pane.undoStack = pane.undoStack.concat(["marks"]);
+                // The marks keep their last 100 steps. Past that, drop the
+                // oldest entry here too so every Ctrl+Z still undoes one.
+                const stack = pane.undoStack.concat(["marks"]);
+                if (stack.filter(entry => entry === "marks").length > 100)
+                    stack.splice(stack.indexOf("marks"), 1);
+                pane.undoStack = stack;
                 pane.redoStack = [];
             }
         }
@@ -1139,6 +1151,7 @@ Item {
                             pane.selectCut(cut);
                         else {
                             pane.clearSelection();
+                            video.marks.clearSelection();
                             pane.seek(at);
                         }
                     }

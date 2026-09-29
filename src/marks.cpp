@@ -77,7 +77,12 @@ QVariantList MarkDocument::annotations() const {
                             {"x2", std::max(edit.from.x(), edit.to.x())},
                             {"y2", std::max(edit.from.y(), edit.to.y())},
                             {"start", edit.start},
-                            {"end", edit.end < 0 ? m_duration : edit.end}});
+                            {"end", edit.end < 0 ? m_duration : edit.end},
+                            // A video's saved check compares these, so a
+                            // reworded label counts as a change.
+                            {"text", edit.text},
+                            {"color", edit.color.name(QColor::HexArgb)},
+                            {"size", edit.size}});
   }
   return list;
 }
