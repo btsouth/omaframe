@@ -211,3 +211,14 @@ the saved Raw PNG, and the note said "Hid 4 possible secrets. OCR can miss
 some, so check before sharing." T put the terminal's text on the clipboard. In
 the editor the same capture showed "Hide 8 possible secrets" (two terminals),
 and Shift+H redacted them in one undo step.
+
+## Repeat on a display that is off, 2026-09-28
+
+Follow-up to #1. `--repeat` whose last area is on a display Hyprland reports
+with `dpmsStatus: false` now opens a new selection on the displays that are on,
+with "That display is off. Select an area again.", instead of waiting for a
+frame that never comes. Checked in omabox by writing a last area on WAYLAND-1
+into `Omaframe.conf`, turning WAYLAND-1 off with `hl.dsp.dpms`, and running
+`--repeat`: the selector opened rather than the cropped picker. A second
+headless output stayed 0×0 in the box, so the case with one display on and one
+off is covered by the unit test and Diogo's report, not by a box run.
