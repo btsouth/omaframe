@@ -63,8 +63,9 @@ something out, pause where it happens and press A for an arrow, B for a box, T
 for a label or N for a numbered step. Those show from there to the end. Select
 any mark and press I and O to set where it starts and stops.
 
-Video edits stay in the current session. Export them before opening another
-file or closing Omaframe.
+Video edits stay in the current session. If you open another file, start a
+capture or close Omaframe before saving, choose **Save and continue**,
+**Discard edits**, or **Cancel**. A failed save keeps your edits open.
 
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 
@@ -185,7 +186,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs five suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs six suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 

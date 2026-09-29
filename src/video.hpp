@@ -104,6 +104,7 @@ signals:
   void loaded();
   void opening();
   void exported(const QUrl &file);
+  void exportFailed();
   void originalAccepted(const QUrl &file);
   void overlaysChanged();
   void opened();

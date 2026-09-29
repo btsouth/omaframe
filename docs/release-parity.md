@@ -41,7 +41,10 @@ This is not part of the published 0.3.0 package.
 Source builds also center button contents, label the video mark tools, and
 keep editor controls and recording options reachable in smaller windows.
 Settings and capture menus close with Esc, and the sample opens in Edit.
-Video edits still have no drafts or confirmation when leaving the session.
+Unsaved video edits prompt before opening another file, starting a capture,
+or quitting, including commands from capture shortcuts. Save and continue
+waits for a successful export; a failed save keeps the edits open. Video
+draft recovery remains future work.
 
 GPU Screen Recorder 6.1.0 already supports the private `set-paused` control and
 a shared pause-aware video/audio clock. See its [6.1.0 control documentation](https://git.dec05eba.com/gpu-screen-recorder/tree/README.md?h=6.1.0).

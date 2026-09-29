@@ -38,18 +38,28 @@ ApplicationWindow {
     property bool editing: false
     property string tool: "select"
     property string savedSignature: ""
+    property bool closingApproved: false
     readonly property bool videoLoaded: videoMode && video.source.toString().length > 0
     readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
     readonly property bool typing: markCanvas.typing || videoPane.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
-    property bool shortcutsAllowed: !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
-    property bool working: studio.busy || video.busy || (recorder.active && !studio.quickMode)
+    property bool shortcutsAllowed: !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
+    property bool working: navigation.saving || studio.busy || video.busy || (recorder.active && !studio.quickMode)
     property string currentStatus: videoMode ? video.status : studio.status
     property string currentDirectory: videoMode ? video.outputDirectory : studio.outputDirectory
     property string currentSaved: videoMode ? video.savedPath : studio.savedPath
     readonly property bool narrow: width < 1100
 
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
+    function requestNavigation(command, file) {
+        if (studio.busy || video.busy || navigation.saving) return;
+        if (videoLoaded) {
+            videoPane.commitText();
+            videoPane.pause();
+        }
+        navigation.request(command, file || "");
+    }
+    Binding { target: navigation; property: "dirty"; value: root.videoLoaded && !root.videoUnchanged && !root.videoSavedCurrent }
     function acceptCurrent() {
         if (markCanvas.typing)
             markCanvas.commitText();
@@ -105,14 +115,14 @@ ApplicationWindow {
         })[tool] || ""
 
     onClosing: function (close) {
-        if (!visible) return;
+        if (!visible || closingApproved) return;
         if (markCanvas.typing) markCanvas.commitText();
         if (root.working || recorder.active) {
             close.accepted = false;
             return;
         }
         if (studio.quickMode) { close.accepted = false; studio.dismissQuick(); }
-        else Qt.quit();
+        else { close.accepted = false; root.requestNavigation("quit"); }
     }
     Binding { target: studio; property: "editing"; value: root.editing && !root.videoMode && root.visible }
     onEditingChanged: if (!editing && markCanvas.typing) markCanvas.commitText()
@@ -133,9 +143,27 @@ ApplicationWindow {
             root.videoMode = true;
             root.editing = false;
             root.recordingReview = false;
-            root.savedSignature = "";
         }
-        function onExported() { root.savedSignature = videoPane.signature; }
+        function onLoaded() { root.savedSignature = ""; }
+        function onExported() {
+            root.savedSignature = videoPane.signature;
+            navigation.saveSucceeded();
+        }
+        function onExportFailed() {
+            if (navigation.saving) {
+                leaveDialog.saveError = video.status + " Your edits are still here.";
+                navigation.saveFailed();
+            }
+        }
+    }
+    Connections {
+        target: navigation
+        function onConfirmationRequested() { leaveDialog.open(); }
+        function onChanged() { if (!navigation.pending) leaveDialog.close(); }
+        function onSaveRequested() {
+            leaveDialog.close();
+            video.exportEdited(videoPane.clipStart, videoPane.clipEnd, videoPane.muted, videoPane.cuts);
+        }
     }
     Shortcut {
         sequence: "Ctrl+O"
@@ -223,7 +251,7 @@ ApplicationWindow {
         id: openDialog
         title: "Open an image or recording"
         nameFilters: ["Images and recordings (*.png *.jpg *.jpeg *.webp *.bmp *.avif *.heic *.mp4 *.webm *.mkv *.mov *.m4v)", "Images (*.png *.jpg *.jpeg *.webp *.bmp)", "Recordings (*.mp4 *.webm *.mkv *.mov *.m4v)"]
-        onAccepted: studio.open(selectedFile)
+        onAccepted: root.requestNavigation("open", selectedFile)
     }
     FolderDialog {
         id: imageFolderDialog
@@ -249,6 +277,49 @@ ApplicationWindow {
         message: "Its private source image and marks are removed. Files you already saved stay where they are."
         confirmText: "Delete draft"
         onConfirmed: studio.deleteDraft(draftId)
+    }
+    Popup {
+        id: leaveDialog
+        property string saveError: ""
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(480, root.width - 48)
+        padding: 22
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onOpened: leaveCancel.forceActiveFocus()
+        onClosed: {
+            if (!navigation.saving) navigation.cancel();
+            saveError = "";
+        }
+        Overlay.modal: Rectangle { color: theme.scrim }
+        background: Rectangle {
+            color: theme.alpha(theme.background, 1)
+            radius: theme.radius
+            border.width: 2
+            border.color: theme.frame
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Text { Layout.fillWidth: true; text: "Save your video edits?"; color: theme.text; font.pixelSize: 16; font.weight: Font.Medium; wrapMode: Text.Wrap }
+            Text {
+                Layout.fillWidth: true
+                text: "Your changes to " + video.name + " haven't been saved. Save them before continuing, or discard the edits. Your original video stays unchanged."
+                color: theme.muted
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
+                lineHeight: 1.25
+            }
+            Text { Layout.fillWidth: true; visible: text.length > 0; text: leaveDialog.saveError; color: theme.urgent; font.pixelSize: 12; wrapMode: Text.Wrap }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                Item { Layout.fillWidth: true }
+                StudioButton { id: leaveCancel; text: "Cancel"; quiet: true; onClicked: navigation.cancel() }
+                StudioButton { text: "Discard edits"; danger: true; onClicked: navigation.discard() }
+                StudioButton { text: "Save and continue"; primary: true; onClicked: navigation.save() }
+            }
+        }
     }
     component SectionLabel: Text {
         color: theme.muted
@@ -316,14 +387,14 @@ ApplicationWindow {
                 detail: "Click a window, drag an area, or press F"
                 glyph: "capture"
                 primary: true
-                onClicked: { captureMenu.close(); studio.capture(true); }
+                onClicked: { captureMenu.close(); root.requestNavigation("capture"); }
             }
             MenuAction {
                 text: "Record video"
                 detail: "Choose an area, window or display to record"
                 glyph: "record"
                 enabled: !recorder.active
-                onClicked: { captureMenu.close(); studio.captureVideo(); }
+                onClicked: { captureMenu.close(); root.requestNavigation("record"); }
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
             MenuAction {
@@ -332,13 +403,13 @@ ApplicationWindow {
                 quiet: true
                 enabled: studio.hasLastArea
                 hint: studio.hasLastArea ? "Capture the same part of the screen again" : "Capture an area first"
-                onClicked: { captureMenu.close(); studio.repeatLastArea(); }
+                onClicked: { captureMenu.close(); root.requestNavigation("repeat"); }
             }
             MenuAction {
                 text: "Whole active display"
                 glyph: "display"
                 quiet: true
-                onClicked: { captureMenu.close(); studio.capture(false); }
+                onClicked: { captureMenu.close(); root.requestNavigation("screen"); }
             }
             Text {
                 text: "The screen freezes while you choose."
@@ -614,7 +685,7 @@ ApplicationWindow {
                         key: shortcuts.screenshotKey
                         accent: true
                         enabled: !root.working
-                        onActivated: studio.capture(true)
+                        onActivated: root.requestNavigation("capture")
                     }
                     ActionCard {
                         glyph: "record"
@@ -622,7 +693,7 @@ ApplicationWindow {
                         detail: "Same selection, with sound and a Stop button kept out of the video."
                         key: shortcuts.recordKey
                         enabled: !root.working && !recorder.active
-                        onActivated: studio.captureVideo()
+                        onActivated: root.requestNavigation("record")
                     }
                     ActionCard {
                         glyph: "image"
@@ -1555,7 +1626,7 @@ ApplicationWindow {
         anchors.fill: parent
         onDropped: function (drop) {
             if (!root.working && drop.hasUrls && drop.urls.length)
-                studio.open(drop.urls[0]);
+                root.requestNavigation("open", drop.urls[0]);
         }
     }
 }

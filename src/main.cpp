@@ -1,3 +1,4 @@
+#include "navigation.hpp"
 #include "omarchy-theme.hpp"
 #include "recording.hpp"
 #include "shortcuts.hpp"
@@ -141,6 +142,7 @@ int main(int argc, char **argv) {
   // The engine owns both stores once they are added.
   auto *videoMarks = new ImageStore;
   Video video;
+  Navigation navigation;
   video.setImageStore(videoMarks);
   Recorder recorder;
   ShortcutSetup shortcuts;
@@ -190,6 +192,7 @@ int main(int argc, char **argv) {
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("studio", &studio);
   engine.rootContext()->setContextProperty("video", &video);
+  engine.rootContext()->setContextProperty("navigation", &navigation);
   engine.rootContext()->setContextProperty("recorder", &recorder);
   engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
   engine.rootContext()->setContextProperty("captureAtStartup", captureStartup);
@@ -221,6 +224,13 @@ int main(int argc, char **argv) {
       return false;
     chooser = qobject_cast<QQuickWindow *>(engine.rootObjects().last());
     return chooser != nullptr;
+  };
+  auto requestNavigation = [&](const QString &cmd, const QUrl &path = QUrl()) {
+    if (window)
+      QMetaObject::invokeMethod(window, "requestNavigation",
+                               Q_ARG(QVariant, cmd), Q_ARG(QVariant, path));
+    else
+      navigation.request(cmd, path);
   };
   QList<QQuickWindow *> selections;
   auto screenFor = [](const QString &name) {
@@ -334,7 +344,8 @@ int main(int argc, char **argv) {
   // started there), and a notification says where the file is. A failed copy
   // or export keeps the review open. Videos opened in the studio stay open.
   auto finishReview = [&] {
-    if (!quickRecordingReview || !window || !video.copyFile())
+    if (navigation.saving() || !quickRecordingReview || !window ||
+        !video.copyFile())
       return;
     const bool edited = !video.savedPath().isEmpty();
     quickRecordingReview = false;
@@ -356,7 +367,12 @@ int main(int argc, char **argv) {
   QObject::connect(&video, &Video::originalAccepted, &app,
                    [&](const QUrl &) { finishReview(); });
   QObject::connect(&video, &Video::exported, &app,
-                   [&](const QUrl &) { finishReview(); });
+                   [&](const QUrl &) {
+                     // QML records the saved edit signature before a normal
+                     // quick review closes. Save-and-continue owns its exit.
+                     if (!navigation.saving())
+                       QTimer::singleShot(0, &app, finishReview);
+                   });
   auto placeLayer = [](QQuickWindow *surface, QScreen *screen,
                        const QString &scope) {
     if (!screen)
@@ -414,6 +430,8 @@ int main(int argc, char **argv) {
     if (!wasVisible)
       adjustWindow(window, false);
   };
+  QObject::connect(&navigation, &Navigation::confirmationRequested, &app,
+                   showStudioWindow);
   // A finished or cancelled capture returns to the studio if it started
   // there, and otherwise ends this short-lived process.
   auto endQuickTask = [&] {
@@ -537,6 +555,11 @@ int main(int argc, char **argv) {
     window->requestActivate();
     adjustWindow(window, true);
   };
+  bool pendingReviewReturnsToStudio = false;
+  auto requestReview = [&](const QUrl &path, bool returnsToStudio) {
+    pendingReviewReturnsToStudio = returnsToStudio;
+    requestNavigation("review", path);
+  };
   // A recording stopped while a screenshot is being selected, finished or
   // edited opens its review once that screenshot is done.
   QUrl pendingReview;
@@ -549,7 +572,7 @@ int main(int argc, char **argv) {
                               QString());
                        return;
                      }
-                     openReview(path, studio.takeReturnToStudio());
+                     requestReview(path, studio.takeReturnToStudio());
                    });
   QObject::connect(&recorder, &Recorder::dismissRequested, &app, [&] {
     hideRecorderSurfaces();
@@ -602,7 +625,7 @@ int main(int argc, char **argv) {
         notify("Screenshot copied",
                "Saved in " + QFileInfo(path).absolutePath().replace(QDir::homePath(), "~"),
                path);
-      openReview(review, returning);
+      requestReview(review, returning);
       return;
     }
     if (returning) {
@@ -653,6 +676,37 @@ int main(int argc, char **argv) {
                      if (studio.quickState() == "selecting")
                        studio.cancelSelection();
                    });
+  QObject::connect(&navigation, &Navigation::proceed, &app,
+                   [&](const QString &cmd, const QUrl &path) {
+                     if (window) {
+                       // Keep the current editor alive while an open is
+                       // checked. A failed open must retain its edit state.
+                       if (cmd != "open" && cmd != "review")
+                         window->setProperty("videoMode", false);
+                       window->setProperty("recordingReview", false);
+                     }
+                     quickRecordingReview = false;
+                     if (cmd == "quit") {
+                       if (window)
+                         window->setProperty("closingApproved", true);
+                       QTimer::singleShot(0, &app, &QCoreApplication::quit);
+                     } else if (cmd == "record")
+                       studio.captureVideo();
+                     else if (cmd == "repeat")
+                       studio.repeatLastArea();
+                     else if (cmd == "capture" || cmd == "screen")
+                       studio.capture(cmd == "capture");
+                     else if (cmd == "review")
+                       openReview(path, pendingReviewReturnsToStudio);
+                     else if (cmd == "open") {
+                       if (!ensureWindow()) {
+                         app.exit(1);
+                         return;
+                       }
+                       studio.open(path);
+                       showStudioWindow();
+                     }
+                   });
   QObject::connect(&server, &QLocalServer::newConnection, &app, [&] {
     while (auto *client = server.nextPendingConnection()) {
       QObject::connect(client, &QLocalSocket::disconnected, client,
@@ -698,9 +752,9 @@ int main(int argc, char **argv) {
         if (recorder.active()) {
           if (!studio.busy() && !video.busy() && !studio.quickMode()) {
             if (cmd == "repeat")
-              studio.repeatLastArea();
+              requestNavigation(cmd);
             else if (cmd == "capture" || cmd == "screen")
-              studio.capture(cmd == "capture");
+              requestNavigation(cmd);
           }
           return;
         }
@@ -718,21 +772,14 @@ int main(int argc, char **argv) {
             window->requestActivate();
           return;
         }
-        if (cmd == "record")
-          studio.captureVideo();
-        else if (cmd == "repeat")
-          studio.repeatLastArea();
-        else if (cmd == "capture" || cmd == "screen")
-          studio.capture(cmd == "capture");
-        else {
-          if (!ensureWindow()) {
-            app.exit(1);
-            return;
-          }
-          if (cmd == "open")
-            studio.open(QUrl::fromLocalFile(request.value("file").toString()));
+        if (cmd == "open")
+          requestNavigation(
+              cmd, QUrl::fromLocalFile(request.value("file").toString()));
+        else if (cmd == "record" || cmd == "repeat" || cmd == "capture" ||
+                 cmd == "screen")
+          requestNavigation(cmd);
+        else
           showStudioWindow();
-        }
       });
     }
   });

@@ -206,6 +206,7 @@ Video::Video(QObject *parent) : QObject(parent) {
                   "Could not start FFmpeg. Install ffmpeg and try again.";
               QFile::remove(m_temporary);
               emit changed();
+              emit exportFailed();
             }
           });
   connect(&m_encoder, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
@@ -217,8 +218,9 @@ Video::Video(QObject *parent) : QObject(parent) {
             } else if (code != 0 || status != QProcess::NormalExit) {
               m_busy = false;
               QFile::remove(m_temporary);
-              m_status =
-                  "Video export failed: " + m_error.simplified().right(300);
+              qWarning().noquote() << "Video export failed:" << m_error.simplified();
+              m_status = "Couldn't save the video. Check the save folder and "
+                         "free space, then try again.";
             } else {
               m_status = "Checking the exported video…";
               emit changed();
@@ -253,6 +255,8 @@ Video::Video(QObject *parent) : QObject(parent) {
                         emit changed();
                         if (!m_saved.isEmpty())
                           emit exported(QUrl::fromLocalFile(m_saved));
+                        else
+                          emit exportFailed();
                       });
               watcher->setFuture(QtConcurrent::run(
                   [path = m_temporary, expected = m_exportDuration,
@@ -300,6 +304,7 @@ Video::Video(QObject *parent) : QObject(parent) {
               return;
             }
             emit changed();
+            emit exportFailed();
           });
 }
 Video::~Video() {
@@ -572,6 +577,7 @@ void Video::exportEdited(double start, double end, bool mute,
       end > m_duration + 0.05 || end - start < 0.1) {
     m_status = "Choose a clip at least a tenth of a second long.";
     emit changed();
+    emit exportFailed();
     return;
   }
   QVector<QPair<double, double>> cuts;
@@ -584,6 +590,7 @@ void Video::exportEdited(double start, double end, bool mute,
         first < 0 || last > m_duration + 0.05 || last - first + 0.000001 < 0.1) {
       m_status = "A removed section has invalid times.";
       emit changed();
+      emit exportFailed();
       return;
     }
     if (last > start && first < end)
@@ -607,6 +614,7 @@ void Video::exportEdited(double start, double end, bool mute,
   if (outputDuration + 0.000001 < 0.1) {
     m_status = "Keep at least a tenth of a second after removing sections.";
     emit changed();
+    emit exportFailed();
     return;
   }
   if (kept.size() == 1) {
@@ -616,6 +624,7 @@ void Video::exportEdited(double start, double end, bool mute,
   if (!QDir().mkpath(m_directory)) {
     m_status = "Could not create the save folder.";
     emit changed();
+    emit exportFailed();
     return;
   }
   // Arrows, boxes, labels and steps go in as pictures, one input each after
@@ -626,6 +635,7 @@ void Video::exportEdited(double start, double end, bool mute,
     m_status = "Could not prepare the marks for the video. Check the free space "
                "in the temporary folder.";
     emit changed();
+    emit exportFailed();
     return;
   }
   // Name the clip after its recording, so the two sit together.
