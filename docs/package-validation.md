@@ -1,5 +1,9 @@
 # Local Arch package validation, 2026-09-27
 
+This is a historical validation record. Results and open checks apply to the
+versions named below. Untested configurations are coverage limits, not pending
+owner tasks; see [the current release policy](../RELEASING.md).
+
 The uncommitted working tree was archived with
 `packaging/build-package.sh --working-tree`. `makepkg` verified the source
 SHA-256 and built `omaframe-0.2.0-1-x86_64.pkg.tar.zst` without installing on
@@ -61,8 +65,8 @@ All five CTest suites passed in omabox before packaging. `desktop-file-validate`
 passed on the packaged desktop entry; `ldd -r` found no missing libraries or
 undefined symbols in the installed binary. `namcap` reported implicitly
 supplied libraries and runtime dependencies accessed through QML or external
-commands. A fresh Omarchy session with real hardware and an upgrade path
-remains a release gate.
+commands. This run did not check a fresh Omarchy session with real hardware
+or an upgrade path.
 
 ## Local package and installed binary, 2026-09-27 18:28
 

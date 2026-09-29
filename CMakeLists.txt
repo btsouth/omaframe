@@ -62,6 +62,13 @@ if(BUILD_TESTING)
   target_link_libraries(video-marks-tests PRIVATE studio-core Qt6::Test)
   add_test(NAME video-marks COMMAND video-marks-tests)
   set_tests_properties(video-marks PROPERTIES TIMEOUT 120 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  # These suites use fixtures or stub tools and need no desktop session.
+  set_tests_properties(recording displays renderer theme video-marks
+    PROPERTIES LABELS "headless")
+  # Rendered OCR fixtures depend on the desktop's system font choices.
+  set_tests_properties(ocr PROPERTIES LABELS "recognition")
+  # Native capture and clipboard checks need an isolated Wayland session.
+  set_tests_properties(pipelines PROPERTIES LABELS "desktop")
 endif()
 install(TARGETS omaframe RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES packaging/io.github.btsouth.omaframe.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

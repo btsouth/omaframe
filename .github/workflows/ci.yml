@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Arch build and headless tests
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel cmake ninja pkgconf git python \
+            qt6-base qt6-declarative qt6-multimedia qt6-wayland \
+            layer-shell-qt wayland wayland-protocols libpulse \
+            ffmpeg ttf-dejavu desktop-file-utils
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Headless tests
+        run: ctest --test-dir build -L headless --output-on-failure --no-tests=error --output-junit test-results.xml
+
+      - name: OCR pattern tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./build/ocr-tests \
+            findsEachKind ignoresNearMisses joinsTokensOcrSplit \
+            hidesAWholePrivateKey findsAKeyBodyWithoutItsHeader readsTesseractTsv \
+            -o -,txt -o build/ocr-patterns.xml,junitxml
+
+      - name: Check install layout
+        run: |
+          DESTDIR="$PWD/build/install" cmake --install build
+          test -x build/install/usr/bin/omaframe
+          test -s build/install/usr/share/icons/hicolor/scalable/apps/omaframe.svg
+          test -s build/install/usr/share/licenses/omaframe/LICENSE
+          test -s build/install/usr/share/licenses/omaframe/OMASNAP-LICENSE
+          desktop-file-validate build/install/usr/share/applications/io.github.btsouth.omaframe.desktop
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: test-results
+          path: |
+            build/test-results.xml
+            build/ocr-patterns.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 7

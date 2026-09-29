@@ -1,5 +1,9 @@
 # Capture workflow validation
 
+This is a historical validation record. Results and open checks apply to the
+versions named below. Untested configurations are coverage limits, not pending
+owner tasks; see [the current release policy](../RELEASING.md).
+
 Date: 2026-09-25. Build: 0.2.0 preview. Local, unpublished checkout.
 
 ## Behavior
@@ -41,7 +45,7 @@ Pre-latency-fix binary SHA-256: `d36503e65812a530e74d67401bd5bbd943364294f7e1092
 
 ## Remaining physical acceptance
 
-The box exposes one usable virtual display. An attempted additional headless output had zero pixel dimensions and was removed; it does not count as multi-monitor validation. Automated tests validate per-output routing, but physical dual-monitor selection, mixed scaling, rotated outputs, and HDR/color management still need an owner-run check.
+The box exposes one usable virtual display. An attempted additional headless output had zero pixel dimensions and was removed; it does not count as multi-monitor validation. Automated tests validate per-output routing, but physical dual-monitor selection, mixed scaling, rotated outputs and HDR/color management were not established by this run.
 
 Suggested check: launch capture while focused on the first display, move to the second, select a region, press 5, and paste. Repeat in the other direction, then try E, a crop, Escape, and Enter. Check that the saved PNG has the expected native dimensions.
 
@@ -84,8 +88,8 @@ The follow-up pipeline checks label re-editing, movement, resize, color, undo,
 and step resize/delete. In a 1366×768 isolated desktop, an existing label was
 rewritten, recolored, enlarged by its handle, moved, deleted, and restored with
 undo. The Select and property controls remained visible and the app log had no
-QML runtime errors. Owner acceptance remains needed on actual captured windows
-and both physical displays, especially fractional scale. OCR, scrolling
+QML runtime errors. Actual captured windows on both physical displays,
+especially fractional scale, were not checked in this run. OCR, scrolling
 capture, pins, and persistent edit projects remain outside this slice.
 
 ## Text and selection follow-up, 2026-09-27
@@ -119,8 +123,8 @@ showed the larger canvas, multiline label, 192 px and corner-resized labels,
 caption/shadow controls, and a long label fitted to the source height. At
 980×730, the inspector and alignment controls remained usable with scrolling.
 A 192 px label exported as a 1360×880 PNG; its saved bytes matched the copied
-PNG. Physical capture acceptance and visual checks on real screenshots are
-still needed before a release claim.
+PNG. This run did not establish physical capture behavior or visual results
+on real screenshots.
 
 ## Editor, start screen and settings pass, 2026-09-27
 
@@ -154,8 +158,8 @@ click, finish picker, quick editor, inline label create, move, re-edit and
 handle resize, arrow drawn and dragged by its line, Esc ladder back to the
 picker, finish 2 saved with a notification and matching clipboard bytes, no
 private original written, settings, Recent edits, and video review. No QML
-errors appeared in the logs. Real captures on both physical monitors remain
-an owner check.
+errors appeared in the logs. This isolated run did not check real captures
+on both physical monitors.
 
 ## Real desktop screenshots, 2026-09-27
 

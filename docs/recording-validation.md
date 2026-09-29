@@ -1,5 +1,9 @@
 # Recording validation, 2026-09-26
 
+This is a historical validation record. Results and open checks apply to the
+versions named below. Untested configurations are coverage limits, not pending
+owner tasks; see [the current release policy](../RELEASING.md).
+
 ## Implemented
 
 - Native recording setup and Screenshot/Video capture-bar switch.
@@ -24,9 +28,9 @@ Alt+Print now attempts Omaframe stop, then legacy recorder stop, then opens Omaf
 
 Backups of bindings.lua and omarchy-menu.jsonc use suffix .bak.omaframe-record-20260926-000437. No packaged Omarchy files were modified.
 
-## Owner acceptance still needed
+## Hardware coverage at this stage
 
-Record a region with desktop and Clean Desktop Microphone audio. Click Stop and check first/last frames, speech level, sync, and saved MP4 playback. Repeat on the second physical monitor and for a full display, stopping from the Omarchy bar or Alt+Print. Real GPU capture, mixed/fractional-scale coordinates, HDR, device disconnect, long sessions, and physical audio quality are not established by omabox tests.
+At this stage, region recording with desktop and Clean Desktop Microphone audio, first/last frames, speech level, sync and physical playback had not been checked. Real GPU capture, mixed/fractional-scale coordinates, HDR, device disconnect, long sessions and physical audio quality are not established by omabox tests. Later checks are recorded below.
 
 Pause, camera integration, and separate audio tracks are not implemented. A full capture on the only display cannot have a visible Stop control without recording it, so this build uses the acknowledged hotkey fallback.
 
@@ -34,7 +38,7 @@ Pause, camera integration, and separate audio tracks are not implemented. A full
 
 Omaframe now accepts Print Screen screenshot captures while its own recording is active. Finishing or cancelling the screenshot leaves the recorder running and keeps its Stop path available. The editor controls remain usable during recording.
 
-An isolated 1920×1080 omabox run used a simulated recorder that wrote a valid MP4. It covered recording, screenshot selection, editor entry, finish change, PNG save, a second capture and cancellation, then `--stop-recording` and MP4 editor handoff. The recorder process stayed alive through both screenshots. Recording tests passed 11/11 and pipeline tests passed 16/16 in the box. Real GPU capture during a concurrent screenshot still needs a physical check.
+An isolated 1920×1080 omabox run used a simulated recorder that wrote a valid MP4. It covered recording, screenshot selection, editor entry, finish change, PNG save, a second capture and cancellation, then `--stop-recording` and MP4 editor handoff. The recorder process stayed alive through both screenshots. Recording tests passed 11/11 and pipeline tests passed 16/16 in the box. Real GPU capture during a concurrent screenshot was not established by this run.
 
 ## First-frame readiness, 2026-09-27
 
@@ -48,7 +52,7 @@ sidecar is removed after use.
 The isolated test backend reproduced an 88-byte, header-only file and confirmed
 that it never enters Recording or opens the editor. The full five-suite CTest
 run passed in omabox. Real GPU capture and the reported screenshot-during-video
-case still need the owner's physical check.
+case were not hardware-verified at this stage.
 
 ## Recorder version gate, 2026-09-27
 
@@ -131,7 +135,7 @@ physical monitor was used, and screenshot editing during this exact recording
 was not independently observed. Two earlier owner-created recording/export
 pairs from the same day are also playable and have no audio tracks. These
 results confirm repeatable silent real capture and cut/trim export; the
-physical audio, second-monitor, and concurrent-screenshot gates remain open.
+physical audio, second-monitor and concurrent-screenshot behavior were not established by these files.
 
 The editor now probes the completed export and decodes its first frame before
 renaming the temporary file or reporting success. An encoder that exits zero
@@ -153,8 +157,8 @@ the unavailable-sink case.
 
 An attempted second virtual display in the local NVIDIA omabox appeared as
 0×0, so it could not validate live second-display capture. The geometry and
-fractional-scale fixtures still pass, and physical second-monitor acceptance
-remains open.
+fractional-scale fixtures still pass, but this run did not establish physical
+second-monitor behavior.
 
 ## Owner second-monitor recording with audio, 2026-09-27
 

@@ -167,6 +167,10 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
+GitHub CI builds on Arch and runs five suites plus OCR pattern tests.
+Native capture, clipboard and full OCR recognition checks run locally in omabox. See
+[CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
+
 ## License
 
 MIT. The native Wayland capture code is adapted from Omasnap at

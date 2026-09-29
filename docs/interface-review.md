@@ -123,7 +123,12 @@ hover outline stayed behind after a drag; the settings popup clipped its right
 column at 1366×768. After-state screenshots are under ignored
 `evidence/review-2026-09-27/after/`.
 
-## Release blockers, in priority order
+## Historical release follow-up, 0.2.0
+
+The list below records the 0.2.0 review. Omaframe 0.3.0 is now published;
+these observations are not current release blockers or owner tasks.
+[RELEASING.md](../RELEASING.md) defines the current automated checks and
+report-driven hardware follow-up.
 
 The owner's desktop run on 2026-09-27 (see recording-validation.md) cleared
 most hardware gates: no control in any video on one or two monitors or over a

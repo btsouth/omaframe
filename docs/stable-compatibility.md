@@ -1,5 +1,9 @@
 # Omarchy stable compatibility, 2026-09-28
 
+This is a historical validation record. Results and open checks apply to the
+versions named below. Untested configurations are coverage limits, not pending
+owner tasks; see [the current release policy](../RELEASING.md).
+
 The 0.2.3 patch removes the edge-only `o.rebind` dependency. Stable's
 `omarchy-settings` 4.0.4 package contains `o.bind`; replacing a binding uses
 `hl.unbind` first. The new preflight refuses unsupported APIs before writing

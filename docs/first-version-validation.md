@@ -1,5 +1,9 @@
 # First-version validation
 
+This is a historical validation record. Results and open checks apply to the
+versions named below. Untested configurations are coverage limits, not pending
+owner tasks; see [the current release policy](../RELEASING.md).
+
 Date: 2026-09-25. Build: 0.1.0 preview. Local source under `/home/bts/Projects/omaframe`.
 
 ## Automated checks

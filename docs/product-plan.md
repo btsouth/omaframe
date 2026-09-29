@@ -2,13 +2,19 @@
 
 Date: 2026-09-25
 
-Status: planning archive and roadmap. Omaframe now has a working local preview; see README.md and the validation documents for implemented behavior. Roadmap features and performance targets below are not claims about the current build.
+Status: planning archive and backlog. Omaframe 0.3.0 is published; see README.md and [release-parity.md](release-parity.md) for shipped behavior. Roadmap features and performance targets below are not claims about the current build.
+
+## Current direction, 2026-09-29
+
+Keep capture quick and the interface small. Basic CI builds on Arch and runs five headless suites plus OCR pattern tests; current documentation tracks the 0.3.0 release. Recording pause/resume is the next feature and is not implemented yet. Larger studio features below remain optional backlog, not committed release requirements.
+
+Use automated regression checks and handle unusual display configurations through bug reports and targeted fixes. No owner-run hardware matrix, monitor power changes or fresh-desktop walkthrough is required before release. Historical acceptance requirements below are superseded by [RELEASING.md](../RELEASING.md). Validation records remain evidence of what was actually checked, not a pending checklist for the owner.
 
 ## Current priority: small capture interface
 
 Owner feedback on 2026-09-25 prioritizes instant capture and explicitly rejects feature bloat. The earlier broad studio roadmap below is a backlog, not a requirement to expose all those features in the core interface.
 
-The next capture-bar proposal is Screenshot / Video, target selection, and video-only system-audio and microphone controls. Screenshot remains the Print Screen default. The video path should supervise the existing recorder and open the finished file for trimming, without taking the user through two region pickers. Preserve Alt+Print as a direct video shortcut. A mode switch alone is incomplete without reliable stop, finalization, and editor handoff.
+Screenshot / Video selection, target selection, computer sound and microphone controls, recorder ownership, stop/finalization and review handoff have shipped. Print remains the screenshot default and Alt+Print starts or stops recording. The next feature is pause/resume within that existing flow.
 
 Countdown and cursor visibility belong in a small More menu. Webcam is secondary. Scrolling capture is useful as a separate screenshot mode, initially focused on browser pages, after the normal screenshot and recording paths are dependable. It must handle fixed headers, repeated content, lazy loading, and manual stop before it is described as reliable. OCR and pinning are contextual result actions, not permanent capture-bar toggles. Timelines, captions, camera layers, and other advanced editing remain deferred.
 
@@ -28,7 +34,7 @@ Video has a different default: record, review/trim, share. It opens unframed and
 
 The app is local first, intended for personal use and public community distribution. No account, trial, payment, watermark, hosted sharing, or telemetry is required. Upstream adoption by Omarchy is not a prerequisite.
 
-The final product name is intentionally undecided. `capture-app` in this document is a placeholder, not a proposed package name. Check repository, package, binary, and existing-product collisions before naming the repository.
+The product, repository, package and binary are named Omaframe / `omaframe`. Earlier `capture-app` references in this archive are historical placeholders.
 
 ## 2. What the existing projects establish
 
@@ -83,7 +89,7 @@ The first-run default is Auto selection of an existing style. The style order re
 
 Do not copy the raw screenshot to the clipboard before acceptance. Escape from the selection or picker cancels the new capture and leaves the previous clipboard unchanged. Escape within an armed editor tool cancels that tool before closing any surface.
 
-Window capture initially means the visible window region from the output frame, with overlapping content honestly retained. Do not promise an unobscured window capture unless a separate surface-capture path has been implemented and tested. Cross-monitor selection is deliberately deferred for the first usable build; capturing on any selected monitor and mixed-DPI correctness are required before public release.
+Window capture initially means the visible window region from the output frame, with overlapping content honestly retained. Do not promise an unobscured window capture unless a separate surface-capture path has been implemented and tested. Cross-monitor selection remains deferred. Capture geometry is regression-tested with fixtures; additional physical configurations are investigated when users report problems.
 
 ### Image editor
 
@@ -165,7 +171,7 @@ Visual acceptance uses at least 12 inputs: dark terminal, light document, colorf
 | Video output | Plain H.264 MP4 with AAC where audio exists; progress and cancellation | Optional framing, GIF/WebM, caption burn-in or SRT, reusable export presets, bounded export queue, cancel/retry and validated output |
 | Integration | Separate shortcut in the isolated environment | Optional default shortcut, launcher entry, open-with actions, package/uninstall, Omaroll folder discovery |
 
-The complete studio remains focused on screen communication. Full photo retouching, RAW development, a general film-editing suite, live streaming, always-on replay recording, team/cloud hosting, and automatic tracking of redacted objects are outside this release. Captions, focus/zoom, cursor emphasis, separate webcam layout, voice cleanup, and simple clip assembly are now committed stages of the full product, not indefinitely deferred extras. Basic camera-overlay parity is required before presenting an early recording build as a replacement for the user's current menu.
+The complete studio remains focused on screen communication. Full photo retouching, RAW development, a general film-editing suite, live streaming, always-on replay recording, team/cloud hosting, and automatic tracking of redacted objects are outside this release. Captions, focus/zoom, cursor emphasis, separate webcam layout, voice cleanup and simple clip assembly remain possible future work. Camera support is not part of the current recording beta.
 
 The minimum supported capture environments are Omarchy and plain Arch/Hyprland, with editing/export usable without Omarchy services. KDE/GNOME and other Wayland desktops require a separate portal/backend acceptance matrix; they are not implied by the word Arch. Keep backend interfaces capable of future expansion without delaying Hyprland quality for untested cross-desktop support.
 
@@ -318,7 +324,7 @@ Automated evidence should cover:
 
 Do visual inspection of rendered application states and actual exported files, not only snapshot tests. For the final installed candidate, verify the launched binary and version, actual shortcut routing, clipboard paste after closing, file visibility in Omaroll, and rollback. Keep native hardware acceptance separate from headless or isolated test results.
 
-## 11. Ordered implementation milestones
+## 11. Historical studio milestones
 
 | Milestone | Deliverable | Exit condition |
 |---|---|---|
@@ -333,7 +339,7 @@ Do visual inspection of rendered application states and actual exported files, n
 | 8. Assembly and workflow completion | Add/join/reorder clips, simple transitions, project reopen/relocate, output presets, bounded export queue, screenshot utility completion | Mixed-source clips and all intended screenshot tools pass; no independent editor or document model introduced |
 | 9. Complete studio release | Arch and Omarchy packages, optional shortcut integration, uninstall/rollback, docs, comparative demos, third-party notices | All committed milestones pass; fresh install/upgrade and owner hardware acceptance complete; exact artifact and supported configurations recorded |
 
-The screenshot preview and recording beta are useful intermediate deliverables, not completion of the requested studio. Do not mark the project finished until milestones 1-9 meet the agreed full scope or the owner explicitly changes it. Milestones 6-8 are committed work. Packaging and upgrade checks start with the first beta and continue throughout; milestone 9 is the final integrated acceptance, not the first installation test. Estimate elapsed time only after milestone 0 establishes reuse and backend behavior.
+This table preserves the earlier broad studio proposal. It is backlog, not the current delivery contract or release policy. The current priority is the small capture flow and recording pause/resume; milestones 6-8 are not committed work.
 
 Suggested first implementation batches after planning:
 
@@ -367,7 +373,7 @@ Prepare release notes, screenshots, build evidence, source/binary version, packa
 | Redacted source leaks through OCR or derived backgrounds | Sanitize before all derived image operations and test the actual exports |
 | Silent failure after a click | Independent save/clipboard states with recoverable documents and truthful feedback |
 
-Only the name, visual tuning, and evidence-dependent backend/reuse choices remain open. The core product boundaries and automatic copy-and-save behavior are specified. New findings should revise this document before implementation relies on an outdated assumption.
+The name and core capture workflow have been settled. Use the current roadmap for priorities; this historical comparison does not commit additional features.
 
 ## 14. Competitive review and search coverage
 
@@ -405,7 +411,7 @@ Search coverage:
 - Reddit: original [ChalKak announcement](https://www.reddit.com/r/omarchy/comments/1r4si8p/i_missed_that_legendary_mac_screenshot_tool_so/), [Omascreen announcement](https://www.reddit.com/r/omarchy/comments/1vv79dp/i_built_a_screen_recorder_and_video_editor_for/), and [OpenShots discussion](https://www.reddit.com/r/indiehackers/comments/1sh5mqk/openshots_free_opensource_alternative_to/), plus targeted searches. These establish discovery and discussion, not reliable comparative testing. Older pricing statements were not treated as current licensing evidence.
 - X: multiple indexed searches were attempted, but useful readable posts were not returned and a relevant author profile did not provide readable content. X coverage is incomplete. Do not claim that X confirms no equivalent exists.
 
-The next step is the bounded practical comparison in milestone 0 as a quality and reuse benchmark for the chosen standalone product. Related products establish expectations that this project should meet or exceed in its supported environments.
+This comparison informed the original plan. It does not supersede the current pause/resume priority or reopen product selection.
 
 ## 15. Recording review after the owner's menu screenshot
 
@@ -521,7 +527,7 @@ Three canonical acceptance tasks should appear in every milestone demo:
 2. Send a quick explanation: record with the selected mic, pause once, stop, trim an end, and share a plain clip with synchronized audio.
 3. Make a polished demo: assemble two clips, adjust a focus segment, reposition the camera, balance voice/desktop audio, correct captions, and export a result that matches the preview.
 
-The third task becomes a release gate when the complete studio is delivered. It cannot be replaced by a screenshot of an attractive but nonfunctional timeline. Artifacts and owner-observed hardware acceptance are required before describing the product as best in category. Remaining unsupported environments or features stay explicit.
+These are historical examples for evaluating future studio features, not current release gates. Keep unsupported features and validation limits explicit, and do not claim category superiority from an attractive mockup.
 
 
 ## Recording implementation update, 2026-09-26

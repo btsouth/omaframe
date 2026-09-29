@@ -1,5 +1,9 @@
 # Omarchy theme validation
 
+This is a historical validation record. Results and open checks apply to the
+versions named below. Untested configurations are coverage limits, not pending
+owner tasks; see [the current release policy](../RELEASING.md).
+
 Checked on 2026-09-26 in omabox. No real-desktop theme changes were made.
 
 ## What changed
