@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
   mark("GUI application ready");
   app.setOrganizationName("Omaframe");
   app.setApplicationName("Omaframe");
-  app.setApplicationVersion("0.3.0");
+  app.setApplicationVersion("0.4.0");
   app.setDesktopFileName("io.github.btsouth.omaframe");
   app.setQuitOnLastWindowClosed(false);
   QThreadPool::globalInstance()->setMaxThreadCount(2);
