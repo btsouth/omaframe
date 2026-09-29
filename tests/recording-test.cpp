@@ -65,7 +65,7 @@ esac
    QVERIFY(video.waitForFinished(10000));QCOMPARE(video.exitCode(),0);
    qputenv("OMAFRAME_TEST_FIXTURE",temp.filePath("fixture.mp4").toUtf8());
    executable("gpu-screen-recorder",R"(#!/usr/bin/python3
-import os,sys,signal,time,shutil
+import os,sys,signal,time,shutil,socket,json
 if '--version' in sys.argv:
     print(os.environ.get('OMAFRAME_TEST_RECORDER_VERSION', '6.1.3'))
     sys.exit(0)
@@ -76,7 +76,37 @@ else:
     shutil.copyfile(os.environ['OMAFRAME_TEST_FIXTURE'],path)
     open(path+'.ts','w').write('monotonic_microsec\trealtime_microsec\n123456\t123456\n')
 signal.signal(signal.SIGINT,lambda *_:sys.exit(0))
-while True: time.sleep(.05)
+mode=os.environ.get('OMAFRAME_TEST_PAUSE_REPLY', 'ok')
+default_mode=mode
+server=socket.socket(socket.AF_UNIX)
+if mode == 'missing':
+    while True: time.sleep(.05)
+server.bind(sys.argv[sys.argv.index('-ipc')+1])
+server.listen()
+while True:
+    client,_=server.accept()
+    data=b''
+    while b'\n' not in data: data+=client.recv(4096)
+    request=json.loads(data)
+    assert request['id']==1 and request['name']=='set-paused'
+    assert isinstance(request['data'],bool)
+    with open(path+'.controls','a') as log:
+        log.write(json.dumps({'pid':os.getpid(),'paused':request['data']})+'\n')
+    mode=default_mode
+    if os.path.exists(path+'.pause-mode'):
+        mode=open(path+'.pause-mode').read().strip()
+    if mode == 'silent':
+        time.sleep(10)
+    elif mode == 'malformed':
+        client.sendall(b'{"id":999,"result":"ok"}\n')
+    elif mode == 'fragmented':
+        client.sendall(b'{"id":1,')
+        time.sleep(.1)
+        client.sendall(b'"result":"ok"}\n')
+    elif mode != 'disconnect':
+        reply={'id':1,'result':'error' if mode=='reject' else 'ok','data':'Fixture rejection' if mode=='reject' else ''}
+        client.sendall((json.dumps(reply)+'\n').encode())
+    client.close()
 )");
  }
  void recordingControlPlacement_data() {
@@ -317,6 +347,133 @@ while True: time.sleep(.05)
    auto energy=[&](int first,int last) { double sum=0;for(int i=first;i<last;++i){float v;memcpy(&v,samples.constData()+i*4,4);sum+=v*v;}return sum/(last-first); };
    QVERIFY(energy(800,2400)>0.0001);
    QVERIFY(energy(4800,7200)>0.0001);
+ }
+ void pauseResumesTheSameProcessAndExcludesPausedTime() {
+   qputenv("OMAFRAME_TEST_PAUSE_REPLY","fragmented");
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed),ack(&r,&Recorder::pauseFinished);
+   QVERIFY(!r.setPaused(true));
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QVERIFY(!r.setPaused(true));
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   qunsetenv("OMAFRAME_TEST_PAUSE_REPLY");
+   QTest::qWait(650);
+   QVERIFY(r.setPaused(true));QVERIFY(r.pausePending());QVERIFY(!r.setPaused(false));
+   QTRY_COMPARE(r.state(),QString("paused"));QVERIFY(!r.pausePending());
+   QVERIFY(r.active());QVERIFY(!r.canStart());QVERIFY(finished.isEmpty());
+   const QString frozen=r.elapsed(),path=r.savedPath();
+   const bool cursor=r.cursor();r.setCursor(!cursor);QCOMPARE(r.cursor(),cursor);
+   r.prepare();r.reset();QCOMPARE(r.state(),QString("paused"));
+   QTest::qWait(1200);QCOMPARE(r.elapsed(),frozen);
+   QVERIFY(r.setPaused(true));QCOMPARE(ack.count(),2); // Idempotent, no backend toggle.
+   QVERIFY(r.setPaused(false));QTRY_COMPARE(r.state(),QString("recording"));
+   QTRY_VERIFY_WITH_TIMEOUT(r.elapsed()!=frozen,800); // Retains the earlier partial second.
+   QVERIFY(r.setPaused(true));QTRY_COMPARE(r.state(),QString("paused"));
+   const QString second=r.elapsed();QTest::qWait(1100);QCOMPARE(r.elapsed(),second);
+   QVERIFY(r.setPaused(false));QTRY_COMPARE(r.state(),QString("recording"));
+   QCOMPARE(r.savedPath(),path);
+   QFile controls(path+".controls");QVERIFY(controls.open(QIODevice::ReadOnly));
+   const auto lines=controls.readAll().trimmed().split('\n');QCOMPARE(lines.size(),4);
+   const auto pid=QJsonDocument::fromJson(lines[0]).object().value("pid");
+   QFile cmdline(QString("/proc/%1/cmdline").arg(pid.toInt()));QVERIFY(cmdline.open(QIODevice::ReadOnly));
+   const auto args=cmdline.readAll().split('\0');
+   QVERIFY(args.contains("-ipc"));
+   const QString socket=QString::fromUtf8(args[args.indexOf("-ipc")+1]);
+   const QString privateDir=QFileInfo(socket).absolutePath();
+   QVERIFY(privateDir!=QFileInfo(path).absolutePath());
+   QVERIFY(!(QFileInfo(privateDir).permissions() & (QFile::ReadGroup|QFile::WriteGroup|QFile::ExeGroup|QFile::ReadOther|QFile::WriteOther|QFile::ExeOther)));
+   for(int i=0;i<lines.size();++i){
+     const auto request=QJsonDocument::fromJson(lines[i]).object();
+     QCOMPARE(request.value("pid"),pid);QCOMPARE(request.value("paused").toBool(),i%2==0);
+   }
+   r.stop();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+   QCOMPARE(r.state(),QString("saved"));QVERIFY(!r.active());
+   QVERIFY(!QFileInfo::exists(privateDir));
+   QVERIFY(!r.setPaused(false));
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   QCOMPARE(r.elapsed(),QString("00:00"));QVERIFY(r.savedPath()!=path);
+   QVERIFY(r.setPaused(true));QTRY_COMPARE(r.state(),QString("paused"));
+   r.cancel();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),2,5000);
+ }
+ void rejectedResumeLeavesTheRecordingPaused() {
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed),ack(&r,&Recorder::pauseFinished);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   QVERIFY(r.setPaused(true));QTRY_COMPARE(r.state(),QString("paused"));
+   QFile mode(r.savedPath()+".pause-mode");QVERIFY(mode.open(QIODevice::WriteOnly));
+   mode.write("reject");mode.close();
+   const QString frozen=r.elapsed();
+   QVERIFY(r.setPaused(false));QTRY_COMPARE(ack.count(),2);QVERIFY(!ack[1][0].toBool());
+   QCOMPARE(r.state(),QString("paused"));QVERIFY(r.active());
+   QVERIFY(r.status().contains("Could not resume"));
+   QTest::qWait(1100);QCOMPARE(r.elapsed(),frozen);
+   QVERIFY(mode.remove());
+   QVERIFY(r.setPaused(false));QTRY_COMPARE(r.state(),QString("recording"));
+   r.stop();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+ }
+ void stoppingDuringPendingPauseStillSaves() {
+   qputenv("OMAFRAME_TEST_PAUSE_REPLY","silent");
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed),ack(&r,&Recorder::pauseFinished);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   qunsetenv("OMAFRAME_TEST_PAUSE_REPLY");
+   QVERIFY(r.setPaused(true));r.stop();
+   QVERIFY(!r.pausePending());QCOMPARE(ack.count(),1);QVERIFY(!ack[0][0].toBool());
+   QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);QCOMPARE(r.state(),QString("saved"));
+ }
+ void pauseFailures_data() {
+   QTest::addColumn<QByteArray>("mode");QTest::addColumn<bool>("finishes");
+   QTest::newRow("rejected")<<QByteArray("reject")<<false;
+   QTest::newRow("socket-unavailable")<<QByteArray("missing")<<false;
+   QTest::newRow("lost-reply")<<QByteArray("silent")<<true;
+   QTest::newRow("invalid-reply")<<QByteArray("malformed")<<true;
+   QTest::newRow("disconnected")<<QByteArray("disconnect")<<true;
+ }
+ void pauseFailures() {
+   QFETCH(QByteArray,mode);QFETCH(bool,finishes);
+   qputenv("OMAFRAME_TEST_PAUSE_REPLY",mode);
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed),ack(&r,&Recorder::pauseFinished);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   qunsetenv("OMAFRAME_TEST_PAUSE_REPLY");
+   QVERIFY(r.setPaused(true));QTRY_COMPARE_WITH_TIMEOUT(ack.count(),1,4000);
+   QVERIFY(!ack[0][0].toBool());QVERIFY(!r.pausePending());
+   if(!finishes){QCOMPARE(r.state(),QString("recording"));QVERIFY(r.status().contains("Could not pause"));r.stop();}
+   QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);QCOMPARE(r.state(),QString("saved"));
+ }
+ void destroyingAnActiveRecorderDoesNotRunCaptureCallbacks_data() {
+   QTest::addColumn<bool>("pending");
+   QTest::newRow("paused")<<false;
+   QTest::newRow("pause-pending")<<true;
+ }
+ void destroyingAnActiveRecorderDoesNotRunCaptureCallbacks() {
+   QFETCH(bool,pending);
+   qputenv("OMAFRAME_TEST_PAUSE_REPLY",pending ? "silent" : "ok");
+   auto *r=new Recorder;
+   r->prepare();QTRY_COMPARE(r->state(),QString("setup"));
+   r->selectDisplay(0);r->setCountdown(0);r->start();
+   QTRY_COMPARE_WITH_TIMEOUT(r->state(),QString("recording"),5000);
+   qunsetenv("OMAFRAME_TEST_PAUSE_REPLY");
+   QVERIFY(r->setPaused(true));
+   if(!pending)QTRY_COMPARE(r->state(),QString("paused"));
+   QSignalSpy finished(r,&Recorder::completed),ack(r,&Recorder::pauseFinished);
+   QTest::ignoreMessage(QtWarningMsg,"QProcess: Destroyed while process (\"bash\") is still running.");
+   delete r;
+   QVERIFY(finished.isEmpty());QVERIFY(ack.isEmpty());
+ }
+ void layoutChangeStopsPausedRecording() {
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   QVERIFY(r.setPaused(true));QTRY_COMPARE(r.state(),QString("paused"));
+   r.layoutChanged();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+   QCOMPARE(r.state(),QString("saved"));
  }
  void headerOnlyRecordingNeverReportsReady() {
    Recorder r;QSignalSpy finished(&r,&Recorder::completed);

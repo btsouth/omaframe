@@ -3,7 +3,7 @@ import QtQuick.Window
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// The timer and Stop button, always placed outside the recorded area. When
+// The timer, Pause and Stop buttons, placed outside the recorded area. When
 // there is no such place, this only counts down, says how to stop, and is
 // gone before the first frame is captured.
 Window {
@@ -29,6 +29,7 @@ Window {
     title: "Omaframe recording controls"
     onClosing: function(event) {if(visible && recorder.active) {event.accepted=false;recorder.stop()}}
     readonly property bool live: recorder.state === "recording"
+    readonly property bool paused: recorder.state === "paused"
     readonly property bool countdownOnly: recorder.countdownOnly
     Rectangle {
         anchors.fill: parent
@@ -44,7 +45,7 @@ Window {
                 id: dot
                 width: 8; height: 8
                 radius: theme.radius > 0 ? 4 : 0
-                color: theme.recording
+                color: control.paused ? theme.muted : theme.recording
                 Layout.leftMargin: 4
                 // A slow pulse while frames are being written.
                 SequentialAnimation on opacity {
@@ -61,17 +62,34 @@ Window {
                       ? "Recording in " + recorder.remaining + (recorder.stopKey.length ? " · " + recorder.stopKey + " stops it" : "")
                       : recorder.state === "countdown" ? "Starting in " + recorder.remaining
                       : recorder.state === "starting" ? "Starting…"
-                      : recorder.state === "stopping" ? "Saving…" : recorder.elapsed
+                      : recorder.state === "stopping" ? "Saving…"
+                      : control.paused ? "Paused" : recorder.elapsed
                 elide: Text.ElideRight
                 font.pixelSize: 13
                 font.family: theme.fontFamily
                 color: theme.text
+                ToolTip.visible: !control.countdownOnly && (timerHover.hovered || recorder.status.indexOf("Could not") === 0)
+                ToolTip.text: recorder.status.indexOf("Could not") === 0 ? recorder.status
+                              : control.paused ? "Paused at " + recorder.elapsed : recorder.status
+                ToolTip.delay: 500
+                HoverHandler { id: timerHover }
+            }
+            StudioButton {
+                objectName: "recordingPause"
+                visible: control.live || control.paused
+                enabled: !recorder.pausePending
+                implicitWidth: 32
+                implicitHeight: 32
+                padding: 7
+                glyph: control.paused ? "play" : "pause"
+                hint: control.paused ? "Resume recording" : "Pause recording"
+                onClicked: recorder.togglePause()
             }
             Button {
                 id: stop
                 text: recorder.state === "countdown" ? "Cancel" : "Stop"
                 enabled: recorder.state !== "stopping"
-                implicitWidth: 80; implicitHeight: 32
+                implicitWidth: 72; implicitHeight: 32
                 hoverEnabled: true
                 onClicked: recorder.stop()
                 Accessible.name: recorder.state === "countdown" ? "Cancel recording" : "Stop recording"

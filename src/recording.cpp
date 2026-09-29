@@ -174,6 +174,47 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
   m_process.setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGINT); });
   m_tick.setInterval(500);
   connect(&m_tick, &QTimer::timeout, this, &Recorder::changed);
+  m_pauseTimeout.setSingleShot(true);
+  m_pauseTimeout.setInterval(2000);
+  connect(&m_pauseTimeout, &QTimer::timeout, this, [this] {
+    finishPause(false, "The recorder did not answer.", m_pauseSent);
+  });
+  connect(&m_pauseSocket, &QLocalSocket::connected, this, [this] {
+    const QJsonObject control{{"id", 1}, {"name", "set-paused"},
+                              {"data", m_pauseTarget}};
+    const auto request = QJsonDocument(control).toJson(QJsonDocument::Compact) + '\n';
+    m_pauseSent = m_pauseSocket.write(request) == request.size();
+    if (!m_pauseSent)
+      finishPause(false, "Could not send the recording control request.", true);
+  });
+  connect(&m_pauseSocket, &QLocalSocket::readyRead, this, [this] {
+    if (!m_pausePending)
+      return;
+    if (m_pauseSocket.bytesAvailable() > 4096) {
+      finishPause(false, "The recorder sent an invalid reply.", true);
+      return;
+    }
+    if (!m_pauseSocket.canReadLine())
+      return;
+    const auto reply =
+        QJsonDocument::fromJson(m_pauseSocket.readLine()).object();
+    const QString result = reply.value("result").toString();
+    if (reply.value("id").toInt() != 1 ||
+        (result != "ok" && result != "error")) {
+      finishPause(false, "The recorder sent an invalid reply.", true);
+      return;
+    }
+    finishPause(result == "ok", reply.value("data").toString());
+  });
+  connect(&m_pauseSocket, &QLocalSocket::errorOccurred, this,
+          [this](QLocalSocket::LocalSocketError) {
+            finishPause(false, "Could not reach the recording controls.",
+                        m_pauseSent);
+          });
+  connect(&m_pauseSocket, &QLocalSocket::disconnected, this, [this] {
+    finishPause(false, "The recorder disconnected before answering.",
+                m_pauseSent);
+  });
   m_countdownTick.setInterval(1000);
   connect(&m_countdownTick, &QTimer::timeout, this, [this] {
     if (--m_remaining <= 0) {
@@ -231,6 +272,12 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
   connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
           this, &Recorder::validateResult);
 }
+Recorder::~Recorder() {
+  // QProcess can emit finished during its destructor, after our later-declared
+  // members have been destroyed. Do not run capture callbacks during teardown.
+  m_process.disconnect(this);
+  m_pauseSocket.disconnect(this);
+}
 void Recorder::refreshBar() const {
   // The bar's recording icon only rechecks when asked.
   if (m_barStop)
@@ -239,10 +286,11 @@ void Recorder::refreshBar() const {
 }
 bool Recorder::active() const {
   return m_state == "countdown" || m_state == "starting" ||
-         m_state == "recording" || m_state == "stopping";
+         m_state == "recording" || m_state == "paused" || m_state == "stopping";
 }
 QString Recorder::elapsed() const {
-  qint64 seconds = m_clock.isValid() ? m_clock.elapsed() / 1000 : 0;
+  qint64 seconds =
+      (m_recordedMs + (m_clock.isValid() ? m_clock.elapsed() : 0)) / 1000;
   return QString("%1:%2")
       .arg(seconds / 60, 2, 10, QChar('0'))
       .arg(seconds % 60, 2, 10, QChar('0'));
@@ -593,6 +641,8 @@ void Recorder::start() {
   m_error.clear();
   m_frameTimedOut = false;
   m_path.clear();
+  m_recordedMs = 0;
+  m_clock.invalidate();
   QSettings s;
   s.setValue("record/desktop", m_desktop);
   s.setValue("record/microphone", m_microphone);
@@ -664,11 +714,19 @@ void Recorder::launch() {
         const QString mic =
             m_microphone ? m_mics.value(m_mic).toMap().value("id").toString()
                          : QString();
+        m_controlDir = std::make_unique<QTemporaryDir>(
+            QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) +
+            "/omaframe-recorder-XXXXXX");
+        if (!m_controlDir->isValid()) {
+          fail("Could not create the recording controls.");
+          return;
+        }
         m_clock.start();
-        const auto [program, arguments] =
-            Recording::recorderCommand(Recording::arguments(
-                m_target, m_path, m_desktop ? m_defaultSink : QString(), mic,
-                m_cursor));
+        const auto [program, arguments] = Recording::recorderCommand(
+            Recording::arguments(m_target, m_path,
+                                 m_desktop ? m_defaultSink : QString(), mic,
+                                 m_cursor) +
+            QStringList{"-ipc", m_controlDir->filePath("control.sock")});
         m_process.start(program, arguments);
         m_startupCheck.start();
         emit changed();
@@ -741,6 +799,58 @@ void Recorder::launch() {
     return Check{};
   }));
 }
+void Recorder::freezeClock() {
+  if (m_clock.isValid()) {
+    m_recordedMs += m_clock.elapsed();
+    m_clock.invalidate();
+  }
+}
+bool Recorder::setPaused(bool paused) {
+  if (m_pausePending || (m_state != "recording" && m_state != "paused") ||
+      m_process.state() != QProcess::Running)
+    return false;
+  if (paused == (m_state == "paused")) {
+    emit pauseFinished(true);
+    return true;
+  }
+  m_pauseTarget = paused;
+  m_pausePending = true;
+  m_pauseSent = false;
+  m_pauseTimeout.start();
+  emit changed();
+  m_pauseSocket.connectToServer(m_controlDir->filePath("control.sock"));
+  return true;
+}
+void Recorder::finishPause(bool success, const QString &error, bool uncertain) {
+  if (!m_pausePending)
+    return;
+  m_pausePending = false;
+  m_pauseTimeout.stop();
+  m_pauseSocket.abort();
+  if (success) {
+    if (m_pauseTarget) {
+      freezeClock();
+      m_tick.stop();
+      m_state = "paused";
+      m_status = "Paused";
+    } else {
+      m_clock.start();
+      m_tick.start();
+      m_state = "recording";
+      m_status = "Recording";
+    }
+  } else if (uncertain) {
+    // The backend may have acted before its reply was lost. Finish the clip
+    // rather than showing a pause state we cannot confirm.
+    stop();
+    m_status = "Saving recording because pause status could not be confirmed.";
+  } else if (!error.isEmpty()) {
+    m_status =
+        (m_pauseTarget ? "Could not pause. " : "Could not resume. ") + error;
+  }
+  emit changed();
+  emit pauseFinished(success);
+}
 void Recorder::stop() {
   if (m_state == "countdown" ||
       (m_state == "starting" && m_process.state() == QProcess::NotRunning)) {
@@ -753,8 +863,10 @@ void Recorder::stop() {
     emit dismissRequested();
     return;
   }
-  if (m_state != "recording" && m_state != "starting")
+  if (m_state != "recording" && m_state != "paused" && m_state != "starting")
     return;
+  finishPause(false);
+  freezeClock();
   m_state = "stopping";
   m_status = "Finishing and checking your recording…";
   m_startupCheck.stop();
@@ -772,6 +884,9 @@ static bool discardEmpty(const QString &path) {
   return info.exists() && info.size() < 64 * 1024 && QFile::remove(path);
 }
 void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
+  finishPause(false);
+  freezeClock();
+  m_controlDir.reset();
   m_startupCheck.stop();
   m_tick.stop();
   QFile::remove(m_path + ".ts");

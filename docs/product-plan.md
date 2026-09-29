@@ -6,7 +6,7 @@ Status: planning archive and backlog. Omaframe 0.3.0 is published; see README.md
 
 ## Current direction, 2026-09-29
 
-Keep capture quick and the interface small. Basic CI builds on Arch and runs five headless suites plus OCR pattern tests; current documentation tracks the 0.3.0 release. Recording pause/resume is the next feature and is not implemented yet. Larger studio features below remain optional backlog, not committed release requirements.
+Keep capture quick and the interface small. Basic CI builds on Arch and runs five headless suites plus OCR pattern tests. The published package is 0.3.0; later source builds add recording pause/resume within the existing control, with private recorder IPC and a timer that excludes paused time. Larger studio features below remain optional backlog, not committed release requirements.
 
 Use automated regression checks and handle unusual display configurations through bug reports and targeted fixes. No owner-run hardware matrix, monitor power changes or fresh-desktop walkthrough is required before release. Historical acceptance requirements below are superseded by [RELEASING.md](../RELEASING.md). Validation records remain evidence of what was actually checked, not a pending checklist for the owner.
 
@@ -14,7 +14,7 @@ Use automated regression checks and handle unusual display configurations throug
 
 Owner feedback on 2026-09-25 prioritizes instant capture and explicitly rejects feature bloat. The earlier broad studio roadmap below is a backlog, not a requirement to expose all those features in the core interface.
 
-Screenshot / Video selection, target selection, computer sound and microphone controls, recorder ownership, stop/finalization and review handoff have shipped. Print remains the screenshot default and Alt+Print starts or stops recording. The next feature is pause/resume within that existing flow.
+Screenshot / Video selection, target selection, computer sound and microphone controls, recorder ownership, stop/finalization and review handoff have shipped. Print remains the screenshot default and Alt+Print starts or stops recording. Source builds after 0.3.0 add pause/resume within that flow, including CLI controls when no button can sit outside the capture.
 
 Countdown and cursor visibility belong in a small More menu. Webcam is secondary. Scrolling capture is useful as a separate screenshot mode, initially focused on browser pages, after the normal screenshot and recording paths are dependable. It must handle fixed headers, repeated content, lazy loading, and manual stop before it is described as reliable. OCR and pinning are contextual result actions, not permanent capture-bar toggles. Timelines, captions, camera layers, and other advanced editing remain deferred.
 
