@@ -36,24 +36,29 @@ Button {
         border.color: control.activeFocus ? theme.focusBorder : control.hovered ? theme.hoverBorder : theme.controlBorder
         Behavior on color { ColorAnimation { duration: 90 } }
     }
-    contentItem: RowLayout {
-        id: content
-        spacing: 8
-        Glyph {
-            visible: control.glyph.length > 0
-            name: control.glyph
-            ink: control.ink
-            Layout.preferredWidth: 17
-            Layout.preferredHeight: 17
-        }
-        Text {
-            visible: control.text.length > 0
-            text: control.text
-            color: control.ink
-            font.family: control.font.family
-            font.pixelSize: control.font.pixelSize
-            font.weight: control.primary || control.danger ? Font.DemiBold : Font.Normal
-            Layout.alignment: Qt.AlignVCenter
+    contentItem: Item {
+        implicitWidth: content.implicitWidth
+        implicitHeight: content.implicitHeight
+        RowLayout {
+            id: content
+            anchors.centerIn: parent
+            spacing: 8
+            Glyph {
+                visible: control.glyph.length > 0
+                name: control.glyph
+                ink: control.ink
+                Layout.preferredWidth: 17
+                Layout.preferredHeight: 17
+            }
+            Text {
+                visible: control.text.length > 0
+                text: control.text
+                color: control.ink
+                font.family: control.font.family
+                font.pixelSize: control.font.pixelSize
+                font.weight: control.primary || control.danger ? Font.DemiBold : Font.Normal
+                Layout.alignment: Qt.AlignVCenter
+            }
         }
     }
 }

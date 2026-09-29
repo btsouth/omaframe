@@ -23,7 +23,7 @@ If pacman says it cannot satisfy a dependency, your package lists are older
 than GPU Screen Recorder 6.1.0. Run `omarchy-update` (or `sudo pacman -Syu` on
 plain Arch) and then the command again.
 
-Open Omaframe from the launcher and click **Use Print and Alt+Print**. It only
+Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
@@ -62,6 +62,9 @@ cover it, and drag over it. It stays hidden for the whole clip. To point
 something out, pause where it happens and press A for an arrow, B for a box, T
 for a label or N for a numbered step. Those show from there to the end. Select
 any mark and press I and O to set where it starts and stops.
+
+Video edits stay in the current session. Export them before opening another
+file or closing Omaframe.
 
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 

@@ -539,10 +539,12 @@ Item {
                 color: theme.text
                 elide: Text.ElideMiddle
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
             }
             Rectangle {
                 visible: pane.savedCurrent
                 implicitWidth: savedRow.implicitWidth + 18
+                Layout.maximumWidth: pane.width * 0.65
                 implicitHeight: 26
                 radius: theme.radius
                 color: theme.alpha(theme.accent, 0.14)
@@ -550,10 +552,13 @@ Item {
                 border.color: theme.alpha(theme.accent, 0.5)
                 RowLayout {
                     id: savedRow
-                    anchors.centerIn: parent
+                    anchors.fill: parent
+                    anchors.margins: 9
+                    anchors.topMargin: 6
+                    anchors.bottomMargin: 6
                     spacing: 6
                     Glyph { name: "check"; ink: theme.selectedText; Layout.preferredWidth: 14; Layout.preferredHeight: 14 }
-                    Text { text: "Saved " + video.savedName + (video.savedSummary.length ? " · " + video.savedSummary : ""); color: theme.selectedText; font.pixelSize: 11 }
+                    Text { Layout.fillWidth: true; text: "Saved " + video.savedName + (video.savedSummary.length ? " · " + video.savedSummary : ""); color: theme.selectedText; font.pixelSize: 11; elide: Text.ElideMiddle }
                 }
             }
             Text {
@@ -850,10 +855,13 @@ Item {
                 hint: pane.muted ? "The saved video will be silent. Click to keep the sound." : "Click to save the video without sound"
                 onClicked: pane.toggleSound()
             }
-            Divider {
-                Layout.leftMargin: 2
-                Layout.rightMargin: 2
-            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 6
+            spacing: 6
+            Caption { text: "MARK UP"; Layout.rightMargin: 6 }
             StudioButton {
                 text: "Blur"
                 glyph: "blur"
@@ -876,21 +884,22 @@ Item {
             }
             Repeater {
                 model: [
-                    { key: "arrow", hint: "Arrow · A" }, { key: "box", hint: "Box · B" },
-                    { key: "text", hint: "Label · T" }, { key: "step", hint: "Numbered step · N" }
+                    { key: "arrow", label: "Arrow", hint: "Arrow · A" }, { key: "box", label: "Box", hint: "Box · B" },
+                    { key: "text", label: "Label", hint: "Label · T" }, { key: "step", label: "Steps", hint: "Numbered step · N" }
                 ]
                 StudioButton {
                     required property var modelData
                     glyph: modelData.key
+                    text: modelData.label
                     quiet: pane.tool !== modelData.key
                     selected: pane.tool === modelData.key
-                    implicitWidth: 36
                     implicitHeight: 36
                     enabled: pane.editable
                     hint: modelData.hint
                     onClicked: pane.tool === modelData.key ? pane.tool = "select" : pane.useTool(modelData.key)
                 }
             }
+            Item { Layout.fillWidth: true }
         }
 
         // One fixed-height bar that describes the selection, so choosing a
@@ -913,6 +922,8 @@ Item {
                     })[pane.tool] || ""
                 color: theme.muted
                 font.pixelSize: 12
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
             }
             Caption {
@@ -954,6 +965,8 @@ Item {
                     : "(" + ((pane.selectedMark.end || 0) - (pane.selectedMark.start || 0)).toFixed(1) + " s)"
                 color: theme.faint
                 font.pixelSize: 11
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
             }
             StudioButton {
@@ -981,6 +994,8 @@ Item {
                     : "Drag the ends of the filmstrip to trim. Drag across it to select a part to remove."
                 color: pane.notice.length ? theme.urgent : theme.muted
                 font.pixelSize: 12
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
             }
             Caption {

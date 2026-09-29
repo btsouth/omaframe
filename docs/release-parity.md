@@ -38,6 +38,11 @@ Stop works while paused. The recorder suite covers repeated transitions,
 rejected or lost replies, normal finalization and preserving custom shortcuts.
 This is not part of the published 0.3.0 package.
 
+Source builds also center button contents, label the video mark tools, and
+keep editor controls and recording options reachable in smaller windows.
+Settings and capture menus close with Esc, and the sample opens in Edit.
+Video edits still have no drafts or confirmation when leaving the session.
+
 GPU Screen Recorder 6.1.0 already supports the private `set-paused` control and
 a shared pause-aware video/audio clock. See its [6.1.0 control documentation](https://git.dec05eba.com/gpu-screen-recorder/tree/README.md?h=6.1.0).
 Omaframe waits for the backend's reply before changing its displayed state.
