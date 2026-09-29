@@ -854,25 +854,28 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                   [](QWindow *w) { return w->isVisible(); });
   emit changed();
   emit hideStudio();
-  QStringList requested;
+  QStringList requested, screens;
+  for (QScreen *screen : QGuiApplication::screens())
+    screens << screen->name();
   // A region starts on whichever display the user chooses with the pointer.
   // Snapshot all displays before placing any selection overlays.
   if (repeat)
     requested << m_lastAreaMonitor;
-  else if (region && monitor == 0) {
-    for (QScreen *screen : QGuiApplication::screens())
-      requested << screen->name();
-  } else if (const auto screens = QGuiApplication::screens();
+  else if (region && monitor == 0)
+    requested = screens;
+  else if (const auto screens = QGuiApplication::screens();
              monitor > 0 && monitor <= screens.size())
     requested << screens[monitor - 1]->name();
   QTimer::singleShot(
       wasVisible ? 220 : 0, this,
-      [this, region, repeat, requested, lastArea = m_lastArea,
+      [this, region, repeat, requested, screens, lastArea = m_lastArea,
        lastPixels = m_lastAreaPixels]() mutable {
         struct SelectionCapture {
           Capture::Screens screens;
           QVariantList targets;
           QString pointer;
+          /** The last area's display is off, so a repeat selects again. */
+          bool lastAreaDark = false;
         };
         auto *watcher = new QFutureWatcher<SelectionCapture>(this);
         connect(watcher, &QFutureWatcher<SelectionCapture>::finished, this,
@@ -892,7 +895,7 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                     return;
                   }
                   QImage repeated;
-                  if (repeat) {
+                  if (repeat && !result.lastAreaDark) {
                     const auto frame = result.screens.images.constBegin();
                     if (frame.value().size() == lastPixels)
                       repeated = Capture::crop(result.screens.images, frame.key(),
@@ -911,7 +914,9 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                       m_store->put("capture/" + it.key(), it.value());
                     m_quickState = "selecting";
                     if (repeat)
-                      m_status = "The display changed. Select an area again.";
+                      m_status = result.lastAreaDark
+                                     ? "That display is off. Select an area again."
+                                     : "The display changed. Select an area again.";
                     ++m_revision;
                     emit changed();
                     emit selectionReady(m_frozen.keys());
@@ -927,7 +932,8 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                     emit chooserRequested();
                   }
                 });
-        watcher->setFuture(QtConcurrent::run([requested, region, repeat]() mutable {
+        watcher->setFuture(QtConcurrent::run([requested, screens, region,
+                                              repeat]() mutable {
           if (requested.isEmpty()) {
             QProcess process;
             process.start("hyprctl", {"-j", "monitors"});
@@ -962,6 +968,13 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
             };
             const auto monitors = query("monitors");
             const auto clients = query("clients");
+            // A display that is off never sends a frame. Repeating an area
+            // there selects again on the displays that are on, like a
+            // repeat after the display changed size.
+            if (repeat && WindowTargets::dark(monitors).contains(requested.value(0))) {
+              requested = screens;
+              result.lastAreaDark = true;
+            }
             requested = WindowTargets::awake(monitors, requested);
             result.targets =
                 WindowTargets::fromHyprland(monitors, clients, requested);

@@ -87,6 +87,9 @@ private slots:
              QStringList({"SUNVD", "HDMI-A-1"}));
     QCOMPARE(WindowTargets::awake(monitors, {"DP-1"}), QStringList({"DP-1"}));
     QCOMPARE(WindowTargets::awake({}, {"DP-1"}), QStringList({"DP-1"}));
+    // A repeat on DP-1 knows to select again elsewhere.
+    QCOMPARE(WindowTargets::dark(monitors), QStringList({"DP-1"}));
+    QCOMPARE(WindowTargets::dark({}), QStringList());
   }
 };
 QTEST_APPLESS_MAIN(DisplaysTest)

@@ -72,14 +72,19 @@ QVariantList WindowTargets::fromHyprland(const QJsonArray &monitors,
   return targets;
 }
 
-QStringList WindowTargets::awake(const QJsonArray &monitors,
-                                 const QStringList &requested) {
+QStringList WindowTargets::dark(const QJsonArray &monitors) {
   QStringList dark;
   for (const auto &value : monitors) {
     const auto m = value.toObject();
     if (!m.value("dpmsStatus").toBool(true))
       dark << m.value("name").toString();
   }
+  return dark;
+}
+
+QStringList WindowTargets::awake(const QJsonArray &monitors,
+                                 const QStringList &requested) {
+  const QStringList dark = WindowTargets::dark(monitors);
   QStringList result;
   for (const auto &name : requested)
     if (!dark.contains(name))
