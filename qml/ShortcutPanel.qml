@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
-// Shows what Print and Alt+Print do now, and offers to point them at
+// Shows the capture shortcuts and offers to point free/default keys at
 // Omaframe. Only Omarchy's stock bindings or free keys are ever changed.
 ColumnLayout {
     id: panel
@@ -11,7 +11,7 @@ ColumnLayout {
     Component.onCompleted: if (!shortcuts.available && !shortcuts.checking) shortcuts.refresh()
     function describe(key, state, action) {
         if (key.length)
-            return key === (action === "screenshot" ? "Print" : "Alt+Print") ? "Ready" : "Ready on " + key;
+            return key === (action === "screenshot" ? "Print" : action === "pause" ? "Alt+Shift+Print" : "Alt+Print") ? "Ready" : "Ready on " + key;
         if (state === "stock")
             return "Omarchy's own tool for now";
         if (state === "none")
@@ -29,7 +29,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 10
         Rectangle {
-            Layout.preferredWidth: 78
+            Layout.preferredWidth: 116
             implicitHeight: 26
             radius: theme.radius
             color: theme.controlFill
@@ -83,13 +83,19 @@ ColumnLayout {
         ready: shortcuts.recordKey.length > 0
         status: panel.describe(shortcuts.recordKey, shortcuts.recordState, "record")
     }
+    ShortcutRow {
+        key: "Alt+Shift+Print"
+        label: "Pause or resume recording"
+        ready: shortcuts.pauseKey.length > 0
+        status: panel.describe(shortcuts.pauseKey, shortcuts.pauseState, "pause")
+    }
     Text {
         Layout.fillWidth: true
         visible: text.length > 0
         text: shortcuts.message.length ? shortcuts.message
             : !shortcuts.available && !shortcuts.checking ? "Hyprland did not answer, so shortcuts cannot be checked here."
-            : shortcuts.canSetUp ? "This replaces only Omarchy's default Print and Alt+Print actions. Your other shortcuts stay as they are, and hypr/bindings.lua is backed up first."
-            : !shortcuts.ready && (shortcuts.screenshotState === "custom" || shortcuts.recordState === "custom") ? "A key already runs something else, so Omaframe left it alone. To use another key, bind it to omaframe --capture or omaframe --record."
+            : shortcuts.canSetUp ? "Use these keys for capture. Custom shortcuts are kept, and a backup is saved first."
+            : !shortcuts.ready && (shortcuts.screenshotState === "custom" || shortcuts.recordState === "custom" || shortcuts.pauseState === "custom") ? "A key already runs something else, so Omaframe left it alone."
             : ""
         color: theme.muted
         font.family: theme.fontFamily
@@ -99,7 +105,7 @@ ColumnLayout {
     }
     StudioButton {
         visible: shortcuts.canSetUp
-        text: shortcuts.checking ? "Setting up…" : "Use Print and Alt+Print"
+        text: shortcuts.checking ? "Setting up…" : "Use capture shortcuts"
         glyph: "keyboard"
         primary: !panel.compact
         enabled: !shortcuts.checking

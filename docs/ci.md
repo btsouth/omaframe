@@ -10,7 +10,7 @@ Five CTest suites have the `headless` label:
 
 | Suite | Coverage |
 | --- | --- |
-| recording | Recorder lifecycle, readiness, pause/resume, failure handling, stop placement and shortcut setup with stub tools |
+| recording | Recorder lifecycle, readiness, pause/resume, failure handling, stop placement and shortcut setup that preserves custom bindings, with stub tools |
 | displays | Display geometry, window targets and powered-off display filtering from fixtures |
 | renderer | Finishes, edge room, annotations and output dimensions |
 | theme | Color parsing, fixture themes and theme-change handling |

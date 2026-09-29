@@ -157,8 +157,9 @@ Window {
                             lineHeight: 1.2
                         }
                         StudioButton {
-                            visible: !recorder.stopShortcut && shortcuts.recordKey.length === 0 && (shortcuts.recordState === "stock" || shortcuts.recordState === "none")
-                            text: shortcuts.checking ? "Setting up…" : "Use Alt+Print to start and stop"
+                            visible: (!recorder.stopShortcut && shortcuts.recordKey.length === 0 && (shortcuts.recordState === "stock" || shortcuts.recordState === "none"))
+                                     || (!recorder.hasControl && shortcuts.pauseKey.length === 0 && shortcuts.pauseState === "none")
+                            text: shortcuts.checking ? "Setting up…" : recorder.stopShortcut ? "Enable pause shortcut" : "Set up recording shortcuts"
                             glyph: "keyboard"
                             enabled: !shortcuts.checking
                             onClicked: shortcuts.setUpRecording()

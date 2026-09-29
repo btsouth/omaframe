@@ -73,6 +73,7 @@ any mark and press I and O to set where it starts and stops.
 | --- | --- | --- |
 | Anywhere | Print Screen | Take a screenshot |
 | Anywhere | Alt+Print Screen | Start a recording, or stop it |
+| Anywhere, source builds after 0.3.0 | Alt+Shift+Print Screen | Pause or resume recording, after enabling capture shortcuts in Settings |
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
 | Choosing an area to record | D / M | Computer sound / microphone |
 | Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
@@ -125,9 +126,12 @@ same recording open and leaves the paused interval out of the saved video
 and audio. The timer counts recorded time. You can still take screenshots
 while paused, and Stop saves the clip normally.
 
-When a whole-display recording has no visible control, use
-`omaframe --pause-recording`, `omaframe --resume-recording`, or bind
-`omaframe --toggle-recording-pause` to a key of your choice. These commands
+Enable capture shortcuts in Settings to use **Alt+Shift+Print Screen** for
+pause/resume, including whole-display recordings without a visible control.
+Setup keeps custom bindings and adds the new key only when it is free.
+
+For scripts or custom keys, use `omaframe --pause-recording`,
+`omaframe --resume-recording`, or `omaframe --toggle-recording-pause`. These commands
 control only the current Omaframe recording and fail if it is not ready.
 Print and Alt+Print keep their existing behavior.
 

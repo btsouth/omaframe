@@ -33,7 +33,7 @@ if [ "$2" = monitors ]; then
 elif [ "$2" = binds ]; then
  if [ -n "$OMAFRAME_TEST_AUTO_SHORTCUT" ]; then
    if [ -e "$OMAFRAME_TEST_AUTO_SHORTCUT" ]; then
-     echo '[{"key":"PRINT","modmask":0,"description":"Screenshot with Omaframe","dispatcher":"__lua","arg":"148","submap":""},{"key":"PRINT","modmask":8,"description":"Record with Omaframe","dispatcher":"__lua","arg":"152","submap":""}]'
+     echo '[{"key":"PRINT","modmask":0,"description":"Screenshot with Omaframe","dispatcher":"__lua","arg":"148","submap":""},{"key":"PRINT","modmask":8,"description":"Record with Omaframe","dispatcher":"__lua","arg":"152","submap":""},{"key":"PRINT","modmask":9,"description":"Pause recording with Omaframe","dispatcher":"__lua","arg":"153","submap":""}]'
    else
      echo '[{"key":"PRINT","modmask":0,"description":"Screenshot","dispatcher":"__lua","arg":"148","submap":""},{"key":"PRINT","modmask":8,"description":"Screenrecording","dispatcher":"__lua","arg":"152","submap":""}]'
    fi
@@ -179,6 +179,11 @@ while True:
    QCOMPARE(Shortcuts::defaultKeyState(binds("[]"),Action::Record),QString("none"));
    QCOMPARE(Shortcuts::defaultKeyState(binds(R"([{"key":"PRINT","modmask":8,"description":"My recorder","dispatcher":"__lua","arg":"1"}])"),Action::Record),QString("custom"));
    QCOMPARE(Shortcuts::defaultKeyState(binds(R"([{"key":"PRINT","modmask":8,"description":"Record with Omaframe","dispatcher":"__lua","arg":"1"}])"),Action::Record),QString("omaframe"));
+   QCOMPARE(Shortcuts::omaframeKey(binds(R"([{"key":"PRINT","modmask":9,"description":"Pause recording with Omaframe","dispatcher":"__lua","arg":"2"}])"),Action::Pause),QString("Alt+Shift+Print"));
+   QCOMPARE(Shortcuts::omaframeKey(binds(R"([{"key":"p","modmask":65,"dispatcher":"exec","arg":"omaframe --toggle-recording-pause"}])"),Action::Pause),QString("Super+Shift+P"));
+   QCOMPARE(Shortcuts::defaultKeyState(binds(R"([{"key":"PRINT","modmask":9,"dispatcher":"exec","arg":"other-recorder"}])"),Action::Pause),QString("custom"));
+   QCOMPARE(Shortcuts::defaultKeyState(binds("[]"),Action::Pause),QString("none"));
+   QVERIFY(Shortcuts::omaframeKey(binds(R"([{"key":"PRINT","modmask":9,"dispatcher":"exec","arg":"omaframe --toggle-recording-pause"}])"),Action::Record).isEmpty());
  }
  void fullDisplayOnOneMonitorKeepsEveryControlOutOfTheVideo() {
    qputenv("OMAFRAME_TEST_NO_STOP_BIND","1");
@@ -265,6 +270,29 @@ while True:
    QVERIFY(!Shortcuts::install(config,"/bin/true",{Action::Screenshot},&error));
    QVERIFY(error.contains("does not load"));
  }
+ void pauseShortcutPreservesExistingKeysAndCustomBindings() {
+   using Shortcuts::Action;
+   const QString config=temp.filePath("pause-shortcuts");QVERIFY(QDir().mkpath(config));
+   QFile startup(config+"/hyprland.lua");QVERIFY(startup.open(QIODevice::WriteOnly));
+   startup.write("require(\"hypr.bindings\")\n");startup.close();
+   QFile bindings(config+"/bindings.lua");QVERIFY(bindings.open(QIODevice::WriteOnly));
+   bindings.write("-- Other keys\no.bind(\"SUPER + K\", \"Other action\", \"other\")\n");bindings.close();
+   QString error,backup;
+   QVERIFY(Shortcuts::install(config,"/bin/true",{Action::Screenshot,Action::Record},&error));
+   QVERIFY2(Shortcuts::install(config,"/bin/true",{Action::Pause},&error,&backup),qPrintable(error));
+   QVERIFY(QFileInfo::exists(backup));QVERIFY(bindings.open(QIODevice::ReadOnly));
+   const QByteArray all=bindings.readAll();bindings.close();
+   QVERIFY(all.contains("SUPER + K"));QVERIFY(all.contains("Screenshot with Omaframe"));QVERIFY(all.contains("Record with Omaframe"));
+   QVERIFY(all.contains("o.bind(\"ALT + SHIFT + PRINT\", \"Pause recording with Omaframe\", \"'/bin/true' --toggle-recording-pause\")"));
+   QString again;QVERIFY(Shortcuts::install(config,"/bin/true",{Action::Pause},&error,&again));QVERIFY(again.isEmpty());
+   for(const QByteArray key:{QByteArray("ALT + SHIFT + PRINT"),QByteArray("SHIFT + ALT + PRINT")}){
+     QVERIFY(bindings.open(QIODevice::WriteOnly|QIODevice::Truncate));
+     const QByteArray custom="o.bind(\""+key+"\", \"Custom\", \"other\")\n";
+     bindings.write(custom);bindings.close();
+     QVERIFY(!Shortcuts::install(config,"/bin/true",{Action::Pause},&error));QVERIFY(error.contains("custom binding"));
+     QVERIFY(bindings.open(QIODevice::ReadOnly));QCOMPARE(bindings.readAll(),custom);bindings.close();
+   }
+ }
  void recordingNeverEditsShortcutsWithoutBeingAsked() {
    const QString config=temp.filePath("config/hypr");
    QVERIFY(QDir().mkpath(config));
@@ -280,18 +308,21 @@ while True:
    QVERIFY(!QFile::exists(QString::fromUtf8(flag)));
    QVERIFY(bindings.open(QIODevice::ReadOnly));QCOMPARE(bindings.readAll(),QByteArray("-- existing user shortcuts\n"));bindings.close();
    // Setup changes the stock keys only when the user asks for it.
-   ShortcutSetup s;QObject::connect(&s,&ShortcutSetup::changed,&r,[&]{if(s.available()&&!s.checking())r.setStopKey(s.recordKey());});
+   ShortcutSetup s;QObject::connect(&s,&ShortcutSetup::changed,&r,[&]{if(s.available()&&!s.checking()){r.setStopKey(s.recordKey());r.setPauseKey(s.pauseKey());}});
    s.refresh();QTRY_VERIFY(s.available()&&!s.checking());
    QCOMPARE(s.screenshotState(),QString("stock"));QCOMPARE(s.recordState(),QString("stock"));QVERIFY(s.canSetUp());
    s.setUp();QTRY_VERIFY_WITH_TIMEOUT(!s.checking(),5000);
    QVERIFY2(s.ready(),qPrintable(s.message()));
    QCOMPARE(s.recordKey(),QString("Alt+Print"));QCOMPARE(s.screenshotKey(),QString("Print"));
-   QVERIFY(s.message().contains("now open Omaframe"));
+   QCOMPARE(s.pauseKey(),QString("Alt+Shift+Print"));
+   QCOMPARE(r.pauseKey(),s.pauseKey());QVERIFY(r.controlLocation().contains("pauses or resumes"));
+   QVERIFY(s.message().contains("shortcuts are ready"));
    QVERIFY(r.canStart());
    QVERIFY(bindings.open(QIODevice::ReadOnly));
    const QByteArray content=bindings.readAll();bindings.close();
    QVERIFY(content.startsWith("-- existing user shortcuts\n"));
    QVERIFY(content.contains("Screenshot with Omaframe"));QVERIFY(content.contains("Record with Omaframe"));
+   QVERIFY(content.contains("Pause recording with Omaframe"));QVERIFY(content.contains("--toggle-recording-pause"));
    qunsetenv("OMAFRAME_TEST_AUTO_SHORTCUT");
  }
  void unsupportedShortcutApiDoesNotTouchConfig() {

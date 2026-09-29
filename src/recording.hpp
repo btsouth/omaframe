@@ -73,6 +73,7 @@ class Recorder final : public QObject {
   Q_PROPERTY(bool countdownOnly READ countdownOnly NOTIFY changed)
   Q_PROPERTY(bool stopShortcut READ stopShortcut NOTIFY changed)
   Q_PROPERTY(QString stopKey READ stopKey NOTIFY changed)
+  Q_PROPERTY(QString pauseKey READ pauseKey NOTIFY changed)
   Q_PROPERTY(bool needsStopShortcut READ needsStopShortcut NOTIFY changed)
   Q_PROPERTY(QString controlLocation READ controlLocation NOTIFY changed)
   Q_PROPERTY(QString savedPath READ savedPath NOTIFY changed)
@@ -110,6 +111,7 @@ public:
   }
   bool stopShortcut() const { return !m_stopKey.isEmpty(); }
   QString stopKey() const { return m_stopKey; }
+  QString pauseKey() const { return m_pauseKey; }
   /** The chosen area leaves no room for a Stop button and no shortcut stops
    *  Omaframe yet. */
   bool needsStopShortcut() const {
@@ -140,6 +142,7 @@ public:
   /** Shows setup for the current target, e.g. from the capture bar. */
   Q_INVOKABLE void showSetup();
   void setStopKey(const QString &key);
+  void setPauseKey(const QString &key);
   /** Forgets an unstarted setup, e.g. when the selector is cancelled. */
   void reset();
   void layoutChanged();
@@ -167,7 +170,7 @@ private:
                    bool uncertain = false);
   void freezeClock();
   QString m_state = "idle", m_status, m_screen, m_target, m_path, m_error,
-          m_defaultSink, m_preferredMic, m_stopKey;
+          m_defaultSink, m_preferredMic, m_stopKey, m_pauseKey;
   QList<Recording::Display> m_displays;
   QVariantList m_mics;
   Recording::Placement m_control, m_countdownControl;
