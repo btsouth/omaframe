@@ -54,8 +54,15 @@ physical microphone quality or GPU-specific capture timing.
 
 ## Possible next work
 
-Manual crop/zoom is a possible later addition. Camera, automatic focus,
-captions, clip assembly and other large editor features remain backlog.
+Source builds after 0.4.0 add manual video crop, automatic recovery drafts
+and optional webcam overlay. Crop applies to the whole clip. Drafts retain
+edits and reference the original video, which must stay in place. Camera is
+off by default and records a separate track using recorded time, so pause,
+trim and cuts apply to both tracks. Review lets you move, resize or hide the
+camera before exporting a new MP4.
+
+Animated zoom, automatic focus, captions and clip assembly remain backlog.
+The current published release is still 0.4.0.
 
 ## Validation notes
 

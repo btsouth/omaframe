@@ -63,9 +63,19 @@ something out, pause where it happens and press A for an arrow, B for a box, T
 for a label or N for a numbered step. Those show from there to the end. Select
 any mark and press I and O to set where it starts and stops.
 
-Video edits stay in the current session. If you open another file, start a
-capture or close Omaframe before saving, choose **Save and continue**,
-**Discard edits**, or **Cancel**. A failed save keeps your edits open.
+Source builds after 0.4.0 also support video crop, recovery drafts and camera:
+
+- Press C and drag a rectangle to crop the whole clip. Press V to preview it,
+  or **Reset crop** to restore the full frame.
+- Edits are kept automatically in **Recent edits**, including trim, cuts,
+  sound, marks, crop and camera placement. Reopen a draft to continue. Keep
+  the original video in place; drafts store edits without copying large videos.
+- Turn on **Camera overlay** in recording Options and choose your camera.
+  It starts off. After recording, pause playback and drag the camera to move
+  it. The **Camera** menu changes its size, position or visibility.
+
+Export saves a new MP4 with your edits. If a draft cannot be saved, Omaframe
+asks before leaving the editor. A failed export keeps your edits open.
 
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 
@@ -88,7 +98,7 @@ capture or close Omaframe before saving, choose **Save and continue**,
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
-| Reviewing a video | G R A B T N | Blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
+| Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
 | In the window | Ctrl+C or Ctrl+S | Copy and save |
 
 ## Good to know
@@ -102,9 +112,14 @@ even in drafts. Reading needs `tesseract` and `tesseract-data-eng`; without
 them the button and T are simply not there. Set `OMARCHY_OCR_LANGS` (for
 example `eng+deu`) to read other languages, as Omarchy's own text capture does.
 
-When you add marks, Omaframe keeps an editable draft with a private copy of the
-capture, listed under Recent edits so you can change it later. Delete a draft
-there when you are done with it.
+Screenshot drafts keep a private copy of the capture. Video drafts keep only
+edits and refer to the original video. Both appear under **Recent edits**.
+Deleting a video draft leaves the original video and exports in place.
+
+Camera recordings keep a separate camera video and a small `.camera.json`
+file beside the screen recording. Keep these files together to edit the camera
+later. Pause/resume leaves paused time out of both tracks. If the camera fails,
+screen recording continues. Share the exported MP4 to include your chosen layout.
 
 Recording a whole display on a single monitor leaves no room for a Stop button
 outside the video, so Omaframe shows a short countdown that tells you how to
@@ -139,7 +154,7 @@ For scripts or custom keys, use `omaframe --pause-recording`,
 control only the current Omaframe recording and fail if it is not ready.
 Print and Alt+Print keep their existing behavior.
 
-There is no webcam overlay or zoom yet. Marks on a video stay in place:
+There is no animated zoom yet. Marks on a video stay in place:
 they do not follow something that moves or scrolls.
 
 ## Uninstall
@@ -186,7 +201,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs six suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs seven headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 

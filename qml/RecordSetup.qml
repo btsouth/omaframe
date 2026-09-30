@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtMultimedia
 
 // Full recording options. The capture bar covers the usual case; this opens
 // from its settings button, and whenever a recording needs attention.
@@ -137,6 +138,32 @@ Window {
                         text: "Silence the first 0.4 s to hide a start-up pop"
                         checked: recorder.suppressStartupPop
                         onToggled: recorder.suppressStartupPop = checked
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
+                    RecordToggle {
+                        Layout.fillWidth: true; Layout.minimumWidth: 0
+                        text: "Camera overlay"; checked: recorder.camera.enabled
+                        onToggled: recorder.camera.enabled = checked
+                    }
+                    Choice {
+                        Layout.fillWidth: true; visible: recorder.camera.enabled
+                        model: recorder.camera.devices; textRole: "label"
+                        currentIndex: recorder.camera.device
+                        displayText: currentIndex < 0 ? "No camera found" : currentText
+                        onActivated: recorder.camera.device = currentIndex
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 130
+                        visible: recorder.camera.enabled
+                        color: theme.well; radius: theme.radius; clip: true
+                        VideoOutput { id: cameraPreview; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+                        Text { anchors.centerIn: parent; visible: !recorder.camera.ready; text: "Waiting for camera…"; color: theme.muted; font.pixelSize: 12 }
+                    }
+                    Binding { target: recorder.camera; property: "previewSink"; value: setup.visible && recorder.camera.enabled ? cameraPreview.videoSink : null }
+                    Text {
+                        Layout.fillWidth: true; visible: recorder.camera.enabled
+                        text: recorder.camera.status; color: recorder.camera.ready ? theme.muted : theme.urgent
+                        font.pixelSize: 12; wrapMode: Text.Wrap
                     }
                     Rectangle {
                         Layout.fillWidth: true

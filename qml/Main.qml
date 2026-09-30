@@ -40,26 +40,32 @@ ApplicationWindow {
     property string savedSignature: ""
     property bool closingApproved: false
     readonly property bool videoLoaded: videoMode && video.source.toString().length > 0
-    readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0
+    readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0 && !video.marks.hasCrop && !(video.cameraSource.toString().length && video.cameraLayout.visible)
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
     readonly property bool typing: markCanvas.typing || videoPane.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
-    property bool shortcutsAllowed: !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
+    property bool shortcutsAllowed: !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
     property bool working: navigation.saving || studio.busy || video.busy || (recorder.active && !studio.quickMode)
     property string currentStatus: videoMode ? video.status : studio.status
     property string currentDirectory: videoMode ? video.outputDirectory : studio.outputDirectory
     property string currentSaved: videoMode ? video.savedPath : studio.savedPath
     readonly property bool narrow: width < 1100
 
+    function resumeRecent(draft) {
+        if (draft.kind === "video") root.requestNavigation("video-draft", draft.id);
+        else root.requestNavigation("image-draft", draft.id);
+    }
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
     function requestNavigation(command, file) {
         if (studio.busy || video.busy || navigation.saving) return;
         if (videoLoaded) {
             videoPane.commitText();
             videoPane.pause();
+            videoPane.syncDraft();
+            video.saveDraftNow();
         }
         navigation.request(command, file || "");
     }
-    Binding { target: navigation; property: "dirty"; value: root.videoLoaded && !root.videoUnchanged && !root.videoSavedCurrent }
+    Binding { target: navigation; property: "dirty"; value: root.videoLoaded && !root.videoUnchanged && !root.videoSavedCurrent && video.draftSignature !== videoPane.signature }
     function acceptCurrent() {
         if (markCanvas.typing)
             markCanvas.commitText();
@@ -144,9 +150,10 @@ ApplicationWindow {
             root.editing = false;
             root.recordingReview = false;
         }
-        function onLoaded() { root.savedSignature = ""; }
+        function onLoaded() { root.savedSignature = video.savedSignature; }
         function onExported() {
             root.savedSignature = videoPane.signature;
+            video.recordSavedSignature(videoPane.signature);
             navigation.saveSucceeded();
         }
         function onExportFailed() {
@@ -273,10 +280,12 @@ ApplicationWindow {
     ConfirmDialog {
         id: draftDeleteDialog
         property string draftId: ""
+        property bool videoDraft: false
         title: "Delete this draft?"
-        message: "Its private source image and marks are removed. Files you already saved stay where they are."
+        message: videoDraft ? "Only these saved edits are removed. Your original video and exports stay where they are."
+                            : "Its private source image and marks are removed. Files you already saved stay where they are."
         confirmText: "Delete draft"
-        onConfirmed: studio.deleteDraft(draftId)
+        onConfirmed: videoDraft ? video.deleteDraft(draftId) : studio.deleteDraft(draftId)
     }
     Popup {
         id: leaveDialog
@@ -764,7 +773,7 @@ ApplicationWindow {
                     }
                 }
                 ColumnLayout {
-                    visible: studio.drafts.length > 0
+                    visible: studio.drafts.length + video.drafts.length > 0
                     Layout.fillWidth: true
                     spacing: 8
                     SectionLabel { text: "RECENT EDITS" }
@@ -774,7 +783,7 @@ ApplicationWindow {
                         columnSpacing: 12
                         rowSpacing: 8
                         Repeater {
-                            model: studio.drafts
+                            model: studio.drafts.concat(video.drafts)
                             delegate: Rectangle {
                                 id: draftCard
                                 required property var modelData
@@ -787,15 +796,15 @@ ApplicationWindow {
                                 activeFocusOnTab: true
                                 Accessible.role: Accessible.Button
                                 Accessible.name: modelData.name + ". Resume edit"
-                                Accessible.onPressAction: studio.resumeDraft(modelData.id)
-                                Keys.onReturnPressed: studio.resumeDraft(modelData.id)
-                                Keys.onSpacePressed: studio.resumeDraft(modelData.id)
+                                Accessible.onPressAction: root.resumeRecent(modelData)
+                                Keys.onReturnPressed: root.resumeRecent(modelData)
+                                Keys.onSpacePressed: root.resumeRecent(modelData)
                                 MouseArea {
                                     id: draftMouse
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: studio.resumeDraft(draftCard.modelData.id)
+                                    onClicked: root.resumeRecent(draftCard.modelData)
                                 }
                                 RowLayout {
                                     anchors.fill: parent
@@ -809,7 +818,8 @@ ApplicationWindow {
                                         clip: true
                                         Image {
                                             anchors.fill: parent
-                                            source: draftCard.modelData.image
+                                            source: draftCard.modelData.image || ""
+                                            Glyph { anchors.centerIn: parent; visible: draftCard.modelData.kind === "video"; name: "record"; width: 24; height: 24; ink: theme.muted }
                                             sourceSize.width: 144
                                             fillMode: Image.PreserveAspectCrop
                                             asynchronous: true
@@ -820,7 +830,7 @@ ApplicationWindow {
                                         spacing: 2
                                         Text { Layout.fillWidth: true; text: draftCard.modelData.name; color: theme.text; font.pixelSize: 12; elide: Text.ElideMiddle }
                                         Text {
-                                            text: draftCard.modelData.when + " · " + draftCard.modelData.edits + (draftCard.modelData.edits === 1 ? " mark" : " marks") + (draftCard.modelData.exported ? " · saved" : "")
+                                            text: (draftCard.modelData.kind === "video" ? "Video · " : "") + draftCard.modelData.when + " · " + draftCard.modelData.edits + (draftCard.modelData.edits === 1 ? " mark" : " marks") + (draftCard.modelData.exported ? " · saved" : "")
                                             color: theme.muted
                                             font.pixelSize: 11
                                         }
@@ -831,6 +841,7 @@ ApplicationWindow {
                                         quiet: true
                                         implicitHeight: 30
                                         onClicked: {
+                                            draftDeleteDialog.videoDraft = draftCard.modelData.kind === "video";
                                             draftDeleteDialog.draftId = draftCard.modelData.id;
                                             draftDeleteDialog.open();
                                         }
@@ -841,7 +852,7 @@ ApplicationWindow {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: "Drafts keep a private copy of the unedited capture so you can change your marks later. Delete a draft when you are done with it."
+                        text: "Image drafts keep a private original. Video drafts keep edits and refer to the original video; keep that file in place. Delete drafts when you are done."
                         color: theme.faint
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
@@ -1512,8 +1523,10 @@ ApplicationWindow {
             property var cuts: item ? item.cuts : []
             property string signature: item ? item.signature : ""
             property bool typing: item ? item.typing : false
+            property bool popupOpen: item ? item.popupOpen : false
             function pause() { if (item) item.pause() }
             function commitText() { if (item) item.commitText() }
+            function syncDraft() { if (item) item.syncDraft() }
             onLoaded: {
                 item.shortcutsAllowed = Qt.binding(function() { return root.shortcutsAllowed });
                 item.savedCurrent = Qt.binding(function() { return root.videoSavedCurrent });
@@ -1522,7 +1535,7 @@ ApplicationWindow {
         // Footer
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 74
+            Layout.preferredHeight: root.videoMode && root.height < 600 ? 64 : 74
             visible: root.videoMode || studio.hasImage
             color: theme.alpha(theme.background, 1)
             Rectangle {

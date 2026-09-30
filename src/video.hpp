@@ -1,10 +1,11 @@
 #pragma once
 #include "marks.hpp"
+#include <QHash>
+#include <QImage>
 #include <QObject>
 #include <QProcess>
 #include <QTemporaryDir>
-#include <QHash>
-#include <QImage>
+#include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include <memory>
@@ -62,6 +63,16 @@ class Video : public QObject {
   /** The pointing marks as pictures for the preview: index, start, end, the
    *  area x, y, w, h as fractions of the frame, and an image source. */
   Q_PROPERTY(QVariantList overlays READ overlays NOTIFY overlaysChanged)
+  Q_PROPERTY(QRectF cropBounds READ cropBounds NOTIFY changed)
+  Q_PROPERTY(QSize outputSize READ outputSize NOTIFY changed)
+  Q_PROPERTY(QVariantMap editState READ editState NOTIFY changed)
+  Q_PROPERTY(QVariantList drafts READ drafts NOTIFY draftsChanged)
+  Q_PROPERTY(QString draftSignature READ draftSignature NOTIFY changed)
+  Q_PROPERTY(QString savedSignature READ savedSignature NOTIFY changed)
+  Q_PROPERTY(QUrl cameraSource READ cameraSource NOTIFY changed)
+  Q_PROPERTY(QVariantMap cameraLayout READ cameraLayout NOTIFY changed)
+  Q_PROPERTY(QRectF cameraBounds READ cameraBounds NOTIFY changed)
+  Q_PROPERTY(double cameraDuration READ cameraDuration NOTIFY changed)
 public:
   static constexpr int ThumbnailCount = 16;
   explicit Video(QObject *parent = nullptr);
@@ -83,6 +94,23 @@ public:
   MarkDocument *marks() { return &m_marks; }
   QSize frameSize() const { return m_frameSize; }
   QVariantList overlays() const { return m_overlays; }
+  QRect cropPixels() const;
+  QRectF cropBounds() const;
+  QSize outputSize() const { return cropPixels().size(); }
+  QVariantMap editState() const { return m_editState; }
+  QVariantList drafts() const { return m_drafts; }
+  QString draftSignature() const { return m_draftSignature; }
+  QString savedSignature() const { return m_savedSignature; }
+  QUrl cameraSource() const { return m_cameraSource; }
+  QVariantMap cameraLayout() const { return m_cameraLayout; }
+  QRectF cameraBounds() const;
+  double cameraDuration() const { return m_cameraDuration; }
+  Q_INVOKABLE void setEditState(const QVariantMap &state);
+  Q_INVOKABLE bool saveDraftNow();
+  Q_INVOKABLE void resumeDraft(const QString &id);
+  Q_INVOKABLE void deleteDraft(const QString &id);
+  Q_INVOKABLE void recordSavedSignature(const QString &signature);
+  Q_INVOKABLE void setCameraLayout(const QVariantMap &layout);
   /** Where the preview pictures of the marks are kept for QML. */
   void setImageStore(ImageStore *store) { m_store = store; }
   Q_INVOKABLE void open(const QUrl &url);
@@ -108,6 +136,7 @@ signals:
   void originalAccepted(const QUrl &file);
   void overlaysChanged();
   void opened();
+  void draftsChanged();
 
 private:
   void makeThumbnails();
@@ -116,6 +145,20 @@ private:
    *  `inputs` and its place to `overlays` for each. False when one could not
    *  be written. */
   bool writeOverlays(QStringList &inputs, QVector<VideoOverlay> &overlays);
+  void refreshDrafts();
+  void restorePendingDraft();
+  void readCameraTrack();
+  bool validEditState(const QVariantMap &state) const;
+  QTimer m_draftTimer;
+  QVariantMap m_editState, m_pendingDraft;
+  QVariantMap m_cameraLayout{
+      {"visible", false}, {"width", 0.24}, {"x", 0.74}, {"y", 0.72}};
+  QVariantList m_drafts;
+  QString m_draftId, m_draftSignature, m_savedSignature;
+  bool m_draftDeleted = false;
+  qint64 m_sourceSize = 0, m_sourceModified = 0;
+  QUrl m_cameraSource;
+  double m_cameraDuration = 0;
   QUrl m_source;
   MarkDocument m_marks;
   QSize m_frameSize;

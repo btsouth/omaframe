@@ -15,6 +15,7 @@ Item {
     property bool shortcutsAllowed: true
     property bool savedCurrent: false
     property bool muted: false
+    readonly property bool compact: height < 440
     property real clipStart: 0
     property real clipEnd: 0
     property var cuts: []
@@ -30,7 +31,7 @@ Item {
     readonly property bool loaded: video.source.toString().length > 0
     readonly property bool editable: loaded && !video.busy
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
-    readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations])
+    readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations, video.marks.cropBounds, video.cameraLayout])
     // The mark tool: select, blur, redact, arrow, box, text or step.
     property string tool: "select"
     readonly property bool typing: markCanvas.typing
@@ -83,7 +84,32 @@ Item {
     }
     // Every change to the edit (trim, removed parts, sound) can be undone.
     function snapshot() {
-        return { clipStart: clipStart, clipEnd: clipEnd, muted: muted, cuts: cuts.slice() };
+        return { clipStart: clipStart, clipEnd: clipEnd, muted: muted, cuts: cuts.slice(), cameraLayout: Object.assign({}, video.cameraLayout) };
+    }
+    function syncDraft() {
+        if (editable && clipEnd - clipStart >= 0.1)
+            video.setEditState(Object.assign(snapshot(), { signature: signature }));
+    }
+    onSignatureChanged: syncDraft()
+    function loadEditState() {
+        const state = video.editState;
+        clipStart = state.clipStart || 0;
+        clipEnd = state.clipEnd || video.duration;
+        muted = state.muted || false;
+        cuts = state.cuts || [];
+        player.pause();
+        player.position = clipStart * 1000;
+        head = clipStart;
+        undoStack = [];
+        redoStack = [];
+        tool = "select";
+        clearSelection();
+        syncDraft();
+    }
+    Component.onCompleted: if (loaded) loadEditState()
+    function changeCamera(layout) {
+        pushUndo();
+        video.setCameraLayout(Object.assign({}, video.cameraLayout, layout));
     }
     function pushUndo() {
         undoStack = undoStack.concat([snapshot()]);
@@ -94,6 +120,7 @@ Item {
         clipEnd = state.clipEnd;
         muted = state.muted;
         cuts = state.cuts;
+        if (state.cameraLayout) video.setCameraLayout(state.cameraLayout);
         clearSelection();
     }
     // Marks keep their own history. Their place in the order is recorded
@@ -387,26 +414,17 @@ Item {
     }
     Connections {
         target: video
-        function onLoaded() {
-            pane.clipStart = 0;
-            pane.clipEnd = video.duration;
-            player.pause();
-            player.position = 0;
-            pane.head = 0;
-            pane.cuts = [];
-            pane.muted = false;
-            pane.undoStack = [];
-            pane.redoStack = [];
-            pane.tool = "select";
-            pane.clearSelection();
-        }
+        function onLoaded() { pane.loadEditState(); }
     }
-    readonly property bool keys: visible && editable && shortcutsAllowed && !typing
+
+    readonly property bool popupOpen: cameraMenu.opened
+    readonly property bool keys: visible && editable && shortcutsAllowed && !typing && !popupOpen
     Shortcut { sequence: "Space"; enabled: pane.keys; onActivated: pane.togglePlay() }
     Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setIn() }
     Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setOut() }
     Shortcut { sequence: "Escape"; enabled: pane.keys && (pane.barMode !== "none" || markCanvas.dragging); onActivated: pane.stepBack() }
     Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && (pane.hasSelection || pane.markSelected); onActivated: pane.deleteSelected() }
+    Shortcut { sequence: "C"; enabled: pane.keys; onActivated: pane.useTool("crop") }
     Shortcut { sequence: "G"; enabled: pane.keys; onActivated: pane.useTool("blur") }
     Shortcut { sequence: "R"; enabled: pane.keys; onActivated: pane.useTool("redact") }
     Shortcut { sequence: "A"; enabled: pane.keys; onActivated: pane.useTool("arrow") }
@@ -524,13 +542,13 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: 22
         anchors.rightMargin: 22
-        anchors.topMargin: 16
-        anchors.bottomMargin: 14
+        anchors.topMargin: pane.compact ? 8 : 16
+        anchors.bottomMargin: pane.compact ? 8 : 14
         spacing: 0
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.bottomMargin: 12
+            Layout.bottomMargin: pane.compact ? 6 : 12
             spacing: 14
             Text {
                 text: pane.loaded ? video.name : "No video open"
@@ -561,9 +579,45 @@ Item {
                     Text { Layout.fillWidth: true; text: "Saved " + video.savedName + (video.savedSummary.length ? " · " + video.savedSummary : ""); color: theme.selectedText; font.pixelSize: 11; elide: Text.ElideMiddle }
                 }
             }
+            StudioButton {
+                id: cameraMenuButton
+                visible: video.cameraSource.toString().length > 0
+                text: "Camera"; quiet: true; glyph: "record"; enabled: pane.editable
+                onClicked: cameraMenu.opened ? cameraMenu.close() : cameraMenu.open()
+                Popup {
+                    id: cameraMenu
+                    y: parent.height + 6
+                    x: Math.min(0, pane.width - cameraMenuButton.x - width - 22)
+                    width: 280; padding: 16; modal: true; focus: true
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                    background: Rectangle { color: theme.alpha(theme.background, 1); radius: theme.radius; border.width: 2; border.color: theme.frame }
+                    contentItem: ColumnLayout {
+                        spacing: 10
+                        Text { text: "Camera overlay"; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
+                        RecordToggle {
+                            Layout.fillWidth: true; text: "Show camera"; checked: video.cameraLayout.visible
+                            onToggled: pane.changeCamera({ visible: checked })
+                        }
+                        Choice {
+                            Layout.fillWidth: true; model: ["Small", "Medium", "Large"]
+                            currentIndex: video.cameraLayout.width <= 0.2 ? 0 : video.cameraLayout.width <= 0.3 ? 1 : 2
+                            enabled: video.cameraLayout.visible
+                            onActivated: pane.changeCamera({ width: [0.18, 0.24, 0.34][currentIndex] })
+                        }
+                        Choice {
+                            Layout.fillWidth: true; model: ["Bottom right", "Bottom left", "Top right", "Top left"]
+                            currentIndex: -1; displayText: "Position…"; enabled: video.cameraLayout.visible
+                            onActivated: pane.changeCamera({ x: currentIndex % 2 ? 0.02 : 0.98 - video.cameraLayout.width, y: currentIndex < 2 ? 0.98 : 0.02 })
+                        }
+                        Text { Layout.fillWidth: true; text: "Pause playback, then drag the camera to move it. Changes can be undone."; color: theme.muted; font.pixelSize: 11; wrapMode: Text.Wrap }
+                    }
+                }
+            }
             Text {
                 visible: pane.loaded && !pane.savedCurrent
-                text: [video.dimensions, pane.time(video.duration), video.audioTracks === 0 ? "No sound" : video.audioTracks === 1 ? "Sound" : video.audioTracks + " sound tracks"].join("   ·   ")
+                Layout.maximumWidth: pane.width * 0.45
+                elide: Text.ElideMiddle
+                text: [video.marks.hasCrop ? video.outputSize.width + " × " + video.outputSize.height : video.dimensions, pane.time(video.duration), video.audioTracks === 0 ? "No sound" : video.audioTracks === 1 ? "Sound" : video.audioTracks + " sound tracks"].join("   ·   ")
                 font.pixelSize: 11
                 color: theme.muted
             }
@@ -576,10 +630,23 @@ Item {
             radius: theme.radius
             color: theme.well
             clip: true
-            VideoOutput {
-                id: output
-                anchors.fill: parent
-                fillMode: VideoOutput.PreserveAspectFit
+            readonly property rect crop: pane.tool === "crop" ? Qt.rect(0, 0, 1, 1) : video.cropBounds
+            readonly property real aspect: video.frameSize.width * crop.width / Math.max(1, video.frameSize.height * crop.height)
+            Item {
+                id: viewport
+                z: 1
+                width: Math.min(stage.width, stage.height * stage.aspect)
+                height: width / Math.max(0.01, stage.aspect)
+                anchors.centerIn: parent
+                clip: true
+                VideoOutput {
+                    id: output
+                    x: -stage.crop.x * width
+                    y: -stage.crop.y * height
+                    width: viewport.width / stage.crop.width
+                    height: viewport.height / stage.crop.height
+                    fillMode: VideoOutput.Stretch
+                }
             }
             MouseArea {
                 id: stageMouse
@@ -592,10 +659,11 @@ Item {
             // The picture itself, inside the letterbox. Marks are placed in it.
             Item {
                 id: picture
-                x: output.contentRect.x
-                y: output.contentRect.y
-                width: output.contentRect.width
-                height: output.contentRect.height
+                parent: viewport
+                x: output.x
+                y: output.y
+                width: output.width
+                height: output.height
                 visible: pane.loaded
                 // What the saved video will show: blur and redactions while
                 // they are on at the playhead.
@@ -620,7 +688,7 @@ Item {
                             visible: false
                             live: true
                             sourceItem: preview.modelData.type === "blur" && preview.visible ? output : null
-                            sourceRect: Qt.rect(picture.x + preview.x, picture.y + preview.y, preview.width, preview.height)
+                            sourceRect: Qt.rect(preview.x, preview.y, preview.width, preview.height)
                         }
                         MultiEffect {
                             anchors.fill: parent
@@ -652,12 +720,13 @@ Item {
                 }
                 MarkCanvas {
                     id: markCanvas
+                    parent: viewport
                     anchors.fill: parent
                     visible: pane.editable && !pane.playing
                     doc: video.marks
                     tool: pane.tool
                     locked: video.busy
-                    workingSize: video.frameSize
+                    workingSize: pane.tool === "crop" ? video.frameSize : video.outputSize
                     sourceSize: video.frameSize
                     time: pane.head
                     duration: video.duration
@@ -665,9 +734,65 @@ Item {
                     onEmptyClicked: hadSelection => { if (!hadSelection) pane.togglePlay(); }
                 }
             }
+            Item {
+                id: cameraOverlay
+                parent: viewport
+                z: 4
+                x: video.cameraBounds.x * viewport.width
+                y: video.cameraBounds.y * viewport.height
+                width: video.cameraBounds.width * viewport.width
+                height: video.cameraBounds.height * viewport.height
+                visible: video.cameraSource.toString().length > 0 && video.cameraLayout.visible && pane.head < video.cameraDuration && pane.tool !== "crop"
+                clip: true
+                MediaPlayer {
+                    id: cameraPlayer
+                    source: video.cameraSource
+                    videoOutput: cameraOutput
+                    onMediaStatusChanged: if (mediaStatus === MediaPlayer.LoadedMedia) position = player.position
+                }
+                VideoOutput { id: cameraOutput; anchors.fill: parent; fillMode: VideoOutput.Stretch }
+                Connections {
+                    target: player
+                    function onPositionChanged() {
+                        if (!pane.playing || Math.abs(cameraPlayer.position - player.position) > 150)
+                            cameraPlayer.position = player.position;
+                    }
+                    function onPlaybackStateChanged() {
+                        cameraPlayer.position = player.position;
+                        if (pane.playing) cameraPlayer.play(); else cameraPlayer.pause();
+                    }
+                }
+                Rectangle { anchors.fill: parent; color: "transparent"; border.width: cameraDrag.containsMouse ? 2 : 0; border.color: theme.accent }
+                MouseArea {
+                    id: cameraDrag
+                    anchors.fill: parent
+                    enabled: pane.editable && !pane.playing
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeAllCursor
+                    property real startX
+                    property real startY
+                    property real layoutX
+                    property real layoutY
+                    onPressed: mouse => {
+                        pane.pushUndo();
+                        const point = mapToItem(viewport, mouse.x, mouse.y);
+                        startX = point.x; startY = point.y;
+                        layoutX = video.cameraBounds.x; layoutY = video.cameraBounds.y;
+                    }
+                    onPositionChanged: mouse => {
+                        if (!pressed) return;
+                        const point = mapToItem(viewport, mouse.x, mouse.y);
+                        video.setCameraLayout(Object.assign({}, video.cameraLayout, {
+                            x: layoutX + (point.x - startX) / viewport.width,
+                            y: layoutY + (point.y - startY) / viewport.height
+                        }));
+                    }
+                }
+            }
             Rectangle {
                 anchors.centerIn: parent
                 width: 64
+                z: 3
                 height: 64
                 radius: theme.radius > 0 ? 32 : 0
                 color: theme.alpha(theme.background, 0.78)
@@ -774,7 +899,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: 14
+            Layout.topMargin: pane.compact ? 8 : 14
             spacing: 10
             StudioButton {
                 glyph: pane.playing ? "pause" : "play"
@@ -861,7 +986,17 @@ Item {
             Layout.fillWidth: true
             Layout.topMargin: 6
             spacing: 6
-            Caption { text: "MARK UP"; Layout.rightMargin: 6 }
+            StudioButton {
+                text: "Crop"; glyph: "crop"; selected: pane.tool === "crop"; quiet: !selected
+                implicitHeight: 36; enabled: pane.editable
+                hint: "Drag a rectangle to keep that part of the video · C"
+                onClicked: pane.tool === "crop" ? pane.tool = "select" : pane.useTool("crop")
+            }
+            StudioButton {
+                visible: video.marks.hasCrop
+                text: "Reset crop"; quiet: true; implicitHeight: 36; enabled: pane.editable
+                onClicked: video.marks.clearCrop()
+            }
             StudioButton {
                 text: "Blur"
                 glyph: "blur"
@@ -906,13 +1041,14 @@ Item {
         // part never shifts the timeline.
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: 10
+            Layout.topMargin: pane.compact ? 6 : 10
             Layout.preferredHeight: 36
             spacing: 8
             Text {
                 visible: pane.barMode === "tool"
                 Layout.fillWidth: true
                 text: ({
+                        crop: "Drag a rectangle to crop the whole clip. Press V to preview it; Reset crop restores the full frame.",
                         blur: "Drag over what to blur. It stays blurred for the whole clip; I and O change that. Use Redact for anything private.",
                         redact: "Drag over what to cover. It is covered for the whole clip; I and O change that.",
                         arrow: "Drag from the tail to the tip. It shows from here to the end of the clip.",
@@ -1084,7 +1220,7 @@ Item {
             id: timeline
             readonly property real gutter: 12
             Layout.fillWidth: true
-            Layout.topMargin: 8
+            Layout.topMargin: pane.compact ? 4 : 8
             Layout.preferredHeight: ruler.y + ruler.height + 2
             enabled: pane.editable
             opacity: pane.loaded ? 1 : 0.35
@@ -1094,7 +1230,7 @@ Item {
                 x: timeline.gutter
                 y: 8
                 width: timeline.width - 2 * timeline.gutter
-                height: 58
+                height: pane.compact ? 42 : 58
                 function xFor(seconds) {
                     return video.duration > 0 ? seconds / video.duration * width : 0;
                 }

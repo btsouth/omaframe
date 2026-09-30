@@ -166,12 +166,23 @@ QStringList videoMarkFilters(const QVector<Frame::Edit> &edits, QSize size,
 }
 
 Video::Video(QObject *parent) : QObject(parent) {
+  m_draftTimer.setSingleShot(true);
+  m_draftTimer.setInterval(250);
+  connect(&m_draftTimer, &QTimer::timeout, this, &Video::saveDraftNow);
+  refreshDrafts();
   m_marks.setLockCheck([this] { return m_busy; });
   connect(&m_marks, &MarkDocument::message, this, [this](const QString &text) {
     m_status = text;
     emit changed();
   });
-  connect(&m_marks, &MarkDocument::edited, this, &Video::renderOverlays);
+  connect(&m_marks, &MarkDocument::edited, this, [this](bool modified) {
+    renderOverlays();
+    emit changed();
+    if (modified && !m_source.isEmpty()) {
+      m_draftDeleted = false;
+      m_draftTimer.start();
+    }
+  });
   m_directory =
       QSettings()
           .value("videoDirectory", QStandardPaths::writableLocation(
@@ -308,6 +319,7 @@ Video::Video(QObject *parent) : QObject(parent) {
           });
 }
 Video::~Video() {
+  saveDraftNow();
   if (m_encoder.state() != QProcess::NotRunning) {
     m_encoder.kill();
     m_encoder.waitForFinished(3000);
@@ -318,6 +330,7 @@ Video::~Video() {
 void Video::open(const QUrl &url) {
   if (m_busy || !url.isLocalFile())
     return;
+  saveDraftNow();
   m_busy = true;
   m_exporting = false;
   m_status = "Reading recording…";
@@ -337,11 +350,15 @@ void Video::open(const QUrl &url) {
             watcher->deleteLater();
             m_busy = false;
             if (!r.error.isEmpty()) {
+              m_pendingDraft.clear();
               m_status = r.error;
               emit changed();
               return;
             }
             m_source = url;
+            const QFileInfo sourceInfo(url.toLocalFile());
+            m_sourceSize = sourceInfo.size();
+            m_sourceModified = sourceInfo.lastModified().toMSecsSinceEpoch();
             m_name = QFileInfo(url.toLocalFile()).fileName();
             m_duration = r.duration;
             m_dimensions = r.dimensions;
@@ -360,6 +377,16 @@ void Video::open(const QUrl &url) {
             m_progress = 0;
             m_status = "Edits are saved as a new file. " + m_name +
                        " stays as it is.";
+            m_draftId.clear();
+            m_draftDeleted = false;
+            m_draftSignature.clear();
+            m_savedSignature.clear();
+            m_editState = {{"clipStart", 0.},
+                           {"clipEnd", m_duration},
+                           {"muted", false},
+                           {"cuts", QVariantList{}}};
+            readCameraTrack();
+            restorePendingDraft();
             makeThumbnails();
             emit changed();
             emit loaded();
@@ -665,8 +692,11 @@ void Video::exportEdited(double start, double end, bool mute,
            .isEmpty();
   // A clip beginning at the first frame can be shortened at the end without
   // re-encoding. Start trims, middle cuts and marks need new frames.
-  const bool streamCopy =
-      !marked && kept.size() == 1 && m_copyCompatible && start <= 0.001;
+  const bool cameraVisible =
+      !m_cameraSource.isEmpty() && m_cameraLayout.value("visible").toBool();
+  const bool composed = m_marks.hasCrop() || cameraVisible;
+  const bool streamCopy = !marked && !composed && kept.size() == 1 &&
+                          m_copyCompatible && start <= 0.001;
   if (streamCopy)
     m_status = "Saving the original quality without re-encoding…";
   emit changed();
@@ -684,26 +714,54 @@ void Video::exportEdited(double start, double end, bool mute,
     m_encoder.start("ffmpeg", args);
     return;
   }
-  if (kept.size() > 1) {
-    QStringList filters;
+  if (kept.size() > 1 || composed) {
+    QStringList filters = videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]",
+                                           "[marked]", overlays);
+    QString base = marked ? "[marked]" : "[0:v:0]";
+    if (m_marks.hasCrop()) {
+      const QRect crop = cropPixels();
+      filters << QString("%1crop=%2:%3:%4:%5[cropped]")
+                     .arg(base)
+                     .arg(crop.width())
+                     .arg(crop.height())
+                     .arg(crop.x())
+                     .arg(crop.y());
+      base = "[cropped]";
+    }
+    if (cameraVisible) {
+      const QRectF bounds = cameraBounds();
+      const QSize size = outputSize();
+      const int w = qRound(bounds.width() * size.width());
+      const int h = qRound(bounds.height() * size.height());
+      filters << QString("[%1:v]scale=%2:%3,format=rgba[webcam]")
+                     .arg(1 + overlays.size())
+                     .arg(w)
+                     .arg(h);
+      filters << QString("%1[webcam]overlay=%2:%3:eof_action=pass:repeatlast=0["
+                         "composed]")
+                     .arg(base)
+                     .arg(qRound(bounds.x() * size.width()))
+                     .arg(qRound(bounds.y() * size.height()));
+      base = "[composed]";
+    }
     QString videoInputs;
-    if (marked) {
-      filters << videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]", "[marked]",
-                                  overlays);
+    if (kept.size() > 1) {
       QString copies;
       for (int i = 0; i < kept.size(); ++i)
         copies += QString("[part%1]").arg(i);
-      filters << QString("[marked]split=%1%2").arg(kept.size()).arg(copies);
+      filters << QString("%1split=%2%3").arg(base).arg(kept.size()).arg(copies);
     }
     for (int i = 0; i < kept.size(); ++i) {
       const auto &range = kept[i];
       const QString times = QString("start=%1:end=%2")
                                 .arg(range.first, 0, 'f', 3)
                                 .arg(range.second, 0, 'f', 3);
-      filters << QString("%1trim=%2,setpts=PTS-STARTPTS,"
-                         "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v%3]")
-                     .arg(marked ? QString("[part%1]").arg(i) : QString("[0:v:0]"))
-                     .arg(times).arg(i);
+      filters << QString(
+                     "%1trim=%2,setpts=PTS-STARTPTS,"
+                     "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p[v%3]")
+                     .arg(kept.size() > 1 ? QString("[part%1]").arg(i) : base)
+                     .arg(times)
+                     .arg(i);
       videoInputs += QString("[v%1]").arg(i);
       if (!mute) {
         for (int track = 0; track < m_audioTracks; ++track)
@@ -726,6 +784,8 @@ void Video::exportEdited(double start, double end, bool mute,
                      "-i", m_source.toLocalFile()};
     if (marked)
       args << overlayInputs;
+    if (cameraVisible)
+      args << "-i" << m_cameraSource.toLocalFile();
     args << "-filter_complex" << filters.join(';') << "-map" << "[v]";
     if (mute)
       args << "-an";

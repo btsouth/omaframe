@@ -23,6 +23,7 @@
 #include <csignal>
 #include <cstdio>
 #include <sys/prctl.h>
+#include <time.h>
 
 static QByteArray command(const QString &program, const QStringList &args,
                           int timeout = 2500) {
@@ -162,6 +163,31 @@ Recording::recorderCommand(const QStringList &arguments) {
               arguments};
 }
 Recorder::Recorder(QObject *parent) : QObject(parent) {
+  connect(&m_webcam, &Webcam::changed, this, &Recorder::changed);
+  connect(
+      &m_webcam, &Webcam::trackFinished, this,
+      [this](const QString &path, double duration, const QString &error) {
+        m_cameraWarning = error;
+        if (!path.isEmpty() && !m_path.isEmpty()) {
+          QSaveFile metadata(m_path + ".camera.json");
+          const QByteArray bytes =
+              QJsonDocument(QJsonObject{{"version", 1},
+                                        {"file", QFileInfo(path).fileName()},
+                                        {"duration", duration}})
+                  .toJson(QJsonDocument::Compact);
+          if (!metadata.open(QIODevice::WriteOnly) ||
+              !metadata.setPermissions(QFile::ReadOwner | QFile::WriteOwner) ||
+              metadata.write(bytes) != bytes.size() || !metadata.commit())
+            m_cameraWarning =
+                "The camera video is saved, but its link couldn't be saved. "
+                "The screen video is still available.";
+        }
+        if (active() && !error.isEmpty()) {
+          m_status = "Recording · camera stopped";
+          emit changed();
+        }
+        completeWhenCameraReady();
+      });
   QSettings s;
   m_desktop = s.value("record/desktop", false).toBool();
   m_microphone = s.value("record/microphone", false).toBool();
@@ -233,6 +259,7 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
     // this sidecar only after the first frame, so file size is not readiness.
     QFile firstFrame(m_path + ".ts");
     bool frameReady = false;
+    qint64 firstFrameUs = 0;
     if (firstFrame.open(QIODevice::ReadOnly)) {
       // GSR 6.1 writes a header followed by the timestamp values. Read the
       // last line so the header cannot make a valid first frame look absent.
@@ -240,8 +267,9 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
           firstFrame.readAll().trimmed().split('\n').last().simplified().split(' ');
       bool monotonic = false, realtime = false;
       if (fields.size() == 2) {
-        frameReady = fields[0].toLongLong(&monotonic) > 0 &&
-                     fields[1].toLongLong(&realtime) > 0 && monotonic && realtime;
+        firstFrameUs = fields[0].toLongLong(&monotonic);
+        frameReady = firstFrameUs > 0 && fields[1].toLongLong(&realtime) > 0 &&
+                     monotonic && realtime;
       }
     }
     if (frameReady && m_process.state() == QProcess::Running) {
@@ -249,7 +277,19 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
       firstFrame.remove();
       m_state = "recording";
       m_status = "Recording";
+      // Calibrate camera time to the backend's first-frame timestamp, not
+      // the later polling time. Fixture timestamps fall outside this window.
+      timespec now{};
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      const qint64 lag =
+          (now.tv_sec * 1000000LL + now.tv_nsec / 1000 - firstFrameUs) / 1000;
+      m_recordedMs = lag >= 0 && lag < 1000 ? lag : 0;
       m_clock.restart();
+      if (m_webcam.enabled())
+        m_webcam.startTrack(m_path + "-webcam.mp4", [this] {
+          return m_state == "recording" ? m_recordedMs + m_clock.elapsed()
+                                        : qint64(-1);
+        });
       m_tick.start();
       m_startupCheck.stop();
       refreshBar();
@@ -277,6 +317,7 @@ Recorder::~Recorder() {
   // members have been destroyed. Do not run capture callbacks during teardown.
   m_process.disconnect(this);
   m_pauseSocket.disconnect(this);
+  m_webcam.disconnect(this);
 }
 void Recorder::refreshBar() const {
   // The bar's recording icon only rechecks when asked.
@@ -359,7 +400,7 @@ QString Recorder::targetLabel() const {
 bool Recorder::canStart() const {
   return !active() && m_state != "loading" && hasTarget() && !m_otherRecorder &&
          (hasControl() || stopShortcut()) && (!m_microphone || m_mic >= 0) &&
-         (!m_desktop || !m_defaultSink.isEmpty());
+         (!m_desktop || !m_defaultSink.isEmpty()) && m_webcam.ready();
 }
 QString Recorder::controlLocation() const {
   const QString pause = m_pauseKey.isEmpty()
@@ -428,6 +469,8 @@ void Recorder::prepare(bool showSetup) {
     }
     return;
   }
+  if (m_webcam.enabled())
+    m_webcam.refresh();
   const int generation = ++m_generation;
   m_state = "loading";
   m_status = "Checking displays and audio…";
@@ -681,6 +724,8 @@ void Recorder::start() {
 void Recorder::launch() {
   if (m_state != "countdown")
     return;
+  m_screenReady = false;
+  m_cameraWarning.clear();
   m_state = "starting";
   m_status = "Starting recorder…";
   // The countdown sits on the recorded display. Take it down before capture.
@@ -879,6 +924,7 @@ void Recorder::stop() {
   if (m_state != "recording" && m_state != "paused" && m_state != "starting")
     return;
   finishPause(false);
+  m_webcam.finishTrack();
   freezeClock();
   m_state = "stopping";
   m_status = "Finishing and checking your recording…";
@@ -897,6 +943,7 @@ static bool discardEmpty(const QString &path) {
   return info.exists() && info.size() < 64 * 1024 && QFile::remove(path);
 }
 void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
+  m_webcam.finishTrack();
   finishPause(false);
   freezeClock();
   m_controlDir.reset();
@@ -927,10 +974,8 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
       fail(error + (QFileInfo::exists(m_path) ? " The file is " + m_path : QString()));
       return;
     }
-    m_state = "saved";
-    m_status = "Recording saved.";
-    emit changed();
-    emit completed(QUrl::fromLocalFile(m_path));
+    m_screenReady = true;
+    completeWhenCameraReady();
   });
   watcher->setFuture(QtConcurrent::run([path, suppressStartupPop, frameTimedOut] {
     const auto data =
@@ -999,7 +1044,19 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
   }));
 }
 
+void Recorder::completeWhenCameraReady() {
+  if (!m_screenReady || m_webcam.finishing())
+    return;
+  m_screenReady = false;
+  m_state = "saved";
+  m_status = m_cameraWarning.isEmpty() ? "Recording saved."
+                                       : "Recording saved. " + m_cameraWarning;
+  emit changed();
+  emit completed(QUrl::fromLocalFile(m_path));
+}
 void Recorder::fail(const QString &message) {
+  m_webcam.finishTrack();
+
   ++m_generation;
   m_tick.stop();
   m_startupCheck.stop();
@@ -1016,6 +1073,7 @@ void Recorder::cancel() {
     stop();
     return;
   }
+  m_webcam.suspend();
   ++m_generation;
   m_pending = {};
   m_state = "idle";
@@ -1025,6 +1083,7 @@ void Recorder::cancel() {
 void Recorder::reset() {
   if (active() || m_state == "idle")
     return;
+  m_webcam.suspend();
   ++m_generation;
   m_pending = {};
   m_capture = {};
