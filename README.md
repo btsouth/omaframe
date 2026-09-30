@@ -63,8 +63,7 @@ something out, pause where it happens and press A for an arrow, B for a box, T
 for a label or N for a numbered step. Those show from there to the end. Select
 any mark and press I and O to set where it starts and stops.
 
-Source builds after 0.4.0 also support video crop, recovery drafts, camera
-and GIF export:
+Version 0.5.0 adds video crop, recovery drafts, camera overlay and GIF export:
 
 - Press C and drag a rectangle to crop the whole clip. Press V to preview it,
   or **Reset crop** to restore the full frame.

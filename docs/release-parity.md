@@ -1,20 +1,20 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.4.0**. This tracks shipped behavior and possible future
+Current release: **0.5.0**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.4.0 | Future work |
+| Workflow | Omaframe 0.5.0 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
 | Capture and finish | Window, area or display; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
 | Screenshot editing | Movable and resizable marks, inline multiline labels, crop, blur/redaction, layers, undo/redo and editable drafts | Pinning, scrolling capture, curved arrows |
 | Screenshot text | Copy text with T; hide possible secrets with H in the picker or Shift+H in the editor; optional local Tesseract | Selectable OCR regions |
-| Record and stop | Display or region, computer sound and selected microphone, countdown, pause/resume; controls outside the capture or shortcut/bar stop when no safe placement exists | Window-follow capture and camera |
-| Video review | Playback, trim and middle cuts, sound on/off, timed marks, undo/redo, copy/save MP4; confirmation before leaving unsaved edits | Draft recovery, crop/zoom, speed sections and GIF export |
+| Record and stop | Display or region, computer sound and selected microphone, countdown, pause/resume, optional webcam overlay; controls outside the capture or shortcut/bar stop when no safe placement exists | Window-follow capture |
+| Video review | Playback, trim and middle cuts, sound on/off, timed marks, crop, camera placement, recovery drafts, undo/redo, copy/save MP4 and short looping GIFs | Animated zoom and speed sections |
 | Distribution | Published Arch package, source archive, PKGBUILD, checksums, desktop entry and license notices | Optional sharing and updates need their own design |
 
 ## MatteShot comparison
@@ -38,12 +38,12 @@ Stop works while paused. The recorder suite covers repeated transitions,
 rejected or lost replies, normal finalization and preserving custom shortcuts.
 
 Version 0.4.0 also centers button contents, labels the video mark tools, and
-keep editor controls and recording options reachable in smaller windows.
+keeps editor controls and recording options reachable in smaller windows.
 Settings and capture menus close with Esc, and the sample opens in Edit.
 Unsaved video edits prompt before opening another file, starting a capture,
 or quitting, including commands from capture shortcuts. Save and continue
-waits for a successful export; a failed save keeps the edits open. Video
-draft recovery remains future work.
+waits for a successful export; a failed save keeps the edits open.
+Version 0.5.0 adds automatic recovery drafts.
 
 GPU Screen Recorder 6.1.0 already supports the private `set-paused` control and
 a shared pause-aware video/audio clock. See its [6.1.0 control documentation](https://git.dec05eba.com/gpu-screen-recorder/tree/README.md?h=6.1.0).
@@ -52,28 +52,39 @@ If a sent request loses its reply, it saves the recording because the pause
 state cannot be confirmed. Fixture and isolated UI checks do not measure
 physical microphone quality or GPU-specific capture timing.
 
-## Possible next work
+## Since 0.4.0
 
-Source builds after 0.4.0 add manual video crop, automatic recovery drafts,
+Version 0.5.0 adds manual video crop, automatic recovery drafts,
 optional webcam overlay and GIF export. Crop applies to the whole clip.
-Drafts retain edits and reference the original video, which must stay in place. Camera is
-off by default and records a separate track using recorded time, so pause,
+Drafts retain edits and reference the original video, which must stay in
+place. Camera is off by default and records a separate track using recorded time, so pause,
 trim and cuts apply to both tracks. Review lets you move, resize or hide the
-camera before exporting a new MP4.
+camera before exporting a new MP4. Keep the original video, camera track
+and camera sidecar together to reopen camera edits.
 
 GIF export makes a silent loop with the same edits, at up to 720 pixels and
 15 fps for clips up to 30 seconds. It keeps the editor open and leaves an
 existing MP4 export available. Copy or show the GIF after saving.
 
+## Possible next work
+
 Animated zoom, automatic focus, captions and clip assembly remain backlog.
-The current published release is still 0.4.0.
 
 ## Validation notes
 
+For 0.5.0, all nine suites passed in an isolated desktop for crop, recovery
+and camera changes. Focused GIF export and navigation tests then passed,
+including output dimensions, looping, edits, cancellation and the duration
+limit. Light and dark small-window checks used fixture recordings. GIF file
+copying was checked through the isolated clipboard. Current CI builds on
+Arch and runs seven headless suites, OCR pattern tests and install checks.
+These checks do not establish physical camera acquisition or GPU behavior.
+
 All eight test suites passed in an isolated desktop for 0.4.0. Light and dark
 themes, small windows, pause/resume controls, file drops, unsaved-edit choices
-and failed-save retry were checked there using fixture recordings. CI builds
-on Arch and runs six headless suites, OCR pattern tests and install checks.
+and failed-save retry were checked there using fixture recordings. CI at
+that release built on Arch and ran six headless suites, OCR pattern tests
+and install checks.
 
 The 0.3.0 release notes record seven passing suites in an isolated desktop,
 isolated UI checks and owner-desktop video mark checks. Powered-off monitor
