@@ -2,11 +2,11 @@
 
 Date: 2026-09-25
 
-Status: planning archive and backlog. Omaframe 0.4.0 includes recording pause/resume and unsaved-video edit protection; see README.md and [release-parity.md](release-parity.md) for shipped behavior. Roadmap features and performance targets below are not claims about the current build.
+Status: planning archive and backlog. Omaframe 0.5.0 includes recording pause/resume, video crop, recovery drafts, optional webcam overlay and GIF export; see README.md and [release-parity.md](release-parity.md) for shipped behavior. Roadmap features and performance targets below are not claims about the current build.
 
 ## Current direction, 2026-09-29
 
-Keep capture quick and the interface small. Basic CI builds on Arch and runs six headless suites plus OCR pattern tests. Version 0.4.0 adds recording pause/resume within the existing control, with private recorder IPC and a timer that excludes paused time. Larger studio features below remain optional backlog, not committed release requirements.
+Keep capture quick and the interface small. Basic CI builds on Arch and runs seven headless suites plus OCR pattern tests. Version 0.4.0 adds recording pause/resume within the existing control, with private recorder IPC and a timer that excludes paused time. Version 0.5.0 adds whole-clip crop, automatic recovery drafts, an optional camera track and short looping GIF export. Larger studio features below remain optional backlog, not committed release requirements.
 
 Use automated regression checks and handle unusual display configurations through bug reports and targeted fixes. No owner-run hardware matrix, monitor power changes or fresh-desktop walkthrough is required before release. Historical acceptance requirements below are superseded by [RELEASING.md](../RELEASING.md). Validation records remain evidence of what was actually checked, not a pending checklist for the owner.
 
@@ -16,7 +16,7 @@ Owner feedback on 2026-09-25 prioritizes instant capture and explicitly rejects 
 
 Screenshot / Video selection, target selection, computer sound and microphone controls, recorder ownership, stop/finalization and review handoff have shipped. Print remains the screenshot default and Alt+Print starts or stops recording. Version 0.4.0 adds pause/resume within that flow, including CLI controls when no button can sit outside the capture.
 
-Countdown and cursor visibility belong in a small More menu. Webcam is secondary. Scrolling capture is useful as a separate screenshot mode, initially focused on browser pages, after the normal screenshot and recording paths are dependable. It must handle fixed headers, repeated content, lazy loading, and manual stop before it is described as reliable. OCR and pinning are contextual result actions, not permanent capture-bar toggles. Timelines, captions, camera layers, and other advanced editing remain deferred.
+Countdown and cursor visibility belong in a small More menu. Webcam is secondary. Scrolling capture is useful as a separate screenshot mode, initially focused on browser pages, after the normal screenshot and recording paths are dependable. It must handle fixed headers, repeated content, lazy loading, and manual stop before it is described as reliable. OCR and pinning are contextual result actions, not permanent capture-bar toggles. The optional camera overlay ships in 0.5.0. Multi-clip timelines, captions and other advanced editing remain deferred.
 
 Startup must not initialize the studio, render samples, or initialize video playback just to select a screenshot region. Detailed startup measurements are in capture-workflow-validation.md.
 
