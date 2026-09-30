@@ -34,6 +34,7 @@ Window {
     property real endY: 0
     property bool dragging: false
     property var hoveredTarget: null
+    property var hintOwner: null
     property real sx: dragging || !hoveredTarget ? Math.min(startX, endX) : hoveredTarget.x * width
     property real sy: dragging || !hoveredTarget ? Math.min(startY, endY) : hoveredTarget.y * height
     property real sw: dragging || !hoveredTarget ? Math.abs(endX - startX) : hoveredTarget.w * width
@@ -73,6 +74,7 @@ Window {
         endX = 0;
         endY = 0;
         hoveredTarget = null;
+        hintOwner = null;
         if (visible)
             area.forceActiveFocus();
     }
@@ -215,6 +217,7 @@ Window {
         property string glyph
         property bool chosen
         property bool compact: window.width < 560
+        readonly property string hint: compact ? label : ""
         property color markColor: theme.selectedText
         signal activated()
         Layout.fillHeight: true
@@ -225,9 +228,6 @@ Window {
         Accessible.name: label
         Accessible.checked: chosen
         Accessible.onPressAction: activated()
-        ToolTip.visible: modeMouse.containsMouse && compact
-        ToolTip.text: label
-        ToolTip.delay: 500
         Behavior on color { ColorAnimation { duration: 90 } }
         RowLayout {
             id: modeRow
@@ -252,6 +252,9 @@ Window {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
+            onEntered: window.hintOwner = mode
+            onExited: if (window.hintOwner === mode) window.hintOwner = null
+            onPressed: window.hintOwner = null
             onClicked: mode.activated()
         }
     }
@@ -286,11 +289,11 @@ Window {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
+            onEntered: window.hintOwner = toggle
+            onExited: if (window.hintOwner === toggle) window.hintOwner = null
+            onPressed: window.hintOwner = null
             onClicked: toggle.activated()
         }
-        ToolTip.visible: toggleMouse.containsMouse && hint.length > 0
-        ToolTip.text: hint
-        ToolTip.delay: 500
     }
 
     // The capture bar: an Omarchy popup, framed in the active-border color.
@@ -395,8 +398,16 @@ Window {
             Text {visible: bar.showHints; text: "Cancel"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
         }
     }
+    BarHint {
+        id: hoverHint
+        anchors.horizontalCenter: bar.horizontalCenter
+        anchors.top: bar.bottom
+        anchors.topMargin: 8
+        maximumWidth: Math.min(640, window.width - 32)
+        text: window.visible && !window.dragging && window.hintOwner ? window.hintOwner.hint : ""
+    }
     Rectangle {
-        visible: !bar.showPrompt && !(studio.recordingSelection && recorder.state === "loading")
+        visible: !hoverHint.visible && !bar.showPrompt && !(studio.recordingSelection && recorder.state === "loading")
         anchors.horizontalCenter: bar.horizontalCenter
         anchors.top: bar.bottom
         anchors.topMargin: 8

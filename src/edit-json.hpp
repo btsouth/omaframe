@@ -26,7 +26,12 @@ inline QJsonObject editToJson(const Frame::Edit &edit) {
           {"points", points},
           {"start", edit.start},
           {"end", edit.end},
-          {"number", edit.number}};
+          {"number", edit.number},
+          {"textBoxWidth", edit.textBox.width()},
+          {"textBoxHeight", edit.textBox.height()},
+          {"outline", edit.outline}, {"arrowHead", edit.arrowHead},
+          {"filled", edit.filled}, {"opacity", edit.opacity},
+          {"numberColor", edit.numberColor.name(QColor::HexArgb)}};
 }
 inline std::optional<Frame::Edit> editFromJson(const QJsonObject &item) {
   const QString type = item.value("type").toString();
@@ -52,10 +57,28 @@ inline std::optional<Frame::Edit> editFromJson(const QJsonObject &item) {
   edit.background = QColor(item.value("background").toString());
   if (!edit.color.isValid() || !edit.background.isValid())
     return std::nullopt;
+  const double boxWidth = item.value("textBoxWidth").toDouble(0);
+  const double boxHeight = item.value("textBoxHeight").toDouble(0);
+  if (!std::isfinite(boxWidth) || !std::isfinite(boxHeight) ||
+      boxWidth < 0 || boxWidth > 1 || boxHeight < 0 || boxHeight > 1)
+    return std::nullopt;
+  edit.textBox = {boxWidth, boxHeight};
   edit.size = size;
   edit.textStyle = item.value("textStyle").toString("box");
   edit.textAlign = item.value("textAlign").toString("center");
   edit.backgroundOpacity = opacity;
+  edit.outline = item.value("outline").toBool(false);
+  edit.filled = item.value("filled").toBool(false);
+  edit.arrowHead = item.value("arrowHead").toString("open");
+  edit.opacity = item.value("opacity").toDouble(95. / 255.);
+  edit.numberColor = QColor(item.value("numberColor").toString("#ffffff"));
+  if (!QStringList{"open", "filled"}.contains(edit.arrowHead) ||
+      !std::isfinite(edit.opacity) || edit.opacity < 0 || edit.opacity > 1 ||
+      !edit.numberColor.isValid())
+    return std::nullopt;
+  // Older highlights stored an unused mark color; keep their gold appearance.
+  if (type == "highlight" && !item.contains("opacity"))
+    edit.color = QColor("#eab841");
   const QJsonArray points = item.value("points").toArray();
   if (points.size() > 2048)
     return std::nullopt;

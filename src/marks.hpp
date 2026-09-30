@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QVariantMap>
 #include <functional>
+#include <optional>
 
 /** The marks on one image: the edit list, selection, undo and redo, and the
  *  label being typed. Screenshots and video frames share it. It never
@@ -16,6 +17,9 @@ class MarkDocument final : public QObject {
   Q_PROPERTY(QRectF cropBounds READ cropBounds NOTIFY changed)
   Q_PROPERTY(QVariantMap selectedAnnotation READ selectedAnnotation NOTIFY changed)
   Q_PROPERTY(int newTextPixels READ newTextPixels NOTIFY changed)
+  Q_PROPERTY(QVariantMap labelDefaults READ labelDefaults NOTIFY changed)
+  Q_PROPERTY(QVariantMap labelStyle READ labelStyle NOTIFY changed)
+  Q_PROPERTY(QVariantMap toolDefaults READ toolDefaults NOTIFY changed)
   Q_PROPERTY(bool textEditing READ textEditing NOTIFY changed)
   /** Every mark, for drawing them over a video: index, type, x1, y1, x2, y2,
    *  start, end, text, color and size. */
@@ -39,6 +43,7 @@ public:
   /** The edits to preview: all of them except a label being typed. */
   QVector<Frame::Edit> visibleEdits() const;
   int selected() const { return m_selected; }
+  bool transforming() const { return m_transform.has_value(); }
   /** The label being typed, which the preview leaves out, or -1. */
   int hiddenIndex() const { return m_hiddenEdit; }
 
@@ -49,6 +54,16 @@ public:
   QVariantMap selectedAnnotation() const;
   /** The font size a new label starts at, in source pixels. */
   int newTextPixels() const;
+  QVariantMap labelDefaults() const;
+  QVariantMap labelStyle() const;
+  Q_INVOKABLE void refreshLabelStyle() { emit changed(); }
+  /** Apply only supplied fields, in one undo step, and remember them for new labels. */
+  Q_INVOKABLE void setLabelStyle(const QVariantMap &style);
+  Q_INVOKABLE void resetLabelStyle();
+  QVariantMap toolDefaults() const;
+  Q_INVOKABLE void setToolStyle(const QString &type, const QVariantMap &style);
+  Q_INVOKABLE void resetToolStyle(const QString &type);
+  Q_INVOKABLE QString stylePreview(const QString &type, const QVariantMap &style) const;
   bool textEditing() const { return m_hiddenEdit >= 0; }
   QVariantList annotations() const;
   double duration() const { return m_duration; }
@@ -76,6 +91,10 @@ public:
    *  canvas. endTextEdit() applies or discards the typed text. */
   Q_INVOKABLE void beginTextEdit();
   Q_INVOKABLE void endTextEdit(const QString &text, bool apply);
+  /** Preview from the drag's original geometry; committing adds one undo step. */
+  Q_INVOKABLE void beginTransform();
+  Q_INVOKABLE void previewTransform(int handle, double x, double y);
+  Q_INVOKABLE void endTransform(bool apply);
   Q_INVOKABLE void moveSelected(double dx, double dy);
   Q_INVOKABLE void nudgeSelected(int dx, int dy);
   Q_INVOKABLE void resizeSelected(int handle, double x, double y);
@@ -102,6 +121,8 @@ signals:
   void message(const QString &text);
 
 private:
+  QVariantMap defaultToolStyle(const QString &type) const;
+  void applyToolDefaults(Frame::Edit &edit) const;
   bool locked() const { return m_locked && m_locked(); }
   void saveHistory();
   void commit(bool modified = true);
@@ -121,6 +142,8 @@ private:
     int selected = -1;
   };
   QVector<EditState> m_undoStates, m_redoStates;
+  std::optional<EditState> m_transform;
+  bool m_previewing = false;
   int m_selected = -1;
   int m_hiddenEdit = -1;
   double m_duration = 0, m_playhead = 0;

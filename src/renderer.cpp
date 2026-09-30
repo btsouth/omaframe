@@ -60,7 +60,8 @@ static TextLayout layoutText(const Edit &edit, const QImage &source,
                              const QFont &font) {
   const QFontMetrics metrics(font, &source);
   const double inset = std::max(4., textPixelSize(edit, source) * 0.27);
-  const int lineLimit = std::max(1, qFloor(source.width() * 0.85 - inset * 2));
+  const int lineLimit = std::max(1, qFloor((edit.textBox.width() > 0 ? edit.textBox.width() * source.width()
+                                                     : source.width() * 0.85) - inset * 2));
   QStringList lines;
   for (const QString &paragraph : edit.text.split('\n')) {
     QString line;
@@ -89,8 +90,9 @@ static TextLayout layoutText(const Edit &edit, const QImage &source,
   for (const QString &line : lines)
     width = std::max(width, metrics.horizontalAdvance(line));
   return {lines.join('\n'),
-          QSizeF(width + inset * 2,
-                 metrics.lineSpacing() * std::max(1, int(lines.size())) + inset * 2)};
+          QSizeF(std::max(width + inset * 2, edit.textBox.width() * source.width()),
+                 std::max(metrics.lineSpacing() * std::max(1, int(lines.size())) + inset * 2,
+                          edit.textBox.height() * source.height()))};
 }
 
 QRectF annotationBounds(const Edit &edit, const QImage &source) {
@@ -215,48 +217,64 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
     const double markSize = std::clamp(edit.size, 0.5, 8.0);
     QPointF a(edit.from.x() * img.width(), edit.from.y() * img.height());
     QPointF b(edit.to.x() * img.width(), edit.to.y() * img.height());
+    auto stroke = [&](const QPainterPath &path, bool fillHead = false) {
+      const double width = unit * markSize;
+      if (edit.outline && (edit.type == "arrow" || edit.type == "line" || edit.type == "pen")) {
+        const QColor contrast = qGray(edit.color.rgb()) > 150 ? QColor("#151a20") : Qt::white;
+        if (fillHead) p.fillPath(path, contrast);
+        p.strokePath(path, QPen(contrast, width + std::max(2., width * .7),
+                               Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+      }
+      if (fillHead) p.fillPath(path, edit.color);
+      p.strokePath(path, QPen(edit.color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    };
     if (edit.type == "redact") {
       // Opaque fill replaces pixels. No blur, reversible filter, or source
       // metadata in export.
       p.setCompositionMode(QPainter::CompositionMode_Source);
       p.fillRect(r, QColor("#151a20"));
     } else if (edit.type == "highlight") {
-      p.fillRect(r, QColor(250, 210, 70, 95));
-      p.setPen(QPen(QColor("#eab841"), unit * 0.5));
-      p.drawRect(r);
+      QColor fill = edit.color;
+      fill.setAlphaF(std::clamp(edit.opacity, 0., 1.));
+      p.fillRect(r, fill);
+      if (edit.opacity > 0) {
+        p.setPen(QPen(edit.color, unit * 0.5));
+        p.drawRect(r);
+      }
     } else if (edit.type == "line" || edit.type == "box" ||
                edit.type == "ellipse") {
-      p.setPen(QPen(edit.color, unit * markSize, Qt::SolidLine, Qt::RoundCap,
-                    Qt::RoundJoin));
-      p.setBrush(Qt::NoBrush);
-      if (edit.type == "line")
-        p.drawLine(a, b);
-      else if (edit.type == "box")
-        p.drawRect(QRectF(a, b).normalized());
-      else
-        p.drawEllipse(QRectF(a, b).normalized());
+      QPainterPath path;
+      if (edit.type == "line") { path.moveTo(a); path.lineTo(b); }
+      else if (edit.type == "box") path.addRect(QRectF(a, b).normalized());
+      else path.addEllipse(QRectF(a, b).normalized());
+      if (edit.filled && edit.type != "line") {
+        QColor fill = edit.background;
+        fill.setAlphaF(std::clamp(edit.opacity, 0., 1.));
+        p.fillPath(path, fill);
+      }
+      stroke(path);
     } else if (edit.type == "pen" && edit.points.size() >= 2) {
-      p.setPen(QPen(edit.color, unit * markSize, Qt::SolidLine,
-                    Qt::RoundCap, Qt::RoundJoin));
       QPainterPath path;
       path.moveTo(edit.points.first().x() * img.width(),
                   edit.points.first().y() * img.height());
       for (qsizetype i = 1; i < edit.points.size(); ++i)
         path.lineTo(edit.points[i].x() * img.width(),
                     edit.points[i].y() * img.height());
-      p.drawPath(path);
+      stroke(path);
     } else if (edit.type == "arrow") {
       const double angle = std::atan2(b.y() - a.y(), b.x() - a.x());
       const double head = unit * 5 * markSize;
-      p.setPen(
-          QPen(edit.color, unit * markSize, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-      p.drawLine(a, b);
-      p.drawLine(b,
-                 b - QPointF(std::cos(angle - 0.55), std::sin(angle - 0.55)) *
-                         head);
-      p.drawLine(b,
-                 b - QPointF(std::cos(angle + 0.55), std::sin(angle + 0.55)) *
-                         head);
+      const QPointF left = b - QPointF(std::cos(angle - 0.55), std::sin(angle - 0.55)) * head;
+      const QPointF right = b - QPointF(std::cos(angle + 0.55), std::sin(angle + 0.55)) * head;
+      const bool filled = edit.arrowHead == "filled";
+      QPainterPath path;
+      path.moveTo(a);
+      path.lineTo(filled ? (left + right) / 2 : b);
+      path.moveTo(left);
+      path.lineTo(b);
+      path.lineTo(right);
+      if (filled) path.closeSubpath();
+      stroke(path, filled);
     } else if (edit.type == "step") {
       ++step;
       p.setPen(QPen(Qt::white, unit * 0.7));
@@ -266,6 +284,7 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
       font.setPixelSize(qRound(unit * 5 * markSize));
       font.setWeight(QFont::DemiBold);
       p.setFont(font);
+      p.setPen(edit.numberColor);
       p.drawText(
           QRectF(a - QPointF(unit * 5 * markSize, unit * 5 * markSize),
                  QSizeF(unit * 10 * markSize, unit * 10 * markSize)),

@@ -9,7 +9,8 @@ import QtQuick.Layouts
 Window {
     id: control
     width: 232
-    height: 48
+    // The lower 48 px are reserved for passive hints outside the video.
+    height: 96
     visible: false
     palette.window: theme.alpha(theme.background, 1)
     palette.windowText: theme.text
@@ -31,8 +32,11 @@ Window {
     readonly property bool live: recorder.state === "recording"
     readonly property bool paused: recorder.state === "paused"
     readonly property bool countdownOnly: recorder.countdownOnly
+    readonly property bool pauseError: recorder.status.indexOf("Could not") === 0
     Rectangle {
-        anchors.fill: parent
+        anchors.top: parent.top
+        width: parent.width
+        height: 48
         radius: theme.radius
         color: theme.alpha(theme.background, 1)
         border.width: 2
@@ -71,9 +75,6 @@ Window {
                     font.pixelSize: 13
                     font.family: theme.fontFamily
                     color: theme.text
-                    ToolTip.visible: !control.countdownOnly && recorder.status.indexOf("Could not") === 0
-                    ToolTip.text: recorder.status
-                    ToolTip.delay: 500
                 }
                 Text {
                     Layout.fillWidth: true
@@ -91,6 +92,8 @@ Window {
                 visible: control.live || control.paused
                 enabled: !recorder.pausePending
                 hint: recorder.pausePending ? "Waiting for recorder…" : control.paused ? "Continue recording" : "Pause recording"
+                tooltipEnabled: false
+                Accessible.description: hint
                 implicitWidth: 74
                 implicitHeight: 32
                 padding: 7
@@ -126,5 +129,14 @@ Window {
                 }
             }
         }
+    }
+    BarHint {
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: 54
+        maximumWidth: control.width
+        text: !control.visible || control.countdownOnly ? ""
+            : control.pauseError ? recorder.status
+            : recorder.pausePending ? "Waiting for recorder…"
+            : pause.hovered && !pause.down ? pause.hint : ""
     }
 }

@@ -111,18 +111,20 @@ while True:
  }
  void recordingControlPlacement_data() {
    QTest::addColumn<QRect>("target");QTest::addColumn<QString>("second");QTest::addColumn<QString>("display");QTest::addColumn<QRect>("expected");
-   // A is 1280x800 with a 24 px bar. The control is 232x48 with a 16 px gap.
-   QTest::newRow("region-below")<<QRect(100,100,800,500)<<QString()<<QString("A")<<QRect(383,616,232,48);
-   QTest::newRow("region-above")<<QRect(100,300,800,480)<<QString()<<QString("A")<<QRect(383,236,232,48);
-   QTest::newRow("tall-region-right")<<QRect(100,40,300,760)<<QString()<<QString("A")<<QRect(416,40,232,48);
-   QTest::newRow("tall-region-left")<<QRect(900,40,380,760)<<QString()<<QString("A")<<QRect(652,40,232,48);
+   // A is 1280x800 with a 24 px bar. The control is 232x96 with a 16 px gap.
+   QTest::newRow("region-below")<<QRect(100,100,800,500)<<QString()<<QString("A")<<QRect(383,616,232,96);
+   QTest::newRow("region-above")<<QRect(100,300,800,480)<<QString()<<QString("A")<<QRect(383,188,232,96);
+   QTest::newRow("tall-region-right")<<QRect(100,40,300,760)<<QString()<<QString("A")<<QRect(416,40,232,96);
+   QTest::newRow("tall-region-left")<<QRect(900,40,380,760)<<QString()<<QString("A")<<QRect(652,40,232,96);
    QTest::newRow("full-single")<<QRect(0,0,1280,800)<<QString()<<QString()<<QRect();
    QTest::newRow("near-full-single")<<QRect(0,0,1280,775)<<QString()<<QString()<<QRect();
+   // A strip that fits only the buttons cannot also fit the below-bar hint.
+   QTest::newRow("thin-strip-needs-shortcut")<<QRect(0,120,1280,680)<<QString()<<QString()<<QRect();
    // The other display's edge that faces the recording, below its bar.
-   QTest::newRow("full-left-neighbor")<<QRect(0,0,1280,800)<<QString("left")<<QString("B")<<QRect(-248,40,232,48);
-   QTest::newRow("full-right-neighbor")<<QRect(0,0,1280,800)<<QString("right")<<QString("B")<<QRect(1296,40,232,48);
-   QTest::newRow("full-below-neighbor")<<QRect(0,0,1280,800)<<QString("below")<<QString("B")<<QRect(523,840,232,48);
-   QTest::newRow("region-too-big-uses-neighbor")<<QRect(0,100,1280,700)<<QString("right")<<QString("B")<<QRect(1296,100,232,48);
+   QTest::newRow("full-left-neighbor")<<QRect(0,0,1280,800)<<QString("left")<<QString("B")<<QRect(-248,40,232,96);
+   QTest::newRow("full-right-neighbor")<<QRect(0,0,1280,800)<<QString("right")<<QString("B")<<QRect(1296,40,232,96);
+   QTest::newRow("full-below-neighbor")<<QRect(0,0,1280,800)<<QString("below")<<QString("B")<<QRect(523,840,232,96);
+   QTest::newRow("region-too-big-uses-neighbor")<<QRect(0,100,1280,700)<<QString("right")<<QString("B")<<QRect(1296,100,232,96);
  }
  void recordingControlPlacement() {
    QFETCH(QRect,target);QFETCH(QString,second);QFETCH(QString,display);QFETCH(QRect,expected);
@@ -213,12 +215,12 @@ while True:
  }
  void fullDisplayUsesUnrecordedMonitorWhenAvailable() {
    qputenv("OMAFRAME_TEST_DUAL_DISPLAY","1");
-   qputenv("OMAFRAME_TEST_LAYERS",R"({"B":{"levels":{"3":[{"namespace":"omaframe-record-control","x":-248,"y":40,"w":232,"h":48}]}}})");
+   qputenv("OMAFRAME_TEST_LAYERS",R"({"B":{"levels":{"3":[{"namespace":"omaframe-record-control","x":-248,"y":40,"w":232,"h":96}]}}})");
    Recorder r;r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
    r.selectDisplay(0);
    QVERIFY(r.canStart());QVERIFY(r.safeStop());
    QCOMPARE(r.control().display,QString("B"));
-   QCOMPARE(r.control().bounds,QRect(-248,40,232,48));
+   QCOMPARE(r.control().bounds,QRect(-248,40,232,96));
    QVERIFY(r.controlLocation().contains("outside the video"));
    r.setCountdown(0);r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
@@ -557,13 +559,18 @@ while True:
  void unsafeActualControlPlacementBlocksRecording() {
    Recorder r;r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
    r.regionSelected("A",QRectF(.1,.1,.5,.5));QVERIFY(r.safeStop());
-   QCOMPARE(r.control().bounds,QRect(331,496,232,48));
+   QCOMPARE(r.control().bounds,QRect(331,496,232,96));
    r.setCountdown(0);r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("failed"),5000);
    QVERIFY(r.status().contains("did not appear"));QVERIFY(r.savedPath().isEmpty());
    // A control that ends up over the area is refused too.
-   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":300,"y":300,"w":232,"h":48}]}}})");
+   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":300,"y":300,"w":232,"h":96}]}}})");
    r.regionSelected("A",QRectF(.1,.1,.5,.5));r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("failed"),5000);
+   QVERIFY(r.status().contains("would be in the recording"));QVERIFY(r.savedPath().isEmpty());
+   // The buttons alone are clear; the reserved hint row crosses the capture.
+   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":331,"y":96,"w":232,"h":96}]}}})");
+   r.regionSelected("A",QRectF(.1,.2,.5,.5));r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("failed"),5000);
    QVERIFY(r.status().contains("would be in the recording"));QVERIFY(r.savedPath().isEmpty());
    qunsetenv("OMAFRAME_TEST_LAYERS");
@@ -577,7 +584,7 @@ while True:
    r.setCountdown(0);
  }
  void selectorChoicesMadeBeforeLoadingAreApplied() {
-   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":331,"y":496,"w":232,"h":48}]}}})");
+   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":331,"y":496,"w":232,"h":96}]}}})");
    Recorder r;QSignalSpy setup(&r,&Recorder::setupRequested);
    r.setCountdown(0);r.prepare(false);QCOMPARE(r.state(),QString("loading"));
    r.regionSelected("A",QRectF(.1,.1,.5,.5),true);
@@ -592,7 +599,7 @@ while True:
    QCOMPARE(setup.count(),1);
  }
  void selectingRegionHidesSetupAndStartsRecording() {
-   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":331,"y":496,"w":232,"h":48}]}}})");
+   qputenv("OMAFRAME_TEST_LAYERS",R"({"A":{"levels":{"3":[{"namespace":"omaframe-record-control","x":331,"y":496,"w":232,"h":96}]}}})");
    Recorder r;r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
    r.setCountdown(0);
    QSignalSpy hidden(&r,&Recorder::hideRequested);

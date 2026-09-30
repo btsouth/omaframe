@@ -15,6 +15,7 @@ Button {
     property bool quiet: false
     property bool selected: false
     property string hint: ""
+    property bool tooltipEnabled: true
     implicitHeight: 38
     implicitWidth: content.implicitWidth + 26
     hoverEnabled: true
@@ -22,7 +23,7 @@ Button {
     font.family: theme.fontFamily
     font.pixelSize: 13
     Accessible.name: text.length ? text : hint
-    ToolTip.visible: hovered && hint.length > 0
+    ToolTip.visible: tooltipEnabled && hovered && !down && hint.length > 0
     ToolTip.text: hint
     ToolTip.delay: 600
     opacity: enabled ? 1 : 0.38

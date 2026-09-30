@@ -1,8 +1,12 @@
 #include "marks.hpp"
+#include <QBuffer>
 #include <QLineF>
+#include <QPainter>
+#include <QSettings>
 #include <cmath>
 
 void MarkDocument::reset(const QImage &base) {
+  m_transform.reset();
   m_base = base;
   m_edits.clear();
   m_undoStates.clear();
@@ -12,6 +16,7 @@ void MarkDocument::reset(const QImage &base) {
 }
 void MarkDocument::restore(const QImage &base, QVector<Frame::Edit> edits,
                            int selected) {
+  m_transform.reset();
   m_base = base;
   m_edits = std::move(edits);
   m_undoStates.clear();
@@ -31,6 +36,177 @@ int MarkDocument::newTextPixels() const {
     return 32;
   return std::clamp(
       qRound(std::min(m_base.width(), m_base.height()) * 0.06), 20, 64);
+}
+QVariantMap MarkDocument::labelDefaults() const {
+  QSettings settings;
+  settings.beginGroup("labels");
+  auto color = [&settings](const QString &key, const QString &fallback) {
+    const QColor value(settings.value(key, fallback).toString());
+    return value.isValid() ? value.name() : fallback;
+  };
+  const QString style = settings.value("textStyle", "box").toString();
+  const QString align = settings.value("textAlign", "center").toString();
+  bool validOpacity = false;
+  double opacity = settings.value("backgroundOpacity", 1.).toDouble(&validOpacity);
+  if (!validOpacity || !std::isfinite(opacity)) opacity = 1.;
+  const int pixels = settings.value("fontPx", 0).toInt();
+  return {{"color", color("color", "#ffffff")},
+          {"background", color("background", "#151a20")},
+          {"backgroundOpacity", std::clamp(opacity, 0., 1.)},
+          {"textStyle", style == "shadow" ? "shadow" : "box"},
+          {"textAlign", QStringList{"left", "center", "right"}.contains(align) ? align : "center"},
+          {"fontPx", pixels >= 8 && pixels <= 4096 ? pixels : newTextPixels()}};
+}
+QVariantMap MarkDocument::labelStyle() const {
+  const auto selected = selectedAnnotation();
+  return selected.value("type") == "text" ? selected : labelDefaults();
+}
+static QVariantMap factoryToolStyle(const QString &type) {
+  if (type == "blur") return {{"size", 1.}};
+  if (type == "highlight")
+    return {{"color", "#eab841"}, {"opacity", 95. / 255.}};
+  if (type == "step")
+    return {{"color", "#e75439"}, {"numberColor", "#ffffff"}, {"size", 1.}};
+  if (!QStringList{"arrow", "line", "box", "ellipse", "pen"}.contains(type))
+    return {};
+  QVariantMap fields{{"color", "#e75439"}, {"size", 1.}};
+  if (type == "arrow" || type == "line" || type == "pen")
+    fields["outline"] = false;
+  if (type == "arrow") fields["arrowHead"] = "open";
+  if (type == "box" || type == "ellipse") {
+    fields["filled"] = false;
+    fields["background"] = "#e75439";
+    fields["opacity"] = .2;
+  }
+  return fields;
+}
+static std::optional<QVariantMap> validToolFields(const QString &type,
+                                                 const QVariantMap &style) {
+  const auto factory = factoryToolStyle(type);
+  if (factory.isEmpty()) return std::nullopt;
+  QVariantMap fields;
+  for (auto it = style.begin(); it != style.end(); ++it) {
+    const QString key = it.key();
+    if (!factory.contains(key)) return std::nullopt;
+    if (key == "color" || key == "background" || key == "numberColor") {
+      const QColor color(it.value().toString());
+      if (!color.isValid()) return std::nullopt;
+      fields[key] = color.name();
+    } else if (key == "size" || key == "opacity") {
+      bool valid = false;
+      const double value = it.value().toDouble(&valid);
+      if (!valid || !std::isfinite(value) ||
+          (key == "size" ? value < .5 || value > 8 : value < 0 || value > 1))
+        return std::nullopt;
+      fields[key] = value;
+    } else if (key == "arrowHead") {
+      if (!QStringList{"open", "filled"}.contains(it.value().toString()))
+        return std::nullopt;
+      fields[key] = it.value().toString();
+    } else {
+      if (it.value().metaType().id() != QMetaType::Bool &&
+          it.value().toString() != "true" && it.value().toString() != "false")
+        return std::nullopt;
+      fields[key] = it.value().toBool();
+    }
+  }
+  return fields;
+}
+static void applyToolFields(Frame::Edit &edit, const QVariantMap &fields) {
+  if (fields.contains("color")) edit.color = QColor(fields["color"].toString());
+  if (fields.contains("background")) edit.background = QColor(fields["background"].toString());
+  if (fields.contains("numberColor")) edit.numberColor = QColor(fields["numberColor"].toString());
+  if (fields.contains("size")) edit.size = fields["size"].toDouble();
+  if (fields.contains("opacity")) edit.opacity = fields["opacity"].toDouble();
+  if (fields.contains("outline")) edit.outline = fields["outline"].toBool();
+  if (fields.contains("filled")) edit.filled = fields["filled"].toBool();
+  if (fields.contains("arrowHead")) edit.arrowHead = fields["arrowHead"].toString();
+}
+QVariantMap MarkDocument::defaultToolStyle(const QString &type) const {
+  auto fields = factoryToolStyle(type);
+  QSettings settings;
+  settings.beginGroup("tools/" + type);
+  for (auto it = fields.begin(); it != fields.end(); ++it) {
+    const auto valid = validToolFields(type, {{it.key(), settings.value(it.key(), it.value())}});
+    if (valid) it.value() = valid->value(it.key());
+  }
+  return fields;
+}
+QVariantMap MarkDocument::toolDefaults() const {
+  QVariantMap defaults;
+  for (const auto *type : {"arrow", "line", "box", "ellipse", "pen", "step", "highlight", "blur"})
+    defaults[type] = defaultToolStyle(type);
+  return defaults;
+}
+void MarkDocument::applyToolDefaults(Frame::Edit &edit) const {
+  applyToolFields(edit, defaultToolStyle(edit.type));
+}
+void MarkDocument::setToolStyle(const QString &type, const QVariantMap &style) {
+  if (locked() || style.isEmpty()) return;
+  const auto fields = validToolFields(type, style);
+  if (!fields) return;
+  endTransform(false);
+  bool modified = false;
+  if (m_selected >= 0 && m_selected < m_edits.size() && m_edits[m_selected].type == type) {
+    Frame::Edit updated = m_edits[m_selected];
+    applyToolFields(updated, *fields);
+    if (updated != m_edits[m_selected]) {
+      saveHistory();
+      m_edits[m_selected] = updated;
+      modified = true;
+    }
+  }
+  QSettings settings;
+  settings.beginGroup("tools/" + type);
+  for (auto it = fields->begin(); it != fields->end(); ++it)
+    settings.setValue(it.key(), it.value());
+  if (modified) commit();
+  else emit changed();
+}
+void MarkDocument::resetToolStyle(const QString &type) {
+  setToolStyle(type, factoryToolStyle(type));
+}
+QString MarkDocument::stylePreview(const QString &type, const QVariantMap &style) const {
+  if (type != "text" && factoryToolStyle(type).isEmpty()) return {};
+  QImage image(560, 160, QImage::Format_ARGB32_Premultiplied);
+  image.fill(Qt::transparent);
+  Frame::Edit edit{type, {.2, .25}, {.8, .75}};
+  applyToolFields(edit, style);
+  // Enlarge fine strokes and step numbers so their colors can be judged in
+  // the small sample. Keep the largest sizes inside its bounds.
+  edit.size = std::min(edit.size * (type == "step" ? 3.5 : type == "blur" ? 1. : 2.), 6.);
+  if (type == "arrow" || type == "line") {
+    edit.from = {.18, .65}; edit.to = {.82, .35};
+  } else if (type == "text") {
+    edit.color = QColor(style.value("color", "#ffffff").toString());
+    edit.background = QColor(style.value("background", "#151a20").toString());
+    edit.backgroundOpacity = style.value("backgroundOpacity", 1.).toDouble();
+    edit.textStyle = style.value("textStyle", "box").toString();
+    edit.textAlign = style.value("textAlign", "center").toString();
+    edit.text = "Your label";
+    edit.size = Frame::textSizeForPixels(std::clamp(style.value("fontPx", 32).toInt(), 24, 60), image);
+    const QRectF bounds = Frame::annotationBounds(edit, image);
+    edit.from = {(1-bounds.width())/2, (1-bounds.height())/2};
+    edit.to = edit.from;
+  } else if (type == "step") edit.from = {.5, .5};
+  else if (type == "pen")
+    edit.points = {{.2,.6}, {.3,.35}, {.4,.65}, {.5,.35}, {.6,.65}, {.8,.4}};
+  else if (type == "blur") {
+    QPainter painter(&image);
+    painter.fillRect(image.rect(), QColor("#e5e9ed"));
+    QFont font("sans-serif");
+    font.setPixelSize(36);
+    painter.setFont(font);
+    painter.setPen(QColor("#151a20"));
+    painter.drawText(image.rect(), Qt::AlignCenter, "Private details");
+    edit.from = {.08,.08}; edit.to = {.92,.92};
+  }
+  const QImage rendered = Frame::applyEdits(image, {edit}, false);
+  QByteArray png;
+  QBuffer buffer(&png);
+  buffer.open(QIODevice::WriteOnly);
+  rendered.save(&buffer, "PNG");
+  return "data:image/png;base64," + QString::fromLatin1(png.toBase64());
 }
 void MarkDocument::setDuration(double seconds) {
   seconds = std::isfinite(seconds) ? std::max(0., seconds) : 0.;
@@ -82,7 +258,16 @@ QVariantList MarkDocument::annotations() const {
                             // reworded label counts as a change.
                             {"text", edit.text},
                             {"color", edit.color.name(QColor::HexArgb)},
-                            {"size", edit.size}});
+                            {"size", edit.size},
+                            {"textStyle", edit.textStyle},
+                            {"textAlign", edit.textAlign},
+                            {"background", edit.background.name(QColor::HexArgb)},
+                            {"backgroundOpacity", edit.backgroundOpacity},
+                            {"outline", edit.outline}, {"arrowHead", edit.arrowHead},
+                            {"filled", edit.filled}, {"opacity", edit.opacity},
+                            {"numberColor", edit.numberColor.name(QColor::HexArgb)},
+                            {"textBoxWidth", edit.textBox.width()},
+                            {"textBoxHeight", edit.textBox.height()}});
   }
   return list;
 }
@@ -104,7 +289,7 @@ void MarkDocument::setSelectedTimes(double start, double end) {
 }
 void MarkDocument::commit(bool modified) {
   emit changed();
-  emit edited(modified);
+  emit edited(modified && !m_previewing);
 }
 static bool fitTextToImage(Frame::Edit &edit, const QImage &source) {
   if (edit.type != "text" || source.isNull())
@@ -168,10 +353,15 @@ void MarkDocument::edit(const QString &type, double x1, double y1,
   }
   Frame::Edit edit{type, a, b, text.left(240)};
   if (type == "text") {
-    edit.color = Qt::white;
-    edit.size = Frame::textSizeForPixels(newTextPixels(), m_base);
+    const auto style = labelDefaults();
+    edit.color = QColor(style.value("color").toString());
+    edit.background = QColor(style.value("background").toString());
+    edit.backgroundOpacity = style.value("backgroundOpacity").toDouble();
+    edit.textStyle = style.value("textStyle").toString();
+    edit.textAlign = style.value("textAlign").toString();
+    edit.size = Frame::textSizeForPixels(style.value("fontPx").toInt(), m_base);
     fitTextToImage(edit, m_base);
-  }
+  } else applyToolDefaults(edit);
   timeNewMark(edit);
   m_edits.append(edit);
   if (type != "crop")
@@ -227,6 +417,7 @@ void MarkDocument::addStroke(const QVariantList &points) {
   saveHistory();
   Frame::Edit stroke{"pen", {left, top}, {right, bottom}};
   stroke.points = std::move(path);
+  applyToolDefaults(stroke);
   timeNewMark(stroke);
   m_edits.append(stroke);
   m_selected = m_edits.size() - 1;
@@ -234,6 +425,10 @@ void MarkDocument::addStroke(const QVariantList &points) {
   commit();
 }
 void MarkDocument::saveHistory() {
+  if (m_previewing)
+    return;
+  if (m_transform)
+    endTransform(false);
   if (m_undoStates.size() >= 100)
     m_undoStates.removeFirst();
   m_undoStates.append({m_edits, m_selected});
@@ -271,11 +466,16 @@ QVariantMap MarkDocument::selectedAnnotation() const {
           {"text", edit.text},
           {"color", edit.color.name()},
           {"size", edit.size},
+          {"textBoxWidth", edit.textBox.width() / crop.width()},
+          {"textBoxHeight", edit.textBox.height() / crop.height()},
           {"fontPx", edit.type == "text" ? Frame::textPixelSize(edit, m_base) : 0},
           {"textStyle", edit.textStyle},
           {"textAlign", edit.textAlign},
           {"background", edit.background.name()},
           {"backgroundOpacity", edit.backgroundOpacity},
+          {"outline", edit.outline}, {"arrowHead", edit.arrowHead},
+          {"filled", edit.filled}, {"opacity", edit.opacity},
+          {"numberColor", edit.numberColor.name()},
           {"x1", (edit.from.x() - crop.x()) / crop.width()},
           {"y1", (edit.from.y() - crop.y()) / crop.height()},
           {"x2", (edit.to.x() - crop.x()) / crop.width()},
@@ -346,6 +546,7 @@ int MarkDocument::hitIndex(double x, double y, bool edgesOnly) const {
   return -1;
 }
 int MarkDocument::selectAt(double x, double y) {
+  endTransform(false);
   const int found = hitIndex(x, y);
   if (found != m_selected) {
     m_selected = found;
@@ -354,6 +555,7 @@ int MarkDocument::selectAt(double x, double y) {
   return m_selected;
 }
 void MarkDocument::select(int index) {
+  endTransform(false);
   if (index < -1 || index >= m_edits.size() ||
       (index >= 0 && m_edits[index].type == "crop") || index == m_selected)
     return;
@@ -374,12 +576,14 @@ QVariantMap MarkDocument::hitAt(double x, double y, bool edgesOnly) const {
           {"h", bounds.height() / crop.height()}};
 }
 void MarkDocument::clearSelection() {
+  endTransform(false);
   if (m_selected < 0)
     return;
   m_selected = -1;
   emit changed();
 }
 void MarkDocument::beginTextEdit() {
+  endTransform(false);
   if (locked() || m_selected < 0 || m_selected >= m_edits.size() ||
       m_edits[m_selected].type != "text" || m_hiddenEdit == m_selected)
     return;
@@ -411,6 +615,40 @@ void MarkDocument::endTextEdit(const QString &text, bool apply) {
     }
   }
   commit(modified);
+}
+void MarkDocument::beginTransform() {
+  endTransform(false);
+  if (!locked() && m_selected >= 0 && m_selected < m_edits.size())
+    m_transform = EditState{m_edits, m_selected};
+}
+void MarkDocument::previewTransform(int handle, double x, double y) {
+  if (!m_transform || locked() || m_selected != m_transform->selected)
+    return;
+  const auto previous = m_edits;
+  m_edits = m_transform->edits;
+  m_previewing = true;
+  if (handle < 0) moveSelected(x, y);
+  else resizeSelected(handle, x, y);
+  // Returning exactly to the starting point must restore the rendered mark too.
+  if (m_edits == m_transform->edits && previous != m_edits)
+    commit(false);
+  m_previewing = false;
+}
+void MarkDocument::endTransform(bool apply) {
+  if (!m_transform)
+    return;
+  const auto updated = m_edits;
+  const auto original = *m_transform;
+  m_transform.reset();
+  m_edits = original.edits;
+  m_selected = original.selected;
+  if (apply && updated != m_edits) {
+    saveHistory();
+    m_edits = updated;
+    commit();
+  } else if (updated != m_edits) {
+    commit(false);
+  }
 }
 void MarkDocument::moveSelected(double dx, double dy) {
   if (locked() || m_selected < 0 || m_selected >= m_edits.size())
@@ -455,16 +693,59 @@ void MarkDocument::resizeSelected(int handle, double x, double y) {
     return;
   const QPointF point = sourcePoint(x, y);
   if (edit.type == "text" || edit.type == "step") {
-    if (handle < 0 || handle > 3)
+    if (handle < 0 || handle > 7)
       return;
     const QRectF bounds = Frame::annotationBounds(edit, m_base);
+    if (edit.type == "text" && handle >= 4) {
+      Frame::Edit updated = edit;
+      QRectF box = bounds;
+      const double minWidth = std::min(1., (Frame::textPixelSize(edit, m_base) * 2. +
+                                          std::max(8., Frame::textPixelSize(edit, m_base) * 0.54)) / m_base.width());
+      if (handle == 4) box.setTop(std::min(point.y(), box.bottom() - 8. / m_base.height()));
+      if (handle == 5) box.setRight(std::max(point.x(), box.left() + minWidth));
+      if (handle == 6) box.setBottom(std::max(point.y(), box.top() + 8. / m_base.height()));
+      if (handle == 7) box.setLeft(std::min(point.x(), box.right() - minWidth));
+      box = box.intersected(QRectF(0, 0, 1, 1));
+      updated.textBox = box.size();
+      // Stop narrowing before wrapping would force the font to shrink.
+      if (Frame::annotationBounds(updated, m_base).height() > 1.) {
+        double low = updated.textBox.width(), high = 1.;
+        for (int i = 0; i < 16; ++i) {
+          const double middle = (low + high) / 2.;
+          updated.textBox.setWidth(middle);
+          if (Frame::annotationBounds(updated, m_base).height() <= 1.) high = middle;
+          else low = middle;
+        }
+        updated.textBox.setWidth(high);
+        if (handle == 7) box.moveLeft(std::max(0., bounds.right() - high));
+      }
+      updated.from = box.topLeft();
+      updated.to = updated.from;
+      // Keep every word visible: height cannot shrink below the laid-out text.
+      const QRectF laidOut = Frame::annotationBounds(updated, m_base);
+      if (handle == 4)
+        updated.from.setY(std::max(0., bounds.bottom() - laidOut.height()));
+      updated.to = updated.from;
+      fitTextToImage(updated, m_base);
+      if (updated.textBox == edit.textBox && updated.from == edit.from)
+        return;
+      saveHistory();
+      m_edits[m_selected] = updated;
+      commit();
+      return;
+    }
     const QPointF opposite = edit.type == "step" ? edit.from
         : handle == 0 ? bounds.bottomRight()
         : handle == 1 ? bounds.bottomLeft()
         : handle == 2 ? bounds.topLeft() : bounds.topRight();
     const QPointF corner = handle == 0 ? bounds.topLeft()
         : handle == 1 ? bounds.topRight()
-        : handle == 2 ? bounds.bottomRight() : bounds.bottomLeft();
+        : handle == 2 ? bounds.bottomRight()
+        : handle == 3 ? bounds.bottomLeft()
+        : handle == 4 ? QPointF(bounds.center().x(), bounds.top())
+        : handle == 5 ? QPointF(bounds.right(), bounds.center().y())
+        : handle == 6 ? QPointF(bounds.center().x(), bounds.bottom())
+                      : QPointF(bounds.left(), bounds.center().y());
     const QPointF scale(m_base.width(), m_base.height());
     const QPointF oldVector((corner.x() - opposite.x()) * scale.x(),
                             (corner.y() - opposite.y()) * scale.y());
@@ -487,6 +768,11 @@ void MarkDocument::resizeSelected(int handle, double x, double y) {
       return;
     Frame::Edit updated = edit;
     updated.size = next;
+    if (edit.type == "text") {
+      const double ratio = next / edit.size;
+      updated.textBox = {std::min(1., edit.textBox.width() * ratio),
+                         std::min(1., edit.textBox.height() * ratio)};
+    }
     if (edit.type == "text" && handle != 2) {
       const QRectF resized = Frame::annotationBounds(updated, m_base);
       QPointF anchor = handle == 0 ? opposite - QPointF(resized.width(), resized.height())
@@ -516,6 +802,10 @@ void MarkDocument::resizeSelected(int handle, double x, double y) {
     else if (handle == 1) { a = {r.left(), point.y()}; b = {point.x(), r.bottom()}; }
     else if (handle == 2) { a = r.topLeft(); b = point; }
     else if (handle == 3) { a = {point.x(), r.top()}; b = {r.right(), point.y()}; }
+    else if (handle == 4) { a = {r.left(), std::min(point.y(), r.bottom() - 1. / m_base.height())}; b = r.bottomRight(); }
+    else if (handle == 5) { a = r.topLeft(); b = {std::max(point.x(), r.left() + 1. / m_base.width()), r.bottom()}; }
+    else if (handle == 6) { a = r.topLeft(); b = {r.right(), std::max(point.y(), r.top() + 1. / m_base.height())}; }
+    else if (handle == 7) { a = {std::min(point.x(), r.right() - 1. / m_base.width()), r.top()}; b = r.bottomRight(); }
     else return;
   }
   if (QLineF(a, b).length() < 0.006 || (a == edit.from && b == edit.to))
@@ -613,6 +903,70 @@ void MarkDocument::setSelectedColor(const QString &color) {
   m_edits[m_selected].color = parsed;
   commit();
 }
+void MarkDocument::setLabelStyle(const QVariantMap &style) {
+  if (locked() || style.isEmpty())
+    return;
+  QVariantMap fields;
+  for (auto it = style.begin(); it != style.end(); ++it) {
+    const QString key = it.key();
+    if (key == "color" || key == "background") {
+      const QColor color(it.value().toString());
+      if (!color.isValid()) return;
+      fields[key] = color.name();
+    } else if (key == "backgroundOpacity") {
+      bool valid = false;
+      const double opacity = it.value().toDouble(&valid);
+      if (!valid || !std::isfinite(opacity) || opacity < 0 || opacity > 1) return;
+      fields[key] = opacity;
+    } else if (key == "fontPx") {
+      bool valid = false;
+      const int pixels = it.value().toInt(&valid);
+      if (!valid || (pixels != 0 && (pixels < 8 || pixels > 4096))) return;
+      fields[key] = pixels;
+    } else if (key == "textStyle") {
+      if (!QStringList{"box", "shadow"}.contains(it.value().toString())) return;
+      fields[key] = it.value();
+    } else if (key == "textAlign") {
+      if (!QStringList{"left", "center", "right"}.contains(it.value().toString())) return;
+      fields[key] = it.value();
+    }
+  }
+  if (fields.isEmpty()) return;
+  endTransform(false);
+  const bool selected = m_selected >= 0 && m_selected < m_edits.size() &&
+                        m_edits[m_selected].type == "text";
+  bool modified = false;
+  if (selected) {
+    Frame::Edit updated = m_edits[m_selected];
+    if (fields.contains("color")) updated.color = QColor(fields["color"].toString());
+    if (fields.contains("background")) updated.background = QColor(fields["background"].toString());
+    if (fields.contains("backgroundOpacity")) updated.backgroundOpacity = fields["backgroundOpacity"].toDouble();
+    if (fields.contains("textStyle")) updated.textStyle = fields["textStyle"].toString();
+    if (fields.contains("textAlign")) updated.textAlign = fields["textAlign"].toString();
+    if (fields.contains("fontPx")) {
+      const int pixels = fields["fontPx"].toInt();
+      updated.size = Frame::textSizeForPixels(pixels ? pixels : newTextPixels(), m_base);
+      fitTextToImage(updated, m_base);
+    }
+    if (updated != m_edits[m_selected]) {
+      saveHistory();
+      m_edits[m_selected] = updated;
+      modified = true;
+    }
+  }
+  QSettings settings;
+  settings.beginGroup("labels");
+  for (auto it = fields.begin(); it != fields.end(); ++it)
+    settings.setValue(it.key(), it.value());
+  // Default-only choices never dirty the current image or enter its undo history.
+  if (modified) commit();
+  else emit changed();
+}
+void MarkDocument::resetLabelStyle() {
+  setLabelStyle({{"color", "#ffffff"}, {"background", "#151a20"},
+                 {"backgroundOpacity", 1.}, {"textStyle", "box"},
+                 {"textAlign", "center"}, {"fontPx", 0}});
+}
 void MarkDocument::setSelectedSize(double size) {
   if (locked() || m_selected < 0 || m_selected >= m_edits.size())
     return;
@@ -648,8 +1002,6 @@ void MarkDocument::setSelectedTextStyle(const QString &style) {
     return;
   saveHistory();
   m_edits[m_selected].textStyle = style;
-  if (style == "shadow" && m_edits[m_selected].color == QColor(Qt::white))
-    m_edits[m_selected].color = QColor("#e75439");
   commit();
 }
 void MarkDocument::setSelectedTextAlignment(const QString &alignment) {
@@ -693,6 +1045,7 @@ void MarkDocument::clearCrop() {
   commit();
 }
 void MarkDocument::undo() {
+  endTransform(false);
   if (locked() || m_undoStates.isEmpty())
     return;
   m_hiddenEdit = -1;
@@ -703,6 +1056,7 @@ void MarkDocument::undo() {
   commit();
 }
 void MarkDocument::redo() {
+  endTransform(false);
   if (locked() || m_redoStates.isEmpty())
     return;
   m_hiddenEdit = -1;

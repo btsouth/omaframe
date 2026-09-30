@@ -45,9 +45,9 @@ ApplicationWindow {
     readonly property bool videoLoaded: videoMode && video.source.toString().length > 0
     readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0 && !video.marks.hasCrop && !(video.cameraSource.toString().length && video.cameraLayout.visible)
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
-    readonly property bool typing: markCanvas.typing || videoPane.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
+    readonly property bool typing: markCanvas.typing || videoPane.typing
     readonly property bool adjustingControl: root.activeFocusItem instanceof Slider || root.activeFocusItem instanceof ComboBox
-    property bool shortcutsAllowed: !root.adjustingControl && !root.working && !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
+    property bool shortcutsAllowed: !markCanvas.dragging && !imageStyle.opened && !root.adjustingControl && !root.working && !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
     property bool working: navigation.saving || studio.busy || video.busy || (recorder.active && !studio.quickMode)
     property string operationStatus: ""
     property string currentStatus: operationStatus || (videoMode ? video.status : studio.status)
@@ -67,6 +67,8 @@ ApplicationWindow {
         captureMenu.close();
         settingsPopup.close();
         gifMenu.close();
+        imageStyle.close();
+        videoPane.closeStylePanel();
         openDialog.close();
         imageFolderDialog.close();
         videoFolderDialog.close();
@@ -122,8 +124,8 @@ ApplicationWindow {
         { key: "step", label: "Steps", shortcut: "N" }, { key: "text", label: "Text", shortcut: "T" }
     ]
     property string toolDescription: ({
-            select: "Click a mark to select it, drag to move it, or drag a handle to resize. Double-click a label to change its words.",
-            crop: "Drag a frame over the full image. Marks outside the frame are kept. Press V when you are done.",
+            select: "Drag a mark to move it; hold Shift to move straight. Drag side handles to resize width or height. Double-click a label to edit its words.",
+            crop: "Drag to crop, then move the frame or adjust its handles. Marks outside are kept. Press V when done.",
             arrow: "Drag from the tail to the tip.",
             line: "Drag to draw a line.",
             box: "Drag to draw an outline box.",
@@ -133,7 +135,7 @@ ApplicationWindow {
             blur: "Drag to soften an area. Use Redact for anything private.",
             pen: "Draw freehand.",
             step: "Click to place the next number.",
-            text: "Click where the label should go, then type. Click a label to change it."
+            text: "Click to type a label. Drag sides for box size, corners for font size. Double-click to change its words."
         })[tool] || ""
 
     onClosing: function (close) {
@@ -148,7 +150,10 @@ ApplicationWindow {
     }
     Binding { target: studio; property: "editing"; value: root.editing && !root.videoMode && root.visible }
     onEditingChanged: if (!editing && markCanvas.typing) markCanvas.commitText()
-    onToolChanged: if (markCanvas.typing) markCanvas.commitText()
+    onToolChanged: {
+        if (markCanvas.typing) markCanvas.commitText();
+        if (tool !== "select") studio.marks.clearSelection();
+    }
     Connections {
         target: studio
         property string previousStatus: ""
@@ -237,7 +242,7 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Escape"
-        enabled: (root.shortcutsAllowed || markCanvas.typing) && !root.videoMode && studio.hasImage && (root.editing || studio.quickMode)
+        enabled: (root.shortcutsAllowed || markCanvas.typing || markCanvas.dragging) && !root.videoMode && studio.hasImage && (root.editing || studio.quickMode)
         onActivated: root.editing ? root.escapeEditor() : studio.showFinishes()
     }
     Shortcut {
@@ -277,7 +282,7 @@ ApplicationWindow {
         enabled: root.shortcutsAllowed && root.editing && studio.marks.selectedAnnotation.type === "text"
         onActivated: markCanvas.editSelectedText()
     }
-    readonly property bool nudging: root.shortcutsAllowed && root.editing && !root.videoMode && studio.marks.selectedAnnotation.type !== undefined
+    readonly property bool nudging: root.shortcutsAllowed && root.editing && !root.videoMode && !markCanvas.dragging && studio.marks.selectedAnnotation.type !== undefined
     Shortcut { sequence: "Left"; enabled: root.nudging; onActivated: studio.marks.nudgeSelected(-1, 0) }
     Shortcut { sequence: "Right"; enabled: root.nudging; onActivated: studio.marks.nudgeSelected(1, 0) }
     Shortcut { sequence: "Up"; enabled: root.nudging; onActivated: studio.marks.nudgeSelected(0, -1) }
@@ -477,7 +482,7 @@ ApplicationWindow {
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         Overlay.modal: Rectangle { color: "transparent" }
-        onOpened: shortcuts.refresh()
+        onOpened: { settingsScroll.contentItem.contentY = 0; shortcuts.refresh(); }
         background: Rectangle {
             color: theme.alpha(theme.background, 1)
             radius: theme.radius
@@ -485,87 +490,95 @@ ApplicationWindow {
             border.color: theme.frame
         }
         contentItem: ScrollView {
+            id: settingsScroll
             clip: true
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: settingsColumn
-                width: settingsPopup.availableWidth - 10
-                spacing: 14
-                RowLayout {
-                    Layout.fillWidth: true
-                    Text { Layout.fillWidth: true; text: "Settings"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 17; font.weight: Font.Medium }
-                    StudioButton { glyph: "close"; quiet: true; implicitHeight: 30; hint: "Close Settings · Esc"; onClicked: settingsPopup.close() }
-                }
-                SectionLabel { text: "SHORTCUTS" }
-                ShortcutPanel { Layout.fillWidth: true; compact: true }
-                Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
-                SectionLabel { text: "SAVE FOLDERS" }
-                Repeater {
-                    model: [
-                        { label: "Screenshots", path: studio.outputDirectory, video: false },
-                        { label: "Recordings", path: video.outputDirectory, video: true }
-                    ]
+            contentItem: Flickable {
+                contentWidth: width
+                contentHeight: settingsColumn.implicitHeight + 4
+                boundsBehavior: Flickable.StopAtBounds
+                ColumnLayout {
+                    id: settingsColumn
+                    x: 2
+                    y: 2
+                    width: parent.width - 14
+                    spacing: 14
                     RowLayout {
-                        required property var modelData
                         Layout.fillWidth: true
-                        Layout.maximumWidth: settingsColumn.width
-                        spacing: 10
-                        ColumnLayout {
+                        Text { Layout.fillWidth: true; text: "Settings"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 17; font.weight: Font.Medium }
+                        StudioButton { glyph: "close"; quiet: true; implicitHeight: 30; hint: "Close Settings · Esc"; onClicked: settingsPopup.close() }
+                    }
+                    SectionLabel { text: "SHORTCUTS" }
+                    ShortcutPanel { Layout.fillWidth: true; compact: true }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
+                    SectionLabel { text: "SAVE FOLDERS" }
+                    Repeater {
+                        model: [
+                            { label: "Screenshots", path: studio.outputDirectory, video: false },
+                            { label: "Recordings", path: video.outputDirectory, video: true }
+                        ]
+                        RowLayout {
+                            required property var modelData
                             Layout.fillWidth: true
-                            spacing: 2
-                            Text { text: modelData.label; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 12 }
-                            Text { Layout.fillWidth: true; text: root.home(modelData.path); color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 11; elide: Text.ElideMiddle }
-                        }
-                        StudioButton {
-                            text: "Change"
-                            quiet: true
-                            implicitHeight: 30
-                            onClicked: { settingsPopup.close(); modelData.video ? videoFolderDialog.open() : imageFolderDialog.open(); }
+                            Layout.maximumWidth: settingsColumn.width
+                            spacing: 10
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text { text: modelData.label; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 12 }
+                                Text { Layout.fillWidth: true; text: root.home(modelData.path); color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 11; elide: Text.ElideMiddle }
+                            }
+                            StudioButton {
+                                text: "Change"
+                                quiet: true
+                                implicitHeight: 30
+                                onClicked: { settingsPopup.close(); modelData.video ? videoFolderDialog.open() : imageFolderDialog.open(); }
+                            }
                         }
                     }
-                }
-                Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
-                SectionLabel { text: "AFTER A CAPTURE IS COPIED" }
-                RecordToggle {
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    text: "Show a notification with the save folder"
-                    checked: notificationSetting.enabled
-                    onToggled: notificationSetting.enabled = checked
-                }
-                Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
-                SectionLabel { text: "PRIVACY" }
-                RecordToggle {
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    text: "Keep an unedited private copy of each capture"
-                    checked: studio.keepOriginals
-                    onToggled: studio.keepOriginals = checked
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: "These copies can include anything you redacted. They stay in " + root.home(studio.originalsFolder) + " until you delete them. " + studio.originalsSummary
-                    color: theme.muted
-                    font.family: theme.fontFamily
-                    font.pixelSize: 11
-                    wrapMode: Text.Wrap
-                }
-                StudioButton {
-                    text: "Delete private originals…"
-                    glyph: "trash"
-                    quiet: true
-                    enabled: !studio.busy && studio.originalsCount > 0
-                    onClicked: { settingsPopup.close(); originalsDialog.open(); }
-                }
-                Text {
-                    Layout.fillWidth: true
-                    Layout.topMargin: 4
-                    text: "Omaframe " + Qt.application.version + " · Everything stays on this computer. No accounts, uploads or telemetry."
-                    color: theme.faint
-                    font.family: theme.fontFamily
-                    font.pixelSize: 11
-                    wrapMode: Text.Wrap
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
+                    SectionLabel { text: "AFTER A CAPTURE IS COPIED" }
+                    RecordToggle {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        text: "Show a notification with the save folder"
+                        checked: notificationSetting.enabled
+                        onToggled: notificationSetting.enabled = checked
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
+                    SectionLabel { text: "PRIVACY" }
+                    RecordToggle {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        text: "Keep an unedited private copy of each capture"
+                        checked: studio.keepOriginals
+                        onToggled: studio.keepOriginals = checked
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "These copies can include anything you redacted. They stay in " + root.home(studio.originalsFolder) + " until you delete them. " + studio.originalsSummary
+                        color: theme.muted
+                        font.family: theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                    StudioButton {
+                        text: "Delete private originals…"
+                        glyph: "trash"
+                        quiet: true
+                        enabled: !studio.busy && studio.originalsCount > 0
+                        onClicked: { settingsPopup.close(); originalsDialog.open(); }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        text: "Omaframe " + Qt.application.version + " · Everything stays on this computer. No accounts, uploads or telemetry."
+                        color: theme.faint
+                        font.family: theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
                 }
             }
         }
@@ -1186,10 +1199,20 @@ ApplicationWindow {
                             height: 1
                             color: theme.separator
                         }
+                        ToolStyleButton {
+                            id: imageStyle
+                            Layout.leftMargin: 14
+                            Layout.rightMargin: 14
+                            Layout.fillWidth: true
+                            kind: studio.marks.selectedAnnotation.type || root.tool
+                            visible: root.editing && supported
+                            doc: studio.marks
+                            enabled: !studio.busy
+                            onBeforeOpen: markCanvas.commitText()
+                        }
                         ColumnLayout {
                             id: selectedInspector
                             readonly property var mark: studio.marks.selectedAnnotation
-                            readonly property bool colored: ["text", "step", "arrow", "line", "box", "ellipse", "pen"].includes(mark.type)
                             readonly property var names: ({ text: "LABEL", step: "STEP", arrow: "ARROW", line: "LINE", box: "BOX", ellipse: "OVAL", pen: "PEN STROKE", highlight: "HIGHLIGHT", redact: "REDACTION", blur: "BLUR" })
                             Layout.leftMargin: 18
                             Layout.rightMargin: 18
@@ -1221,205 +1244,6 @@ ApplicationWindow {
                                 spacing: 4
                                 StudioButton { text: "Backward"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Move this mark one layer backward"; enabled: !studio.busy && selectedInspector.mark.layer > 1; onClicked: studio.marks.moveSelectedLayer(-1) }
                                 StudioButton { text: "Forward"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Move this mark one layer forward"; enabled: !studio.busy && selectedInspector.mark.layer < selectedInspector.mark.layers; onClicked: studio.marks.moveSelectedLayer(1) }
-                            }
-                            Text {
-                                visible: selectedInspector.mark.type === "text"
-                                text: "Size"
-                                color: theme.text
-                                font.pixelSize: 12
-                            }
-                            RowLayout {
-                                visible: selectedInspector.mark.type === "text"
-                                Layout.fillWidth: true
-                                spacing: 8
-                                NumberField {
-                                    id: fontField
-                                    from: 8; to: 4096
-                                    value: studio.marks.selectedAnnotation.fontPx || 24
-                                    step: Math.max(1, Math.round(value / 12))
-                                    suffix: "px"
-                                    onCommitted: next => studio.marks.setSelectedFontPixels(next)
-                                }
-                                ThemedSlider {
-                                    Layout.fillWidth: true
-                                    from: 0; to: 1
-                                    value: Math.log2(Math.max(8, studio.marks.selectedAnnotation.fontPx || 24) / 8) / 9
-                                    onCommitted: v => studio.marks.setSelectedFontPixels(Math.round(8 * Math.pow(512, v)))
-                                }
-                            }
-                            Text {
-                                visible: selectedInspector.mark.type === "text"
-                                Layout.fillWidth: true
-                                text: "Or drag a corner handle on the image."
-                                color: theme.faint
-                                font.pixelSize: 10
-                            }
-                            Text {
-                                visible: selectedInspector.colored
-                                text: selectedInspector.mark.type === "text" ? "Text color" : "Color"
-                                color: theme.text
-                                font.pixelSize: 12
-                            }
-                            Flow {
-                                visible: selectedInspector.colored
-                                Layout.fillWidth: true
-                                spacing: 6
-                                Repeater {
-                                    model: ["#ffffff", "#151a20", "#e75439", "#eab841", "#459ec7", "#4ca782"]
-                                    Rectangle {
-                                        required property string modelData
-                                        width: 24; height: 24; radius: theme.radius > 0 ? 12 : 2
-                                        color: modelData
-                                        border.width: activeFocus || studio.marks.selectedAnnotation.color === modelData ? 3 : 1
-                                        border.color: activeFocus || studio.marks.selectedAnnotation.color === modelData ? theme.focusBorder : theme.controlBorder
-                                        Accessible.role: Accessible.Button
-                                        Accessible.name: "Color " + modelData
-                                        activeFocusOnTab: true
-                                        Accessible.onPressAction: studio.marks.setSelectedColor(modelData)
-                                        Keys.onReturnPressed: studio.marks.setSelectedColor(modelData)
-                                        Keys.onSpacePressed: studio.marks.setSelectedColor(modelData)
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            enabled: !studio.busy
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: studio.marks.setSelectedColor(parent.modelData)
-                                        }
-                                    }
-                                }
-                                TextField {
-                                    id: colorInput
-                                    Accessible.name: "Mark color as a hex value"
-                                    Keys.onEscapePressed: { text = studio.marks.selectedAnnotation.color || ""; root.contentItem.forceActiveFocus(); }
-                                    width: 78
-                                    height: 28
-                                    property bool validColor: /^#[0-9a-fA-F]{6}$/.test(text)
-                                    text: selectedInspector.mark.color || ""
-                                    placeholderText: "#RRGGBB"
-                                    color: theme.text
-                                    font.pixelSize: 11
-                                    selectByMouse: true
-                                    onEditingFinished: {
-                                        if (validColor)
-                                            studio.marks.setSelectedColor(text)
-                                        else
-                                            text = studio.marks.selectedAnnotation.color || ""
-                                    }
-                                    background: Rectangle {
-                                        color: theme.well
-                                        border.width: colorInput.activeFocus ? 2 : 1
-                                        border.color: colorInput.validColor ? (colorInput.activeFocus ? theme.focusBorder : theme.controlBorder) : theme.urgent
-                                    }
-                                }
-                            }
-                            Text {
-                                visible: selectedInspector.mark.type !== "text" && ["step", "arrow", "line", "box", "ellipse", "pen", "blur"].includes(selectedInspector.mark.type)
-                                text: (selectedInspector.mark.type === "blur" ? "Strength · " : "Thickness · ") + Number(selectedInspector.mark.size || 1).toFixed(2) + "×"
-                                color: theme.text
-                                font.pixelSize: 12
-                            }
-                            ThemedSlider {
-                                visible: selectedInspector.mark.type !== "text" && ["step", "arrow", "line", "box", "ellipse", "pen", "blur"].includes(selectedInspector.mark.type)
-                                Layout.fillWidth: true
-                                from: 0.5; to: 8; stepSize: 0.25
-                                value: studio.marks.selectedAnnotation.size || 1
-                                onCommitted: v => studio.marks.setSelectedSize(v)
-                            }
-                            Text {
-                                visible: selectedInspector.mark.type === "text"
-                                text: "Style"
-                                color: theme.text
-                                font.pixelSize: 12
-                            }
-                            RowLayout {
-                                visible: selectedInspector.mark.type === "text"
-                                Layout.fillWidth: true
-                                spacing: 4
-                                StudioButton { text: "Box"; selected: studio.marks.selectedAnnotation.textStyle === "box"; quiet: !selected; Layout.fillWidth: true; implicitHeight: 32; onClicked: studio.marks.setSelectedTextStyle("box") }
-                                StudioButton { text: "Shadow"; selected: studio.marks.selectedAnnotation.textStyle === "shadow"; quiet: !selected; Layout.fillWidth: true; implicitHeight: 32; onClicked: studio.marks.setSelectedTextStyle("shadow") }
-                            }
-                            RowLayout {
-                                visible: selectedInspector.mark.type === "text"
-                                Layout.fillWidth: true
-                                spacing: 4
-                                Repeater {
-                                    model: ["left", "center", "right"]
-                                    StudioButton {
-                                        required property string modelData
-                                        text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
-                                        selected: studio.marks.selectedAnnotation.textAlign === modelData
-                                        quiet: !selected
-                                        Layout.fillWidth: true
-                                        implicitHeight: 30
-                                        font.pixelSize: 11
-                                        hint: "Align lines " + modelData
-                                        onClicked: studio.marks.setSelectedTextAlignment(modelData)
-                                    }
-                                }
-                            }
-                            Text {
-                                visible: selectedInspector.mark.type === "text" && selectedInspector.mark.textStyle === "box"
-                                text: "Box color · " + Math.round((selectedInspector.mark.backgroundOpacity || 0) * 100) + "%"
-                                color: theme.text
-                                font.pixelSize: 12
-                            }
-                            Flow {
-                                visible: selectedInspector.mark.type === "text" && selectedInspector.mark.textStyle === "box"
-                                Layout.fillWidth: true
-                                spacing: 6
-                                Repeater {
-                                    model: ["#151a20", "#ffffff", "#e75439", "#eab841", "#459ec7", "#4ca782"]
-                                    Rectangle {
-                                        required property string modelData
-                                        width: 24; height: 24; radius: theme.radius > 0 ? 12 : 2
-                                        color: modelData
-                                        border.width: activeFocus || studio.marks.selectedAnnotation.background === modelData ? 3 : 1
-                                        border.color: activeFocus || studio.marks.selectedAnnotation.background === modelData ? theme.focusBorder : theme.controlBorder
-                                        Accessible.role: Accessible.Button
-                                        Accessible.name: "Box color " + modelData
-                                        activeFocusOnTab: true
-                                        Accessible.onPressAction: studio.marks.setSelectedBackground(modelData)
-                                        Keys.onReturnPressed: studio.marks.setSelectedBackground(modelData)
-                                        Keys.onSpacePressed: studio.marks.setSelectedBackground(modelData)
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            enabled: !studio.busy
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: studio.marks.setSelectedBackground(parent.modelData)
-                                        }
-                                    }
-                                }
-                                TextField {
-                                    id: boxColorInput
-                                    Accessible.name: "Label background as a hex value"
-                                    Keys.onEscapePressed: { text = studio.marks.selectedAnnotation.background || ""; root.contentItem.forceActiveFocus(); }
-                                    width: 78
-                                    height: 28
-                                    property bool validColor: /^#[0-9a-fA-F]{6}$/.test(text)
-                                    text: selectedInspector.mark.background || ""
-                                    placeholderText: "#RRGGBB"
-                                    color: theme.text
-                                    font.pixelSize: 11
-                                    selectByMouse: true
-                                    onEditingFinished: {
-                                        if (validColor)
-                                            studio.marks.setSelectedBackground(text)
-                                        else
-                                            text = studio.marks.selectedAnnotation.background || ""
-                                    }
-                                    background: Rectangle {
-                                        color: theme.well
-                                        border.width: boxColorInput.activeFocus ? 2 : 1
-                                        border.color: boxColorInput.validColor ? (boxColorInput.activeFocus ? theme.focusBorder : theme.controlBorder) : theme.urgent
-                                    }
-                                }
-                            }
-                            ThemedSlider {
-                                visible: selectedInspector.mark.type === "text" && selectedInspector.mark.textStyle === "box"
-                                Layout.fillWidth: true
-                                from: 0; to: 1; stepSize: 0.05
-                                value: studio.marks.selectedAnnotation.backgroundOpacity || 0
-                                Accessible.name: "Box opacity"
-                                onCommitted: v => studio.marks.setSelectedBackgroundOpacity(v)
                             }
                             Text {
                                 visible: selectedInspector.mark.type === "redact"
@@ -1609,6 +1433,7 @@ ApplicationWindow {
             function pause() { if (item) item.pause() }
             function commitText() { if (item) item.commitText() }
             function syncDraft() { if (item) item.syncDraft() }
+            function closeStylePanel() { if (item) item.closeStylePanel() }
             onLoaded: {
                 item.shortcutsAllowed = Qt.binding(function() { return root.shortcutsAllowed });
                 item.savedCurrent = Qt.binding(function() { return root.videoSavedCurrent });

@@ -421,6 +421,10 @@ void Studio::refreshDrafts() {
   emit changed();
 }
 void Studio::saveDraftNow() {
+  if (m_marks.transforming()) {
+    m_draftTimer.start();
+    return;
+  }
   m_draftTimer.stop();
   if (!m_draftDirty || m_demo || m_original.isNull())
     return;

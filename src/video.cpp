@@ -551,7 +551,8 @@ static QByteArray markLook(const QVector<Frame::Edit> &edits, int index,
   QDataStream out(&key, QIODevice::WriteOnly);
   out << size << edit.type << edit.from << edit.to << edit.text << edit.color
       << edit.size << edit.textStyle << edit.textAlign << edit.background
-      << edit.backgroundOpacity << edit.points << number;
+      << edit.backgroundOpacity << edit.points << number << edit.textBox
+      << edit.outline << edit.arrowHead << edit.filled << edit.opacity << edit.numberColor;
   return key;
 }
 void Video::renderOverlays() {

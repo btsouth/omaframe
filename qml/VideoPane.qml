@@ -158,6 +158,7 @@ Item {
         }
         redoStack = redoStack.slice(0, -1);
     }
+    function closeStylePanel() { videoStyle.close(); }
     function commitText() {
         markCanvas.commitText();
     }
@@ -174,6 +175,7 @@ Item {
             return;
         player.pause();
         clearSelection();
+        video.marks.clearSelection();
         tool = key;
     }
     // Esc steps back one layer: a drag, the selected mark, the mark tool,
@@ -349,8 +351,7 @@ Item {
         return false;
     }
 
-    onVisibleChanged: if (!visible)
-        player.pause()
+    onVisibleChanged: if (!visible) { player.pause(); videoStyle.close(); }
     onMarkSelectedChanged: if (markSelected) {
         hasSelection = false;
         selectedCut = -1;
@@ -420,12 +421,12 @@ Item {
         function onLoaded() { pane.loadEditState(); }
     }
 
-    readonly property bool popupOpen: cameraMenu.opened
-    readonly property bool keys: visible && editable && shortcutsAllowed && !typing && !popupOpen
+    readonly property bool popupOpen: cameraMenu.opened || videoStyle.opened
+    readonly property bool keys: visible && editable && shortcutsAllowed && !typing && !popupOpen && !markCanvas.dragging
     Shortcut { sequence: "Space"; enabled: pane.keys; onActivated: pane.togglePlay() }
     Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setIn() }
     Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setOut() }
-    Shortcut { sequence: "Escape"; enabled: pane.keys && (pane.barMode !== "none" || markCanvas.dragging); onActivated: pane.stepBack() }
+    Shortcut { sequence: "Escape"; enabled: (pane.keys || markCanvas.dragging) && (pane.barMode !== "none" || markCanvas.dragging); onActivated: pane.stepBack() }
     Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && (pane.hasSelection || pane.markSelected); onActivated: pane.deleteSelected() }
     Shortcut { sequence: "C"; enabled: pane.keys; onActivated: pane.useTool("crop") }
     Shortcut { sequence: "G"; enabled: pane.keys; onActivated: pane.useTool("blur") }
@@ -1077,12 +1078,12 @@ Item {
                 visible: pane.barMode === "tool"
                 Layout.fillWidth: true
                 text: ({
-                        crop: "Drag a rectangle to crop the whole clip. Press V to preview it; Reset crop restores the full frame.",
+                        crop: "Drag to crop the whole clip. Move the frame or adjust its handles. Press V to preview; Reset crop restores the full frame.",
                         blur: "Drag over what to blur. It stays blurred for the whole clip; I and O change that. Use Redact for anything private.",
                         redact: "Drag over what to cover. It is covered for the whole clip; I and O change that.",
                         arrow: "Drag from the tail to the tip. It shows from here to the end of the clip.",
                         box: "Drag to draw a box. It shows from here to the end of the clip.",
-                        text: "Click where the label should go, then type. It shows from here to the end of the clip.",
+                        text: "Click to type a label. Drag sides for box size, corners for font size. It shows from here to the end.",
                         step: "Click to place the next number. It shows from here to the end of the clip."
                     })[pane.tool] || ""
                 color: theme.muted
@@ -1137,6 +1138,16 @@ Item {
                 wrapMode: Text.Wrap
                 maximumLineCount: 2
                 elide: Text.ElideRight
+            }
+            ToolStyleButton {
+                id: videoStyle
+                Layout.minimumWidth: implicitWidth
+                kind: pane.selectedMark.type || pane.tool
+                visible: supported
+                doc: video.marks
+                enabled: pane.editable && !pane.playing
+                implicitHeight: 32
+                onBeforeOpen: { markCanvas.commitText(); player.pause(); }
             }
             StudioButton {
                 visible: pane.barMode === "mark"

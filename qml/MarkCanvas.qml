@@ -31,9 +31,14 @@ Item {
     function editSelectedText() { textEditor.editSelected(); }
     // Drops the drag in progress without applying it.
     function cancelDrag() {
+        transformTimer.stop();
+        if (editSurface.doc) editSurface.doc.endTransform(false);
         drawArea.interaction = "none";
         guide.requestPaint();
     }
+    onLockedChanged: if (locked) cancelDrag()
+    onToolChanged: { cancelDrag(); if (tool === "text" && doc) doc.refreshLabelStyle(); }
+    onVisibleChanged: if (!visible) cancelDrag()
     Connections {
         target: editSurface.doc
         function onChanged() {
@@ -48,8 +53,9 @@ Item {
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         enabled: !editSurface.locked
-        cursorShape: hoverHandle >= 0 ? (editSurface.doc.selectedAnnotation.type === "line" || editSurface.doc.selectedAnnotation.type === "arrow" ? Qt.CrossCursor : hoverHandle === 1 || hoverHandle === 3 ? Qt.SizeBDiagCursor : Qt.SizeFDiagCursor)
-            : hoverMark.type !== undefined && editSurface.tool !== "crop" ? Qt.SizeAllCursor
+        readonly property int cursorHandle: pressed && interaction === "resize" ? handle : hoverHandle
+        cursorShape: pressed && (interaction === "move" || interaction === "cropMove") ? Qt.SizeAllCursor : cursorHandle >= 0 ? (transformMark.type === "line" || transformMark.type === "arrow" ? Qt.CrossCursor : cursorHandle === 4 || cursorHandle === 6 ? Qt.SizeVerCursor : cursorHandle === 5 || cursorHandle === 7 ? Qt.SizeHorCursor : cursorHandle === 1 || cursorHandle === 3 ? Qt.SizeBDiagCursor : Qt.SizeFDiagCursor)
+            : hoverMark.type !== undefined ? Qt.SizeAllCursor
             : editSurface.tool === "select" ? Qt.ArrowCursor
             : editSurface.tool === "text" ? Qt.IBeamCursor : Qt.CrossCursor
         property real startX: 0
@@ -65,34 +71,62 @@ Item {
         property bool pressedEmpty: false
         property bool pressedWithSelection: false
         readonly property bool moved: Math.hypot(endX - startX, endY - startY) > 3
-        readonly property bool selectionShown: editSurface.tool !== "crop" && !textEditor.active && editSurface.showing(editSurface.doc.selectedAnnotation)
-        function handleAt(px, py) {
-            const selected = editSurface.doc.selectedAnnotation;
-            if (!selected.type || !selectionShown)
-                return -1;
-            if (selected.type === "text" || selected.type === "step") {
-                const left = selected.boundX * width, top = selected.boundY * height;
-                const right = (selected.boundX + selected.boundW) * width;
-                const bottom = (selected.boundY + selected.boundH) * height;
-                const corners = [[left, top], [right, top], [right, bottom], [left, bottom]];
-                const small = selected.type === "text" && (right - left < 60 || bottom - top < 28);
-                if (small)
-                    return Math.hypot(px - right, py - bottom) < 10 ? 2 : -1;
-                for (let i = 0; i < corners.length; ++i)
-                    if (Math.hypot(px - corners[i][0], py - corners[i][1]) < 14)
-                        return i;
-                return -1;
+        property var initialMark: ({})
+        readonly property var transformMark: editSurface.tool === "crop"
+            ? editSurface.doc.hasCrop ? ({ type: "crop", boundX: editSurface.doc.cropBounds.x, boundY: editSurface.doc.cropBounds.y,
+                 boundW: editSurface.doc.cropBounds.width, boundH: editSurface.doc.cropBounds.height }) : ({})
+            : editSurface.doc.selectedAnnotation
+        readonly property bool selectionShown: !textEditor.active && editSurface.showing(transformMark)
+        function handles(mark) {
+            if (!mark.type) return [];
+            if (mark.type === "line" || mark.type === "arrow")
+                return [{ id: 0, x: mark.x1 * width, y: mark.y1 * height },
+                        { id: 1, x: mark.x2 * width, y: mark.y2 * height }];
+            const l = mark.boundX * width, t = mark.boundY * height;
+            const r = l + mark.boundW * width, b = t + mark.boundH * height;
+            const points = [[l,t], [r,t], [r,b], [l,b], [(l+r)/2,t], [r,(t+b)/2], [(l+r)/2,b], [l,(t+b)/2]];
+            const compact = r-l < 48 || b-t < 28;
+            return points.map((point, id) => ({id: id, x: point[0], y: point[1]}))
+                .filter(point => !compact || point.id === 2 || (point.id >= 4 &&
+                    (point.id % 2 === 0 ? r-l >= 32 : b-t >= 16)));
+        }
+        function updatePointer(mouse) {
+            endX = Math.max(0, Math.min(width, mouse.x));
+            endY = Math.max(0, Math.min(height, mouse.y));
+            if ((interaction === "move" || interaction === "cropMove") && (mouse.modifiers & Qt.ShiftModifier)) {
+                if (Math.abs(endX-startX) >= Math.abs(endY-startY)) endY = startY;
+                else endX = startX;
             }
-            const points = selected.type === "line" || selected.type === "arrow"
-                ? [[selected.x1, selected.y1], [selected.x2, selected.y2]]
-                : [[Math.min(selected.x1, selected.x2), Math.min(selected.y1, selected.y2)],
-                   [Math.max(selected.x1, selected.x2), Math.min(selected.y1, selected.y2)],
-                   [Math.max(selected.x1, selected.x2), Math.max(selected.y1, selected.y2)],
-                   [Math.min(selected.x1, selected.x2), Math.max(selected.y1, selected.y2)]];
-            for (let i = 0; i < points.length; ++i)
-                if (Math.hypot(px - points[i][0] * width, py - points[i][1] * height) < 14)
-                    return i;
-            return -1;
+        }
+        function cropRect() {
+            let l = initialMark.boundX * width, t = initialMark.boundY * height;
+            let r = l + initialMark.boundW * width, b = t + initialMark.boundH * height;
+            if (interaction === "cropMove") {
+                const dx = Math.max(-l, Math.min(width-r, endX-startX));
+                const dy = Math.max(-t, Math.min(height-b, endY-startY));
+                l += dx; r += dx; t += dy; b += dy;
+            } else {
+                if (handle === 0 || handle === 3 || handle === 7) l = Math.min(endX, r-4);
+                if (handle === 1 || handle === 2 || handle === 5) r = Math.max(endX, l+4);
+                if (handle === 0 || handle === 1 || handle === 4) t = Math.min(endY, b-4);
+                if (handle === 2 || handle === 3 || handle === 6) b = Math.max(endY, t+4);
+            }
+            return Qt.rect(l, t, r-l, b-t);
+        }
+        function previewTransform() {
+            if (interaction === "resize" && initialMark.type !== "crop")
+                editSurface.doc.previewTransform(handle, endX / width, endY / height);
+            else if (interaction === "move")
+                editSurface.doc.previewTransform(-1, moved ? (endX-startX) / width : 0, moved ? (endY-startY) / height : 0);
+        }
+        function handleAt(px, py) {
+            if (!selectionShown) return -1;
+            let closest = -1, distance = 12;
+            for (const point of handles(transformMark)) {
+                const d = Math.hypot(px-point.x, py-point.y);
+                if (d < distance) { closest = point.id; distance = d; }
+            }
+            return closest;
         }
         onPressed: function (mouse) {
             // A click outside the label being typed finishes it.
@@ -120,12 +154,16 @@ Item {
             }
             handle = handleAt(mouse.x, mouse.y);
             if (handle >= 0) {
+                initialMark = transformMark;
                 interaction = "resize";
+                if (initialMark.type !== "crop") editSurface.doc.beginTransform();
                 guide.requestPaint();
                 return;
             }
             if (editSurface.tool === "crop") {
-                interaction = "draw";
+                initialMark = transformMark;
+                const crop = editSurface.doc.cropBounds;
+                interaction = editSurface.doc.hasCrop && nx > crop.x && nx < crop.x+crop.width && ny > crop.y && ny < crop.y+crop.height ? "cropMove" : "draw";
                 guide.requestPaint();
                 return;
             }
@@ -137,6 +175,7 @@ Item {
                 editSurface.doc.select(hit.index);
                 pressedType = hit.type;
                 interaction = "move";
+                editSurface.doc.beginTransform();
                 guide.requestPaint();
                 return;
             }
@@ -157,11 +196,15 @@ Item {
         onPositionChanged: function (mouse) {
             if (!pressed) {
                 hoverHandle = handleAt(mouse.x, mouse.y);
-                hoverMark = editSurface.tool === "crop" || hoverHandle >= 0 ? ({}) : editSurface.doc.hitAt(mouse.x / width, mouse.y / height, editSurface.tool !== "select");
+                if (hoverHandle >= 0) hoverMark = ({});
+                else if (editSurface.tool === "crop") {
+                    const crop = editSurface.doc.cropBounds;
+                    hoverMark = editSurface.doc.hasCrop && mouse.x/width > crop.x && mouse.x/width < crop.x+crop.width && mouse.y/height > crop.y && mouse.y/height < crop.y+crop.height ? ({type: "crop"}) : ({});
+                } else hoverMark = editSurface.doc.hitAt(mouse.x / width, mouse.y / height, editSurface.tool !== "select");
                 return;
             }
-            endX = Math.max(0, Math.min(width, mouse.x));
-            endY = Math.max(0, Math.min(height, mouse.y));
+            updatePointer(mouse);
+            if ((interaction === "resize" || interaction === "move") && !transformTimer.running) transformTimer.start();
             if (interaction === "stroke") {
                 const last = strokePoints[strokePoints.length - 1];
                 if (!last || Math.hypot(endX - last.x * width, endY - last.y * height) >= 2)
@@ -173,14 +216,15 @@ Item {
         onReleased: function (mouse) {
             if (mouse.button === Qt.RightButton)
                 return;
-            endX = Math.max(0, Math.min(width, mouse.x));
-            endY = Math.max(0, Math.min(height, mouse.y));
-            if (interaction === "resize")
-                editSurface.doc.resizeSelected(handle, endX / width, endY / height);
-            else if (interaction === "move") {
-                if (moved)
-                    editSurface.doc.moveSelected((endX - startX) / width, (endY - startY) / height);
-                else if (pressedType === "text" && editSurface.tool === "text")
+            updatePointer(mouse);
+            transformTimer.stop();
+            if (interaction === "cropMove" || (interaction === "resize" && initialMark.type === "crop")) {
+                const box = cropRect();
+                editSurface.doc.edit("crop", box.x/width, box.y/height, (box.x+box.width)/width, (box.y+box.height)/height);
+            } else if (interaction === "resize" || interaction === "move") {
+                previewTransform();
+                editSurface.doc.endTransform(true);
+                if (interaction === "move" && !moved && pressedType === "text" && editSurface.tool === "text")
                     textEditor.editSelected();
             } else if (interaction === "stroke") {
                 strokePoints = strokePoints.concat([{ x: endX / width, y: endY / height }]);
@@ -206,7 +250,7 @@ Item {
                 textEditor.editSelected();
             }
         }
-        onCanceled: { interaction = "none"; strokePoints = []; guide.requestPaint(); }
+        onCanceled: { editSurface.cancelDrag(); strokePoints = []; }
         Canvas {
             id: guide
             anchors.fill: parent
@@ -228,39 +272,11 @@ Item {
                         else c.lineTo(point.x * width, point.y * height);
                     }
                     c.stroke();
+                } else if (drawArea.interaction === "cropMove" || (drawArea.interaction === "resize" && drawArea.initialMark.type === "crop")) {
+                    const box = drawArea.cropRect();
+                    c.strokeRect(box.x, box.y, box.width, box.height);
                 } else if (drawArea.interaction === "resize") {
-                    const mark = editSurface.doc.selectedAnnotation;
-                    if (!mark.type)
-                        return;
-                    const left = mark.boundX * width, top = mark.boundY * height;
-                    const right = (mark.boundX + mark.boundW) * width;
-                    const bottom = (mark.boundY + mark.boundH) * height;
-                    const corners = [[left, top], [right, top], [right, bottom], [left, bottom]];
-                    const opposite = corners[(drawArea.handle + 2) % 4];
-                    if (mark.type === "text" || mark.type === "step") {
-                        const pivot = mark.type === "step" ? [(left + right) / 2, (top + bottom) / 2] : opposite;
-                        const old = [corners[drawArea.handle][0] - pivot[0], corners[drawArea.handle][1] - pivot[1]];
-                        const now = [drawArea.endX - pivot[0], drawArea.endY - pivot[1]];
-                        const ratio = Math.max(0.1, Math.min(30, (old[0] * now[0] + old[1] * now[1]) / Math.max(1, old[0] * old[0] + old[1] * old[1])));
-                        const nextW = (right - left) * ratio, nextH = (bottom - top) * ratio;
-                        const nextLeft = mark.type === "step" ? pivot[0] - nextW / 2 : drawArea.handle === 0 || drawArea.handle === 3 ? opposite[0] - nextW : opposite[0];
-                        const nextTop = mark.type === "step" ? pivot[1] - nextH / 2 : drawArea.handle === 0 || drawArea.handle === 1 ? opposite[1] - nextH : opposite[1];
-                        c.strokeRect(nextLeft, nextTop, nextW, nextH);
-                        if (mark.type === "text") {
-                            c.setLineDash([]);
-                            c.font = "12px monospace";
-                            const label = Math.max(8, Math.min(4096, Math.round(mark.fontPx * ratio))) + " px";
-                            c.fillStyle = theme.alpha(theme.background, 0.85);
-                            c.fillRect(nextLeft, nextTop - 22, c.measureText(label).width + 12, 18);
-                            c.fillStyle = theme.text;
-                            c.fillText(label, nextLeft + 6, nextTop - 9);
-                        }
-                    } else if (mark.type === "line" || mark.type === "arrow") {
-                        const other = drawArea.handle === 0 ? [mark.x2 * width, mark.y2 * height] : [mark.x1 * width, mark.y1 * height];
-                        c.beginPath(); c.moveTo(other[0], other[1]); c.lineTo(drawArea.endX, drawArea.endY); c.stroke();
-                    } else {
-                        c.strokeRect(opposite[0], opposite[1], drawArea.endX - opposite[0], drawArea.endY - opposite[1]);
-                    }
+                    return; // The actual mark previews the resize, with its real text layout.
                 } else if (drawArea.interaction === "move" || drawArea.interaction === "newText") {
                     return;
                 } else if (editSurface.tool === "arrow" || editSurface.tool === "line") {
@@ -288,15 +304,10 @@ Item {
             }
         }
     }
-    Rectangle {
-        visible: editSurface.tool === "crop" && editSurface.doc.hasCrop
-        x: editSurface.doc.cropBounds.x * parent.width
-        y: editSurface.doc.cropBounds.y * parent.height
-        width: editSurface.doc.cropBounds.width * parent.width
-        height: editSurface.doc.cropBounds.height * parent.height
-        color: "transparent"
-        border.width: 2
-        border.color: theme.accent
+    Timer {
+        id: transformTimer
+        interval: 40
+        onTriggered: drawArea.previewTransform()
     }
     // Hover: a quiet dashed outline says "this can be picked up".
     Canvas {
@@ -322,16 +333,12 @@ Item {
     }
     Item {
         id: selectedOutline
-        readonly property var mark: editSurface.doc.selectedAnnotation
-        readonly property bool anchorOnly: mark.type === "text" || mark.type === "step" || mark.type === "pen"
-        readonly property bool compactLabel: mark.type === "text" && (width < 60 || height < 28)
-        readonly property real dragX: drawArea.interaction === "move" ? drawArea.endX - drawArea.startX : 0
-        readonly property real dragY: drawArea.interaction === "move" ? drawArea.endY - drawArea.startY : 0
-        visible: drawArea.selectionShown && mark.type !== undefined
-        x: (anchorOnly ? mark.boundX || 0 : Math.min(mark.x1 || 0, mark.x2 || 0)) * parent.width + dragX
-        y: (anchorOnly ? mark.boundY || 0 : Math.min(mark.y1 || 0, mark.y2 || 0)) * parent.height + dragY
-        width: anchorOnly ? Math.max(1, (mark.boundW || 0) * parent.width) : Math.max(1, Math.abs((mark.x2 || 0) - (mark.x1 || 0)) * parent.width)
-        height: anchorOnly ? Math.max(1, (mark.boundH || 0) * parent.height) : Math.max(1, Math.abs((mark.y2 || 0) - (mark.y1 || 0)) * parent.height)
+        readonly property var mark: drawArea.transformMark
+        visible: drawArea.selectionShown && mark.type !== undefined && drawArea.interaction !== "cropMove" && !(drawArea.interaction === "resize" && mark.type === "crop")
+        x: (mark.boundX || 0) * parent.width
+        y: (mark.boundY || 0) * parent.height
+        width: Math.max(1, (mark.boundW || 0) * parent.width)
+        height: Math.max(1, (mark.boundH || 0) * parent.height)
         Rectangle {
             visible: selectedOutline.mark.type !== "line" && selectedOutline.mark.type !== "arrow"
             anchors.fill: parent
@@ -341,24 +348,17 @@ Item {
             border.color: theme.accent
         }
         Repeater {
-            model: selectedOutline.mark.type === "pen" ? 0 : selectedOutline.compactLabel ? 1 : selectedOutline.mark.type === "line" || selectedOutline.mark.type === "arrow" ? 2 : 4
+            model: drawArea.handles(selectedOutline.mark)
             Rectangle {
-                required property int index
-                width: selectedOutline.compactLabel ? 11 : 13
+                required property var modelData
+                width: modelData.id >= 4 ? 10 : 12
                 height: width
-                radius: theme.radius > 0 ? width / 2 : 1
+                radius: modelData.id >= 4 ? 2 : width / 2
                 color: theme.background
                 border.width: 2
                 border.color: theme.accent
-                readonly property bool segment: selectedOutline.mark.type === "line" || selectedOutline.mark.type === "arrow"
-                x: selectedOutline.compactLabel ? selectedOutline.width - width / 2
-                   : selectedOutline.anchorOnly ? (index === 1 || index === 2 ? selectedOutline.width - width / 2 : -width / 2)
-                   : segment ? (index === 0 ? selectedOutline.mark.x1 : selectedOutline.mark.x2) * editSurface.width - selectedOutline.x + selectedOutline.dragX - width / 2
-                           : (index === 1 || index === 2) ? selectedOutline.width - width / 2 : -width / 2
-                y: selectedOutline.compactLabel ? selectedOutline.height - height / 2
-                   : selectedOutline.anchorOnly ? (index >= 2 ? selectedOutline.height - height / 2 : -height / 2)
-                   : segment ? (index === 0 ? selectedOutline.mark.y1 : selectedOutline.mark.y2) * editSurface.height - selectedOutline.y + selectedOutline.dragY - height / 2
-                           : (index >= 2) ? selectedOutline.height - height / 2 : -height / 2
+                x: modelData.x - selectedOutline.x - width / 2
+                y: modelData.y - selectedOutline.y - height / 2
             }
         }
     }
@@ -372,13 +372,14 @@ Item {
         property real anchorY: 0
         property var mark: ({})
         readonly property real viewScale: editSurface.width / Math.max(1, editSurface.workingSize.width)
-        readonly property int fontPx: creating ? editSurface.doc.newTextPixels : (mark.fontPx || editSurface.doc.newTextPixels)
+        readonly property var defaults: editSurface.doc.labelDefaults
+        readonly property int fontPx: creating ? (defaults.fontPx || editSurface.doc.newTextPixels) : (mark.fontPx || editSurface.doc.newTextPixels)
         readonly property real inset: Math.max(4, fontPx * 0.27) * viewScale
-        readonly property bool boxStyle: creating || mark.textStyle !== "shadow"
-        readonly property color ink: creating ? "#ffffff" : (mark.color || "#ffffff")
-        readonly property color fill: creating ? "#151a20" : (mark.background || "#151a20")
-        readonly property real fillOpacity: creating || mark.backgroundOpacity === undefined ? 1 : mark.backgroundOpacity
-        readonly property real maxLine: Math.max(1, Math.min(editSurface.width, editSurface.sourceSize.width * 0.85 * viewScale) - inset * 2)
+        readonly property bool boxStyle: creating ? defaults.textStyle !== "shadow" : mark.textStyle !== "shadow"
+        readonly property color ink: creating ? (defaults.color || "#ffffff") : (mark.color || "#ffffff")
+        readonly property color fill: creating ? (defaults.background || "#151a20") : (mark.background || "#151a20")
+        readonly property real fillOpacity: creating ? (defaults.backgroundOpacity ?? 1) : (mark.backgroundOpacity ?? 1)
+        readonly property real maxLine: Math.max(1, Math.min(editSurface.width, !creating && mark.textBoxWidth > 0 ? mark.textBoxWidth * editSurface.width : editSurface.sourceSize.width * 0.85 * viewScale) - inset * 2)
         visible: active
         z: 30
         x: Math.max(0, Math.min(anchorX * editSurface.width, editSurface.width - width))
@@ -431,8 +432,8 @@ Item {
         }
         Rectangle {
             id: box
-            width: Math.min(textEditor.maxLine, Math.max(measure.contentWidth, placeholder.contentWidth) + 4) + textEditor.inset * 2
-            height: Math.min(editSurface.height, Math.max(field.contentHeight, measure.contentHeight) + textEditor.inset * 2)
+            width: !textEditor.creating && textEditor.mark.textBoxWidth > 0 ? textEditor.mark.textBoxWidth * editSurface.width : Math.min(textEditor.maxLine, Math.max(measure.contentWidth, placeholder.contentWidth) + 4) + textEditor.inset * 2
+            height: Math.min(editSurface.height, Math.max(Math.max(field.contentHeight, measure.contentHeight) + textEditor.inset * 2, (textEditor.mark.textBoxHeight || 0) * editSurface.height))
             radius: Math.max(2, textEditor.fontPx * 0.12 * textEditor.viewScale)
             color: textEditor.boxStyle ? Qt.rgba(textEditor.fill.r, textEditor.fill.g, textEditor.fill.b, textEditor.fillOpacity) : theme.alpha("#000000", 0.18)
             Rectangle {
@@ -471,6 +472,7 @@ Item {
                     color: textEditor.ink
                     selectionColor: theme.alpha(theme.accent, 0.55)
                     selectedTextColor: textEditor.ink
+                    verticalAlignment: TextEdit.AlignVCenter
                     wrapMode: TextEdit.Wrap
                     horizontalAlignment: textEditor.creating || textEditor.mark.textAlign === "center" || !textEditor.mark.textAlign ? TextEdit.AlignHCenter : textEditor.mark.textAlign === "right" ? TextEdit.AlignRight : TextEdit.AlignLeft
                     selectByMouse: true
