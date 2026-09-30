@@ -233,12 +233,14 @@ Video::Video(QObject *parent) : QObject(parent) {
               m_status = "Couldn't save the video. Check the save folder and "
                          "free space, then try again.";
             } else {
-              m_status = "Checking the exported video…";
+              m_status = m_gifExport ? "Checking the exported GIF…"
+                                     : "Checking the exported video…";
               emit changed();
               auto *watcher = new QFutureWatcher<bool>(this);
               connect(watcher, &QFutureWatcher<bool>::finished, this,
                       [this, watcher] {
                         const bool valid = watcher->result();
+                        bool saved = false;
                         watcher->deleteLater();
                         m_busy = false;
                         if (m_cancelled) {
@@ -253,26 +255,37 @@ Video::Video(QObject *parent) : QObject(parent) {
                           m_status = "Could not finish saving the clip. "
                                      "Check the save folder.";
                         } else {
-                          m_saved = m_final;
+                          saved = true;
                           m_progress = 1;
-                          m_savedSummary =
+                          const QString summary =
                               QString("%1 s · %2")
                                   .arg(m_exportDuration, 0, 'f', 1)
                                   .arg(QLocale().formattedDataSize(
-                                      QFileInfo(m_saved).size()));
-                          m_status = "Saved " + QFileInfo(m_saved).fileName() +
+                                      QFileInfo(m_final).size()));
+                          if (m_gifExport) {
+                            m_gifSaved = m_final;
+                            m_gifSummary = summary;
+                          } else {
+                            m_saved = m_final;
+                            m_savedSummary = summary;
+                          }
+                          m_status = "Saved " + QFileInfo(m_final).fileName() +
+                                     " · " + summary +
                                      ". The original is unchanged.";
                         }
                         emit changed();
-                        if (!m_saved.isEmpty())
+                        if (saved && m_gifExport)
+                          emit gifExported(QUrl::fromLocalFile(m_gifSaved));
+                        else if (saved)
                           emit exported(QUrl::fromLocalFile(m_saved));
                         else
                           emit exportFailed();
                       });
               watcher->setFuture(QtConcurrent::run(
                   [path = m_temporary, expected = m_exportDuration,
+                   gif = m_gifExport,
                    expectedAudio = m_muteExport ? 0 : m_audioTracks] {
-                    if (QFileInfo(path).size() < 1024)
+                    if (QFileInfo(path).size() < (gif ? 16 : 1024))
                       return false;
                     QProcess probe;
                     probe.start("ffprobe", {"-v", "error", "-show_entries",
@@ -374,6 +387,8 @@ void Video::open(const QUrl &url) {
             m_copyCompatible = r.copyCompatible;
             m_saved.clear();
             m_savedSummary.clear();
+            m_gifSaved.clear();
+            m_gifSummary.clear();
             m_progress = 0;
             m_status = "Edits are saved as a new file. " + m_name +
                        " stays as it is.";
@@ -598,6 +613,14 @@ void Video::exportClip(double start, double end, bool mute) {
 }
 void Video::exportEdited(double start, double end, bool mute,
                          const QVariantList &removedRanges) {
+  exportEditedAs(start, end, mute, removedRanges, false);
+}
+void Video::exportGif(double start, double end,
+                      const QVariantList &removedRanges) {
+  exportEditedAs(start, end, true, removedRanges, true);
+}
+void Video::exportEditedAs(double start, double end, bool mute,
+                           const QVariantList &removedRanges, bool gif) {
   if (m_busy || m_source.isEmpty())
     return;
   if (!std::isfinite(start) || !std::isfinite(end) || start < 0 ||
@@ -644,6 +667,13 @@ void Video::exportEdited(double start, double end, bool mute,
     emit exportFailed();
     return;
   }
+  if (gif && outputDuration > 30.000001) {
+    m_status = "Keep GIFs to 30 seconds or less. Trim the ends or remove a "
+               "part of the clip.";
+    emit changed();
+    emit exportFailed();
+    return;
+  }
   if (kept.size() == 1) {
     start = kept.first().first;
     end = kept.first().second;
@@ -667,12 +697,15 @@ void Video::exportEdited(double start, double end, bool mute,
   }
   // Name the clip after its recording, so the two sit together.
   const QString base = QFileInfo(m_source.toLocalFile()).completeBaseName();
-  m_final = m_directory + "/" + base + "-edited.mp4";
+  const QString extension = gif ? ".gif" : ".mp4";
+  m_final = m_directory + "/" + base + "-edited" + extension;
   for (int n = 2; QFileInfo::exists(m_final); ++n)
-    m_final = m_directory + QString("/%1-edited-%2.mp4").arg(base).arg(n);
+    m_final =
+        m_directory + QString("/%1-edited-%2").arg(base).arg(n) + extension;
   m_temporary = m_directory + "/." + QFileInfo(m_final).completeBaseName() +
                 "-" + QUuid::createUuid().toString(QUuid::Id128).left(6) +
-                ".part.mp4";
+                ".part" + extension;
+  m_gifExport = gif;
   m_exportDuration = outputDuration;
   m_muteExport = mute;
   m_cancelled = false;
@@ -681,9 +714,11 @@ void Video::exportEdited(double start, double end, bool mute,
   m_progressBuffer.clear();
   m_busy = true;
   m_exporting = true;
-  m_saved.clear();
-  m_savedSummary.clear();
-  m_status = "Exporting a clean MP4…";
+  if (!gif) {
+    m_saved.clear();
+    m_savedSummary.clear();
+  }
+  m_status = gif ? "Exporting a looping GIF…" : "Exporting a clean MP4…";
   // Marks are drawn on the source before any trim or cut, so their times are
   // always times in the recording.
   const QVector<Frame::Edit> marks = m_marks.edits();
@@ -695,7 +730,7 @@ void Video::exportEdited(double start, double end, bool mute,
   const bool cameraVisible =
       !m_cameraSource.isEmpty() && m_cameraLayout.value("visible").toBool();
   const bool composed = m_marks.hasCrop() || cameraVisible;
-  const bool streamCopy = !marked && !composed && kept.size() == 1 &&
+  const bool streamCopy = !gif && !marked && !composed && kept.size() == 1 &&
                           m_copyCompatible && start <= 0.001;
   if (streamCopy)
     m_status = "Saving the original quality without re-encoding…";
@@ -714,7 +749,7 @@ void Video::exportEdited(double start, double end, bool mute,
     m_encoder.start("ffmpeg", args);
     return;
   }
-  if (kept.size() > 1 || composed) {
+  if (gif || kept.size() > 1 || composed) {
     QStringList filters = videoMarkFilters(marks, m_frameSize, 0, "[0:v:0]",
                                            "[marked]", overlays);
     QString base = marked ? "[marked]" : "[0:v:0]";
@@ -780,13 +815,24 @@ void Video::exportEdited(double start, double end, bool mute,
                        .arg(inputs).arg(kept.size()).arg(track);
       }
     }
+    if (gif) {
+      // A fresh palette per frame keeps encoding streaming, rather than
+      // retaining the whole clip while a global palette is generated.
+      filters << "[v]fps=15,scale=w='min(720,iw)':h='min(720,ih)':"
+                 "force_original_aspect_ratio=decrease:flags=lanczos,"
+                 "split[gifframes][gifcolors]"
+              << "[gifcolors]palettegen=stats_mode=single[palette]"
+              << "[gifframes][palette]paletteuse=new=1:dither=bayer:bayer_"
+                 "scale=3[gif]";
+    }
     QStringList args{"-hide_banner", "-loglevel", "error", "-nostdin", "-n",
                      "-i", m_source.toLocalFile()};
     if (marked)
       args << overlayInputs;
     if (cameraVisible)
       args << "-i" << m_cameraSource.toLocalFile();
-    args << "-filter_complex" << filters.join(';') << "-map" << "[v]";
+    args << "-filter_complex" << filters.join(';') << "-map"
+         << (gif ? "[gif]" : "[v]");
     if (mute)
       args << "-an";
     else {
@@ -795,10 +841,12 @@ void Video::exportEdited(double start, double end, bool mute,
       if (m_audioTracks)
         args << "-c:a" << "aac" << "-b:a" << "192k";
     }
-    args << "-c:v" << "libx264" << "-preset" << "veryfast" << "-crf" << "16"
-         << "-pix_fmt" << "yuv420p" << "-map_metadata" << "-1"
-         << "-movflags" << "+faststart" << "-progress" << "pipe:1"
-         << m_temporary;
+    if (gif)
+      args << "-c:v" << "gif" << "-loop" << "0";
+    else
+      args << "-c:v" << "libx264" << "-preset" << "veryfast" << "-crf" << "16"
+           << "-pix_fmt" << "yuv420p" << "-movflags" << "+faststart";
+    args << "-map_metadata" << "-1" << "-progress" << "pipe:1" << m_temporary;
     m_encoder.start("ffmpeg", args);
     return;
   }
@@ -859,8 +907,12 @@ QString Video::savedName() const {
 }
 bool Video::copyFile() {
   const QString path = m_saved.isEmpty() ? m_source.toLocalFile() : m_saved;
+  return copyPath(path);
+}
+bool Video::copyGif() { return copyPath(m_gifSaved); }
+bool Video::copyPath(const QString &path) {
   if (path.isEmpty() || !QFileInfo::exists(path)) {
-    m_status = "The video file is missing, so it could not be copied.";
+    m_status = "The file is missing, so it could not be copied.";
     emit changed();
     return false;
   }
@@ -877,10 +929,11 @@ bool Video::copyFile() {
     clipboard.kill();
     clipboard.waitForFinished();
   }
-  m_status = copied ? QFileInfo(path).fileName() +
-                          " is on the clipboard. Paste it into a chat or folder."
-                    : "The video is saved, but it could not be copied. Check "
-                      "that wl-clipboard is installed.";
+  m_status = copied
+                 ? QFileInfo(path).fileName() +
+                       " is on the clipboard. Paste it into a chat or folder."
+                 : "The file is saved, but it could not be copied. Check "
+                   "that wl-clipboard is installed.";
   emit changed();
   return copied;
 }
@@ -898,6 +951,11 @@ void Video::revealSaved() {
   if (!m_saved.isEmpty())
     QDesktopServices::openUrl(
         QUrl::fromLocalFile(QFileInfo(m_saved).absolutePath()));
+}
+void Video::revealGif() {
+  if (!m_gifSaved.isEmpty())
+    QDesktopServices::openUrl(
+        QUrl::fromLocalFile(QFileInfo(m_gifSaved).absolutePath()));
 }
 void Video::setOutputDirectory(const QUrl &url) {
   if (m_busy || !url.isLocalFile())

@@ -38,12 +38,13 @@ ApplicationWindow {
     property bool editing: false
     property string tool: "select"
     property string savedSignature: ""
+    property string gifSignature: ""
     property bool closingApproved: false
     readonly property bool videoLoaded: videoMode && video.source.toString().length > 0
     readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0 && !video.marks.hasCrop && !(video.cameraSource.toString().length && video.cameraLayout.visible)
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
     readonly property bool typing: markCanvas.typing || videoPane.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
-    property bool shortcutsAllowed: !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
+    property bool shortcutsAllowed: !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
     property bool working: navigation.saving || studio.busy || video.busy || (recorder.active && !studio.quickMode)
     property string currentStatus: videoMode ? video.status : studio.status
     property string currentDirectory: videoMode ? video.outputDirectory : studio.outputDirectory
@@ -150,7 +151,8 @@ ApplicationWindow {
             root.editing = false;
             root.recordingReview = false;
         }
-        function onLoaded() { root.savedSignature = video.savedSignature; }
+        function onLoaded() { root.savedSignature = video.savedSignature; root.gifSignature = ""; }
+        function onGifExported() { root.gifSignature = videoPane.signature; }
         function onExported() {
             root.savedSignature = videoPane.signature;
             video.recordSavedSignature(videoPane.signature);
@@ -1519,6 +1521,7 @@ ApplicationWindow {
             source: "VideoPane.qml"
             property real clipStart: item ? item.clipStart : 0
             property real clipEnd: item ? item.clipEnd : 0
+            property real outputDuration: item ? item.outputDuration : 0
             property bool muted: item ? item.muted : false
             property var cuts: item ? item.cuts : []
             property string signature: item ? item.signature : ""
@@ -1618,6 +1621,64 @@ ApplicationWindow {
                     quiet: true
                     hint: "Open the folder with the saved file"
                     onClicked: root.videoMode ? video.revealSaved() : studio.revealSaved()
+                }
+                StudioButton {
+                    id: gifButton
+                    visible: root.videoLoaded
+                    text: "Export GIF"
+                    quiet: true
+                    enabled: !root.working
+                    hint: "Save a looping GIF of this clip, with your edits and no sound"
+                    onClicked: gifMenu.opened ? gifMenu.close() : gifMenu.open()
+                    Popup {
+                        id: gifMenu
+                        x: parent.width - width
+                        y: -height - 8
+                        width: 280; padding: 16; modal: true; focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                        readonly property bool current: video.gifPath.length > 0 && root.gifSignature === videoPane.signature
+                        background: Rectangle { color: theme.alpha(theme.background, 1); radius: theme.radius; border.width: 2; border.color: theme.frame }
+                        contentItem: ColumnLayout {
+                            spacing: 12
+                            Text { text: "Export GIF"; color: theme.text; font.pixelSize: 15; font.weight: Font.Medium }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Loops without sound. Includes your edits. Up to 720 px at 15 fps."
+                                color: theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: videoPane.outputDuration > 30.000001 ? "Trim or cut this clip to 30 seconds or less."
+                                    : "Clip length: " + videoPane.outputDuration.toFixed(1) + " seconds. GIFs can be larger than MP4."
+                                color: videoPane.outputDuration > 30.000001 ? theme.urgent : theme.muted
+                                font.pixelSize: 12; wrapMode: Text.Wrap
+                            }
+                            Text {
+                                Layout.fillWidth: true; visible: gifMenu.current
+                                text: "Saved " + video.gifPath.split("/").pop() + "\n" + video.gifSummary
+                                color: theme.selectedText; font.pixelSize: 12; wrapMode: Text.Wrap
+                            }
+                            RowLayout {
+                                visible: gifMenu.current
+                                StudioButton { text: "Show file"; glyph: "folder"; quiet: true; enabled: !root.working; onClicked: video.revealGif() }
+                            }
+                            StudioButton {
+                                Layout.fillWidth: true
+                                text: root.working ? "Exporting…" : gifMenu.current ? "Copy GIF" : "Export GIF"
+                                primary: true
+                                enabled: !root.working && videoPane.outputDuration >= 0.1 && videoPane.outputDuration <= 30.000001
+                                onClicked: {
+                                    if (gifMenu.current) {
+                                        if (video.copyGif()) gifMenu.close();
+                                        return;
+                                    }
+                                    videoPane.commitText();
+                                    videoPane.pause();
+                                    video.exportGif(videoPane.clipStart, videoPane.clipEnd, videoPane.cuts);
+                                }
+                            }
+                        }
+                    }
                 }
                 StudioButton {
                     readonly property string label: root.working ? "Working…"

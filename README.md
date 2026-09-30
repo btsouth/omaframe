@@ -63,7 +63,8 @@ something out, pause where it happens and press A for an arrow, B for a box, T
 for a label or N for a numbered step. Those show from there to the end. Select
 any mark and press I and O to set where it starts and stops.
 
-Source builds after 0.4.0 also support video crop, recovery drafts and camera:
+Source builds after 0.4.0 also support video crop, recovery drafts, camera
+and GIF export:
 
 - Press C and drag a rectangle to crop the whole clip. Press V to preview it,
   or **Reset crop** to restore the full frame.
@@ -73,6 +74,10 @@ Source builds after 0.4.0 also support video crop, recovery drafts and camera:
 - Turn on **Camera overlay** in recording Options and choose your camera.
   It starts off. After recording, pause playback and drag the camera to move
   it. The **Camera** menu changes its size, position or visibility.
+- Use **Export GIF** for a short looping demo or bug report. It includes your
+  edits and has no sound, with **Copy GIF** and **Show file** after saving.
+  GIFs use up to 720 pixels at 15 fps and clips up to 30 seconds. They can be
+  larger than MP4, especially with lots of movement. MP4 export stays available.
 
 Export saves a new MP4 with your edits. If a draft cannot be saved, Omaframe
 asks before leaving the editor. A failed export keeps your edits open.

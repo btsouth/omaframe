@@ -56,6 +56,8 @@ class Video : public QObject {
   /** The saved clip's file name and a short "9.0 s · 8.1 MB" summary. */
   Q_PROPERTY(QString savedName READ savedName NOTIFY changed)
   Q_PROPERTY(QString savedSummary READ savedSummary NOTIFY changed)
+  Q_PROPERTY(QString gifPath READ gifPath NOTIFY changed)
+  Q_PROPERTY(QString gifSummary READ gifSummary NOTIFY changed)
   /** Blur and redaction marks over the video, saved into the exported clip. */
   Q_PROPERTY(MarkDocument *marks READ marks CONSTANT)
   /** The video's frame size in pixels. */
@@ -91,6 +93,8 @@ public:
   QStringList thumbnails() const { return m_thumbnails; }
   QString savedName() const;
   QString savedSummary() const { return m_savedSummary; }
+  QString gifPath() const { return m_gifSaved; }
+  QString gifSummary() const { return m_gifSummary; }
   MarkDocument *marks() { return &m_marks; }
   QSize frameSize() const { return m_frameSize; }
   QVariantList overlays() const { return m_overlays; }
@@ -117,6 +121,10 @@ public:
   Q_INVOKABLE void exportClip(double start, double end, bool mute);
   Q_INVOKABLE void exportEdited(double start, double end, bool mute,
                                const QVariantList &removedRanges);
+  Q_INVOKABLE void exportGif(double start, double end,
+                             const QVariantList &removedRanges);
+  Q_INVOKABLE bool copyGif();
+  Q_INVOKABLE void revealGif();
   Q_INVOKABLE void keepOriginal();
   /** Ends recording review; the recording and any edit are already saved. */
   Q_INVOKABLE void finish();
@@ -132,6 +140,7 @@ signals:
   void loaded();
   void opening();
   void exported(const QUrl &file);
+  void gifExported(const QUrl &file);
   void exportFailed();
   void originalAccepted(const QUrl &file);
   void overlaysChanged();
@@ -139,6 +148,9 @@ signals:
   void draftsChanged();
 
 private:
+  void exportEditedAs(double start, double end, bool mute,
+                      const QVariantList &removedRanges, bool gif);
+  bool copyPath(const QString &path);
   void makeThumbnails();
   void renderOverlays();
   /** Writes each pointing mark as a PNG for FFmpeg, adding an input to
@@ -182,7 +194,9 @@ private:
   bool m_busy = false, m_cancelled = false, m_exporting = false;
   bool m_copyCompatible = false;
   bool m_muteExport = false;
+  bool m_gifExport = false;
   QString m_savedSummary;
+  QString m_gifSaved, m_gifSummary;
   int m_audioTracks = 0;
   QProcess m_encoder;
   QByteArray m_progressBuffer;
