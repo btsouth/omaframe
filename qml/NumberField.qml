@@ -54,7 +54,7 @@ RowLayout {
         Layout.preferredHeight: 30
         text: field.value + ""
         horizontalAlignment: TextInput.AlignHCenter
-        validator: IntValidator { bottom: 0; top: field.to }
+        validator: IntValidator { bottom: field.from; top: field.to }
         selectByMouse: true
         color: theme.text
         selectionColor: theme.alpha(theme.accent, 0.4)
@@ -63,7 +63,8 @@ RowLayout {
         font.pixelSize: 12
         rightPadding: field.suffix.length ? 22 : 6
         onActiveFocusChanged: if (activeFocus) selectAll()
-        onEditingFinished: field.commit(Number(text) || field.value)
+        onEditingFinished: field.commit(text.trim().length && Number.isFinite(Number(text)) ? Number(text) : field.value)
+        Keys.onEscapePressed: { field.commit(field.value); focus = false; }
         Keys.onUpPressed: field.commit(field.value + field.step)
         Keys.onDownPressed: field.commit(field.value - field.step)
         Text {

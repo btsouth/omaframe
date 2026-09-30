@@ -29,7 +29,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 10
         Rectangle {
-            Layout.preferredWidth: 116
+            Layout.preferredWidth: 132
             implicitHeight: 26
             radius: theme.radius
             color: theme.controlFill
@@ -40,7 +40,10 @@ ColumnLayout {
                 text: shortcutRow.key
                 color: theme.text
                 font.family: theme.fontFamily
-                font.pixelSize: 12
+                font.pixelSize: 11
+                width: parent.width - 12
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideMiddle
             }
         }
         ColumnLayout {
@@ -55,6 +58,7 @@ ColumnLayout {
                 elide: Text.ElideRight
             }
             RowLayout {
+                Layout.fillWidth: true
                 spacing: 6
                 Rectangle {
                     width: 7
@@ -63,7 +67,9 @@ ColumnLayout {
                     color: shortcutRow.ready ? theme.accent : shortcutRow.status === "Used by another action" ? theme.urgent : theme.faint
                 }
                 Text {
+                    Layout.fillWidth: true
                     text: shortcutRow.status
+                    wrapMode: Text.Wrap
                     color: shortcutRow.ready ? theme.selectedText : theme.muted
                     font.family: theme.fontFamily
                     font.pixelSize: 11
@@ -72,19 +78,19 @@ ColumnLayout {
         }
     }
     ShortcutRow {
-        key: "Print"
+        key: shortcuts.screenshotKey || "Print"
         label: "Take a screenshot"
         ready: shortcuts.screenshotKey.length > 0
         status: panel.describe(shortcuts.screenshotKey, shortcuts.screenshotState, "screenshot")
     }
     ShortcutRow {
-        key: "Alt+Print"
-        label: "Record, and stop recording"
+        key: shortcuts.recordKey || "Alt+Print"
+        label: "Start or stop recording"
         ready: shortcuts.recordKey.length > 0
         status: panel.describe(shortcuts.recordKey, shortcuts.recordState, "record")
     }
     ShortcutRow {
-        key: "Alt+Shift+Print"
+        key: shortcuts.pauseKey || "Alt+Shift+Print"
         label: "Pause or resume recording"
         ready: shortcuts.pauseKey.length > 0
         status: panel.describe(shortcuts.pauseKey, shortcuts.pauseState, "pause")

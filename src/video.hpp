@@ -129,8 +129,9 @@ public:
   /** Ends recording review; the recording and any edit are already saved. */
   Q_INVOKABLE void finish();
   /** Puts the saved clip, or the open recording when nothing was saved, on
-   *  the clipboard as a file for pasting into chats and file managers. */
-  Q_INVOKABLE bool copyFile();
+   *  the clipboard as a file for pasting into chats and file managers.
+   *  `original` selects the source while preserving an earlier export. */
+  Q_INVOKABLE bool copyFile(bool original = false);
   Q_INVOKABLE void cancel();
   Q_INVOKABLE void revealSaved();
   Q_INVOKABLE void revealSource();

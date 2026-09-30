@@ -25,8 +25,8 @@ Window {
     Shortcut {sequence: "Escape"; enabled: window.visible; onActivated: studio.cancelSelection()}
     Shortcut {sequence: "Tab"; enabled: window.visible && !window.dragging; onActivated: window.toggleMode()}
     Shortcut {sequence: "F"; enabled: window.visible && !window.dragging; onActivated: window.wholeDisplay()}
-    Shortcut {sequence: "D"; enabled: window.visible && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
-    Shortcut {sequence: "M"; enabled: window.visible && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
+    Shortcut {sequence: "D"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
+    Shortcut {sequence: "M"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
     property string monitorName: ""
     property real startX: 0
     property real startY: 0
@@ -147,9 +147,14 @@ Window {
         anchors.fill: parent
         cursorShape: Qt.CrossCursor
         hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         focus: true
         Keys.onEscapePressed: studio.cancelSelection()
         onPressed: function (mouse) {
+            if (mouse.button === Qt.RightButton) {
+                studio.cancelSelection();
+                return;
+            }
             area.forceActiveFocus();
             window.startX = mouse.x;
             window.startY = mouse.y;
@@ -169,6 +174,8 @@ Window {
         }
         onExited: if (!pressed) window.hoveredTarget = null
         onReleased: function (mouse) {
+            if (mouse.button !== Qt.LeftButton)
+                return;
             const dx = mouse.x - window.startX;
             const dy = mouse.y - window.startY;
             const target = window.targetAt(mouse.x, mouse.y);
@@ -207,6 +214,7 @@ Window {
         property string label
         property string glyph
         property bool chosen
+        property bool compact: window.width < 560
         property color markColor: theme.selectedText
         signal activated()
         Layout.fillHeight: true
@@ -216,6 +224,10 @@ Window {
         Accessible.role: Accessible.RadioButton
         Accessible.name: label
         Accessible.checked: chosen
+        Accessible.onPressAction: activated()
+        ToolTip.visible: modeMouse.containsMouse && compact
+        ToolTip.text: label
+        ToolTip.delay: 500
         Behavior on color { ColorAnimation { duration: 90 } }
         RowLayout {
             id: modeRow
@@ -228,6 +240,7 @@ Window {
                 Layout.preferredHeight: 16
             }
             Text {
+                visible: !mode.compact
                 text: mode.label
                 color: mode.chosen ? theme.text : theme.muted
                 font.family: theme.fontFamily
@@ -260,12 +273,13 @@ Window {
         Accessible.role: checkable ? Accessible.CheckBox : Accessible.Button
         Accessible.name: label.length ? label : hint
         Accessible.checked: on
+        Accessible.onPressAction: activated()
         RowLayout {
             id: toggleRow
             anchors.centerIn: parent
             spacing: 6
             Glyph { name: toggle.glyph; ink: toggle.on ? theme.selectedText : theme.muted; Layout.preferredWidth: 15; Layout.preferredHeight: 15 }
-            Text { text: toggle.label; color: toggle.on ? theme.text : theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
+            Text { visible: toggle.label.length > 0; text: toggle.label; color: toggle.on ? theme.text : theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
         }
         MouseArea {
             id: toggleMouse
@@ -328,7 +342,7 @@ Window {
             }
             Rectangle {Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
             BarToggle {
-                label: "Whole display"
+                label: window.width < 760 ? "" : "Whole display"
                 glyph: "display"
                 checkable: false
                 hint: (studio.recordingSelection ? "Record" : "Capture") + " this entire display · F"
@@ -336,7 +350,7 @@ Window {
             }
             BarToggle {
                 visible: studio.recordingSelection
-                label: "Sound"
+                label: window.width < 760 ? "" : "Sound"
                 glyph: recorder.desktopAudio ? "volume" : "mute"
                 on: recorder.desktopAudio
                 hint: "Record what your computer plays · D"
@@ -344,7 +358,7 @@ Window {
             }
             BarToggle {
                 visible: studio.recordingSelection
-                label: "Mic"
+                label: window.width < 760 ? "" : "Mic"
                 glyph: "mic"
                 on: recorder.micAudio
                 hint: (recorder.micAudio && recorder.microphone >= 0 ? "Recording from " + recorder.microphones[recorder.microphone].label : "Record your microphone") + " · M"
@@ -373,6 +387,9 @@ Window {
             Text {visible: bar.showHints; text: studio.recordingSelection ? "Screenshot" : "Video"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
             Keycap {
                 key: "Esc"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Cancel capture"
+                Accessible.onPressAction: studio.cancelSelection()
                 MouseArea {anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: studio.cancelSelection()}
             }
             Text {visible: bar.showHints; text: "Cancel"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
@@ -389,7 +406,11 @@ Window {
         color: theme.alpha(theme.background, 1)
         Text {
             id: selectionHint
-            anchors.centerIn: parent
+            anchors.fill: parent
+            anchors.margins: 6
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
             text: studio.recordingSelection ? "Click a window or drag an area to record" : "Click a window or drag an area"
             color: theme.text
             font.family: theme.fontFamily

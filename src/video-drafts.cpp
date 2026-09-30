@@ -178,6 +178,7 @@ void Video::refreshDrafts() {
         {"kind", "video"},
         {"name", doc.value("name").toString("Video")},
         {"when", file.lastModified().toString("MMM d, h:mm AP")},
+        {"modified", file.lastModified().toMSecsSinceEpoch()},
         {"edits", doc.value("edits").toArray().size()},
         {"image", ""},
         {"exported", QFileInfo::exists(doc.value("savedPath").toString())}});

@@ -34,13 +34,21 @@ Item {
         drawArea.interaction = "none";
         guide.requestPaint();
     }
+    Connections {
+        target: editSurface.doc
+        function onChanged() {
+            // Undo, delete and crop can remove the mark under a still cursor.
+            drawArea.hoverMark = ({});
+            drawArea.hoverHandle = -1;
+        }
+    }
     MouseArea {
         id: drawArea
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         enabled: !editSurface.locked
-        cursorShape: hoverHandle >= 0 ? Qt.SizeFDiagCursor
+        cursorShape: hoverHandle >= 0 ? (editSurface.doc.selectedAnnotation.type === "line" || editSurface.doc.selectedAnnotation.type === "arrow" ? Qt.CrossCursor : hoverHandle === 1 || hoverHandle === 3 ? Qt.SizeBDiagCursor : Qt.SizeFDiagCursor)
             : hoverMark.type !== undefined && editSurface.tool !== "crop" ? Qt.SizeAllCursor
             : editSurface.tool === "select" ? Qt.ArrowCursor
             : editSurface.tool === "text" ? Qt.IBeamCursor : Qt.CrossCursor
@@ -370,11 +378,11 @@ Item {
         readonly property color ink: creating ? "#ffffff" : (mark.color || "#ffffff")
         readonly property color fill: creating ? "#151a20" : (mark.background || "#151a20")
         readonly property real fillOpacity: creating || mark.backgroundOpacity === undefined ? 1 : mark.backgroundOpacity
-        readonly property real maxLine: Math.max(60, editSurface.sourceSize.width * 0.85 * viewScale - inset * 2)
+        readonly property real maxLine: Math.max(1, Math.min(editSurface.width, editSurface.sourceSize.width * 0.85 * viewScale) - inset * 2)
         visible: active
         z: 30
-        x: Math.min(anchorX * editSurface.width, Math.max(0, editSurface.width - width))
-        y: anchorY * editSurface.height
+        x: Math.max(0, Math.min(anchorX * editSurface.width, editSurface.width - width))
+        y: Math.max(0, Math.min(anchorY * editSurface.height, editSurface.height - height))
         width: box.width
         height: box.height
         function create(nx, ny) {
@@ -383,6 +391,7 @@ Item {
             anchorX = nx;
             anchorY = ny;
             field.text = "";
+            textScroll.contentY = 0;
             active = true;
             field.forceActiveFocus();
         }
@@ -395,6 +404,7 @@ Item {
             anchorX = m.boundX;
             anchorY = m.boundY;
             field.text = m.text;
+            textScroll.contentY = 0;
             editSurface.doc.beginTextEdit();
             active = true;
             field.forceActiveFocus();
@@ -422,7 +432,7 @@ Item {
         Rectangle {
             id: box
             width: Math.min(textEditor.maxLine, Math.max(measure.contentWidth, placeholder.contentWidth) + 4) + textEditor.inset * 2
-            height: Math.max(field.contentHeight, measure.contentHeight) + textEditor.inset * 2
+            height: Math.min(editSurface.height, Math.max(field.contentHeight, measure.contentHeight) + textEditor.inset * 2)
             radius: Math.max(2, textEditor.fontPx * 0.12 * textEditor.viewScale)
             color: textEditor.boxStyle ? Qt.rgba(textEditor.fill.r, textEditor.fill.g, textEditor.fill.b, textEditor.fillOpacity) : theme.alpha("#000000", 0.18)
             Rectangle {
@@ -433,32 +443,49 @@ Item {
                 border.width: 2
                 border.color: theme.accent
             }
-            TextEdit {
-                id: field
+            Flickable {
+                id: textScroll
                 anchors.fill: parent
-                leftPadding: textEditor.inset
-                rightPadding: textEditor.inset
-                topPadding: textEditor.inset
-                bottomPadding: textEditor.inset
-                font.family: "sans-serif"
-                font.weight: Font.DemiBold
-                font.pixelSize: Math.max(6, textEditor.fontPx * textEditor.viewScale)
-                color: textEditor.ink
-                selectionColor: theme.alpha(theme.accent, 0.55)
-                selectedTextColor: textEditor.ink
-                wrapMode: TextEdit.Wrap
-                horizontalAlignment: textEditor.creating || textEditor.mark.textAlign === "center" || !textEditor.mark.textAlign ? TextEdit.AlignHCenter : textEditor.mark.textAlign === "right" ? TextEdit.AlignRight : TextEdit.AlignLeft
-                selectByMouse: true
-                Accessible.name: "Label text"
-                onTextChanged: if (length > 240) remove(240, length)
-                onActiveFocusChanged: if (!activeFocus && textEditor.active) textEditor.commit()
-                Keys.onPressed: function (event) {
-                    if (event.key === Qt.Key_Escape) {
-                        textEditor.commit();
-                        event.accepted = true;
-                    } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
-                        textEditor.commit();
-                        event.accepted = true;
+                clip: true
+                contentWidth: width
+                contentHeight: field.height
+                interactive: false
+                function revealCursor() {
+                    const caret = field.cursorRectangle;
+                    if (caret.y < contentY)
+                        contentY = Math.max(0, caret.y);
+                    else if (caret.y + caret.height > contentY + height)
+                        contentY = Math.max(0, Math.min(contentHeight - height, caret.y + caret.height - height));
+                }
+                TextEdit {
+                    id: field
+                    width: textScroll.width
+                    height: Math.max(textScroll.height, contentHeight)
+                    leftPadding: textEditor.inset
+                    rightPadding: textEditor.inset
+                    topPadding: textEditor.inset
+                    bottomPadding: textEditor.inset
+                    font.family: "sans-serif"
+                    font.weight: Font.DemiBold
+                    font.pixelSize: Math.max(6, textEditor.fontPx * textEditor.viewScale)
+                    color: textEditor.ink
+                    selectionColor: theme.alpha(theme.accent, 0.55)
+                    selectedTextColor: textEditor.ink
+                    wrapMode: TextEdit.Wrap
+                    horizontalAlignment: textEditor.creating || textEditor.mark.textAlign === "center" || !textEditor.mark.textAlign ? TextEdit.AlignHCenter : textEditor.mark.textAlign === "right" ? TextEdit.AlignRight : TextEdit.AlignLeft
+                    selectByMouse: true
+                    Accessible.name: "Label text"
+                    onTextChanged: if (length > 240) remove(240, length)
+                    onCursorRectangleChanged: textScroll.revealCursor()
+                    onActiveFocusChanged: if (!activeFocus && textEditor.active) textEditor.commit()
+                    Keys.onPressed: function (event) {
+                        if (event.key === Qt.Key_Escape) {
+                            textEditor.commit();
+                            event.accepted = true;
+                        } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier)) {
+                            textEditor.commit();
+                            event.accepted = true;
+                        }
                     }
                 }
             }
@@ -478,20 +505,25 @@ Item {
             }
         }
         Rectangle {
-            y: box.height + 8
-            width: hintText.implicitWidth + 16
-            height: 24
+            visible: textEditor.y >= height + 8 || textEditor.y + box.height + height + 8 <= editSurface.height
+            x: Math.max(-textEditor.x, Math.min(0, editSurface.width - textEditor.x - width))
+            y: textEditor.y + box.height + height + 8 > editSurface.height ? -height - 8 : box.height + 8
+            width: Math.min(hintText.implicitWidth + 16, editSurface.width)
+            height: hintText.implicitHeight + 12
             radius: theme.radius
             color: theme.alpha(theme.background, 0.94)
             border.width: 1
             border.color: theme.controlBorder
             Text {
                 id: hintText
-                anchors.centerIn: parent
-                text: "Enter adds a line · Esc or click outside to finish"
+                anchors.fill: parent
+                anchors.margins: 6
+                text: (field.length >= 220 ? field.length + "/240 · " : "") + "Enter: new line · Esc: finish"
                 color: theme.muted
                 font.family: theme.fontFamily
                 font.pixelSize: 11
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
             }
         }
     }

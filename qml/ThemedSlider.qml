@@ -8,6 +8,7 @@ Slider {
     signal committed(real value)
     implicitHeight: 24
     hoverEnabled: true
+    Keys.onEscapePressed: focus = false
     onPressedChanged: if (!pressed) committed(value)
     Keys.onReleased: function (event) {
         if (event.key === Qt.Key_Left || event.key === Qt.Key_Right || event.key === Qt.Key_Up || event.key === Qt.Key_Down || event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown || event.key === Qt.Key_Home || event.key === Qt.Key_End)

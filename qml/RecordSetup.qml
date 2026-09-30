@@ -25,7 +25,7 @@ Window {
     color: "transparent"
     flags: Qt.FramelessWindowHint
     title: "Omaframe recording"
-    readonly property int wantedHeight: content.implicitHeight + 56
+    readonly property int wantedHeight: content.implicitHeight + recordFooter.implicitHeight + 72
     onWantedHeightChanged: if (visible) height = Math.min(wantedHeight, screen ? screen.height : wantedHeight)
     onVisibleChanged: if (visible) keys.forceActiveFocus()
     onClosing: function(event) { if (visible) { event.accepted = false; recorder.cancel() } }
@@ -34,7 +34,12 @@ Window {
         anchors.fill: parent
         focus: true
         Keys.onEscapePressed: recorder.cancel()
-        Keys.onReturnPressed: primaryButton.clicked()
+        Keys.onReturnPressed: function(event) {
+            if (setup.activeFocusItem === keys && primaryButton.enabled)
+                primaryButton.clicked();
+            else
+                event.accepted = false;
+        }
         Rectangle {
             anchors.fill: parent
             radius: theme.radius
@@ -44,7 +49,8 @@ Window {
             ScrollView {
                 id: optionsScroll
                 anchors.fill: parent
-                anchors.margins: 28
+                anchors.margins: setup.width < 500 ? 18 : 28
+                anchors.bottomMargin: recordFooter.implicitHeight + (setup.width < 500 ? 34 : 44)
                 clip: true
                 contentWidth: availableWidth
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -57,18 +63,20 @@ Window {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 4
-                            Text { text: recorder.state === "failed" ? "Recording needs attention" : "Record your screen"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 19; font.weight: Font.Medium }
-                            Text { text: "Nothing starts until you choose what to record."; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
+                            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; text: recorder.state === "failed" ? "Recording needs attention" : "Record your screen"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 19; font.weight: Font.Medium }
+                            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Nothing starts until you choose what to record."; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
                         }
-                        Item { Layout.fillWidth: true }
                         StudioButton { glyph: "close"; quiet: true; hint: "Cancel · Esc"; onClicked: recorder.cancel() }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
                     Text { text: "WHAT TO RECORD"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 10; font.letterSpacing: 0.8 }
-                    RowLayout {
+                    GridLayout {
                         Layout.fillWidth: true
-                        spacing: 8
+                        columns: optionsScroll.availableWidth < 480 ? 1 : 2
+                        columnSpacing: 8
+                        rowSpacing: 8
                         StudioButton {
+                            Layout.fillWidth: optionsScroll.availableWidth < 480
                             text: "Area or window"
                             glyph: "capture"
                             selected: recorder.hasTarget && !recorder.targetLabel.startsWith("Entire")
@@ -99,7 +107,7 @@ Window {
                     Text { text: "SOUND AND DETAILS"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 10; font.letterSpacing: 0.8 }
                     GridLayout {
                         Layout.fillWidth: true
-                        columns: 2
+                        columns: optionsScroll.availableWidth < 480 ? 1 : 2
                         columnSpacing: 18
                         rowSpacing: 4
                         RecordToggle { Layout.fillWidth: true; Layout.minimumWidth: 0; text: "Computer sound"; checked: recorder.desktopAudio; onToggled: recorder.desktopAudio = checked }
@@ -135,7 +143,7 @@ Window {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         visible: recorder.desktopAudio || recorder.micAudio
-                        text: "Silence the first 0.4 s to hide a start-up pop"
+                        text: "Mute the first 0.4 seconds to avoid an audio pop"
                         checked: recorder.suppressStartupPop
                         onToggled: recorder.suppressStartupPop = checked
                     }
@@ -146,7 +154,7 @@ Window {
                         onToggled: recorder.camera.enabled = checked
                     }
                     Choice {
-                        Layout.fillWidth: true; visible: recorder.camera.enabled
+                        Layout.fillWidth: true; visible: recorder.camera.enabled && recorder.camera.devices.length > 0
                         model: recorder.camera.devices; textRole: "label"
                         currentIndex: recorder.camera.device
                         displayText: currentIndex < 0 ? "No camera found" : currentText
@@ -154,16 +162,21 @@ Window {
                     }
                     Rectangle {
                         Layout.fillWidth: true; Layout.preferredHeight: 130
-                        visible: recorder.camera.enabled
+                        visible: recorder.camera.enabled && recorder.camera.devices.length > 0
                         color: theme.well; radius: theme.radius; clip: true
                         VideoOutput { id: cameraPreview; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
-                        Text { anchors.centerIn: parent; visible: !recorder.camera.ready; text: "Waiting for camera…"; color: theme.muted; font.pixelSize: 12 }
+                        Text { anchors.centerIn: parent; visible: !recorder.camera.ready; text: "Starting camera…"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
                     }
                     Binding { target: recorder.camera; property: "previewSink"; value: setup.visible && recorder.camera.enabled ? cameraPreview.videoSink : null }
                     Text {
                         Layout.fillWidth: true; visible: recorder.camera.enabled
                         text: recorder.camera.status; color: recorder.camera.ready ? theme.muted : theme.urgent
-                        font.pixelSize: 12; wrapMode: Text.Wrap
+                        font.family: theme.fontFamily; font.pixelSize: 12; wrapMode: Text.Wrap
+                    }
+                    Text {
+                        Layout.fillWidth: true; visible: recorder.camera.enabled && recorder.camera.ready
+                        text: "Move, resize or hide the camera in the video review."
+                        color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; wrapMode: Text.Wrap
                     }
                     Rectangle {
                         Layout.fillWidth: true
@@ -226,19 +239,25 @@ Window {
                         font.family: theme.fontFamily
                         font.pixelSize: 12
                     }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.topMargin: 4
-                        Text { text: "60 fps · MP4 · saved in " + video.outputDirectory.replace(/^\/home\/[^/]+/, "~"); color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideMiddle }
-                        StudioButton {
-                            id: primaryButton
-                            text: !recorder.hasTarget ? "Choose area and record" : recorder.countdown > 0 ? "Record in " + recorder.countdown + " s" : "Start recording"
-                            glyph: "record"
-                            primary: true
-                            enabled: recorder.state !== "loading" && !recorder.active && (!recorder.hasTarget || recorder.canStart)
-                            onClicked: if (enabled) (!recorder.hasTarget ? recorder.chooseRegion() : recorder.start())
-                        }
-                    }
+                }
+            }
+            ColumnLayout {
+                id: recordFooter
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: setup.width < 500 ? 18 : 28
+                spacing: 10
+                Text { text: "60 fps · MP4 · saved in " + video.outputDirectory.replace(/^\/home\/[^/]+/, "~"); color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideMiddle }
+                StudioButton {
+                    Layout.alignment: Qt.AlignRight
+                    Layout.fillWidth: optionsScroll.availableWidth < 480
+                    id: primaryButton
+                    text: !recorder.hasTarget ? "Choose area and record" : recorder.countdown > 0 ? "Record in " + recorder.countdown + " s" : "Start recording"
+                    glyph: "record"
+                    primary: true
+                    enabled: recorder.state !== "loading" && !recorder.active && (!recorder.hasTarget || recorder.canStart)
+                    onClicked: if (enabled) (!recorder.hasTarget ? recorder.chooseRegion() : recorder.start())
                 }
             }
         }

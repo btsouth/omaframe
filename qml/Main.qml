@@ -26,10 +26,12 @@ ApplicationWindow {
     palette.toolTipBase: theme.alpha(theme.background, 1)
     palette.toolTipText: theme.text
     palette.highlight: theme.accent
-    palette.highlightedText: theme.onAccent
+    palette.highlightedText: openDialog.visible || imageFolderDialog.visible || videoFolderDialog.visible ? theme.text : theme.onAccent
     palette.placeholderText: theme.faint
-    palette.light: theme.controlFill
-    palette.midlight: theme.hoverFill
+    // Qt dialogs blend palette roles as opaque colors. Compose the shell's
+    // translucent fills first so selection contrast stays correct.
+    palette.light: theme.alpha(theme.mix(theme.background, theme.controlFill, theme.controlFill.a), 1)
+    palette.midlight: theme.alpha(theme.mix(theme.background, theme.hoverFill, theme.hoverFill.a), 1)
     palette.mid: theme.controlBorder
     palette.dark: theme.frame
     palette.shadow: theme.scrim
@@ -44,9 +46,12 @@ ApplicationWindow {
     readonly property bool videoUnchanged: videoLoaded && videoPane.clipStart <= 0.001 && Math.abs(videoPane.clipEnd - video.duration) <= 0.001 && !videoPane.muted && videoPane.cuts.length === 0 && video.marks.annotations.length === 0 && !video.marks.hasCrop && !(video.cameraSource.toString().length && video.cameraLayout.visible)
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
     readonly property bool typing: markCanvas.typing || videoPane.typing || colorInput.activeFocus || boxColorInput.activeFocus || fontField.inputFocus
-    property bool shortcutsAllowed: !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
+    readonly property bool adjustingControl: root.activeFocusItem instanceof Slider || root.activeFocusItem instanceof ComboBox
+    property bool shortcutsAllowed: !root.adjustingControl && !root.working && !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
     property bool working: navigation.saving || studio.busy || video.busy || (recorder.active && !studio.quickMode)
-    property string currentStatus: videoMode ? video.status : studio.status
+    property string operationStatus: ""
+    property string currentStatus: operationStatus || (videoMode ? video.status : studio.status)
+    readonly property var recentDrafts: studio.drafts.concat(video.drafts).sort((a, b) => (b.modified || 0) - (a.modified || 0))
     property string currentDirectory: videoMode ? video.outputDirectory : studio.outputDirectory
     property string currentSaved: videoMode ? video.savedPath : studio.savedPath
     readonly property bool narrow: width < 1100
@@ -58,6 +63,14 @@ ApplicationWindow {
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
     function requestNavigation(command, file) {
         if (studio.busy || video.busy || navigation.saving) return;
+        if (markCanvas.typing) markCanvas.commitText();
+        captureMenu.close();
+        settingsPopup.close();
+        gifMenu.close();
+        openDialog.close();
+        imageFolderDialog.close();
+        videoFolderDialog.close();
+        root.contentItem.forceActiveFocus();
         if (videoLoaded) {
             videoPane.commitText();
             videoPane.pause();
@@ -78,6 +91,8 @@ ApplicationWindow {
                 video.finish();
             else if (!videoSavedCurrent && !videoUnchanged)
                 video.exportEdited(videoPane.clipStart, videoPane.clipEnd, videoPane.muted, videoPane.cuts);
+            else
+                video.copyFile(root.videoUnchanged && !root.videoSavedCurrent);
         } else if (studio.recoveryAction.length)
             studio.retryOutput();
         else
@@ -136,6 +151,14 @@ ApplicationWindow {
     onToolChanged: if (markCanvas.typing) markCanvas.commitText()
     Connections {
         target: studio
+        property string previousStatus: ""
+        Component.onCompleted: previousStatus = studio.status
+        function onChanged() {
+            if (studio.status !== previousStatus) {
+                previousStatus = studio.status;
+                root.operationStatus = studio.status;
+            }
+        }
         function onEditorRequested() { root.editing = true; root.videoMode = false; root.tool = "select"; }
         function onSourceChanged() {
             markCanvas.cancelText();
@@ -146,13 +169,21 @@ ApplicationWindow {
     }
     Connections {
         target: video
+        property string previousStatus: ""
+        Component.onCompleted: previousStatus = video.status
+        function onChanged() {
+            if (video.status !== previousStatus) {
+                previousStatus = video.status;
+                root.operationStatus = video.status;
+            }
+        }
         function onOpening() {
             root.videoMode = true;
             root.editing = false;
             root.recordingReview = false;
         }
         function onLoaded() { root.savedSignature = video.savedSignature; root.gifSignature = ""; }
-        function onGifExported() { root.gifSignature = videoPane.signature; }
+        function onGifExported() { root.gifSignature = videoPane.signature; gifMenu.open(); }
         function onExported() {
             root.savedSignature = videoPane.signature;
             video.recordSavedSignature(videoPane.signature);
@@ -258,18 +289,23 @@ ApplicationWindow {
 
     FileDialog {
         id: openDialog
+        Component.onCompleted: if ("popupType" in openDialog) openDialog.popupType = Popup.Item
         title: "Open an image or recording"
-        nameFilters: ["Images and recordings (*.png *.jpg *.jpeg *.webp *.bmp *.avif *.heic *.mp4 *.webm *.mkv *.mov *.m4v)", "Images (*.png *.jpg *.jpeg *.webp *.bmp)", "Recordings (*.mp4 *.webm *.mkv *.mov *.m4v)"]
+        nameFilters: ["Images and recordings (*.png *.jpg *.jpeg *.webp *.bmp *.avif *.heic *.mp4 *.webm *.mkv *.mov *.m4v *.avi)", "Images (*.png *.jpg *.jpeg *.webp *.bmp *.avif *.heic)", "Recordings (*.mp4 *.webm *.mkv *.mov *.m4v *.avi)"]
         onAccepted: root.requestNavigation("open", selectedFile)
     }
     FolderDialog {
         id: imageFolderDialog
+        Component.onCompleted: if ("popupType" in imageFolderDialog) imageFolderDialog.popupType = Popup.Item
         title: "Save screenshots in"
+        currentFolder: "file://" + studio.outputDirectory
         onAccepted: studio.setOutputDirectory(selectedFolder)
     }
     FolderDialog {
         id: videoFolderDialog
+        Component.onCompleted: if ("popupType" in videoFolderDialog) videoFolderDialog.popupType = Popup.Item
         title: "Save recordings and clips in"
+        currentFolder: "file://" + video.outputDirectory
         onAccepted: video.setOutputDirectory(selectedFolder)
     }
     ConfirmDialog {
@@ -456,7 +492,11 @@ ApplicationWindow {
                 id: settingsColumn
                 width: settingsPopup.availableWidth - 10
                 spacing: 14
-                Text { text: "Settings"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 17; font.weight: Font.Medium }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { Layout.fillWidth: true; text: "Settings"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 17; font.weight: Font.Medium }
+                    StudioButton { glyph: "close"; quiet: true; implicitHeight: 30; hint: "Close Settings · Esc"; onClicked: settingsPopup.close() }
+                }
                 SectionLabel { text: "SHORTCUTS" }
                 ShortcutPanel { Layout.fillWidth: true; compact: true }
                 Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
@@ -577,8 +617,17 @@ ApplicationWindow {
                 }
                 Item { Layout.fillWidth: true }
                 StudioButton {
+                    visible: root.videoMode && !root.recordingReview
+                    text: "Back"
+                    glyph: "back"
+                    quiet: true
+                    enabled: !root.working
+                    hint: "Return to the start screen. Your edits stay in Recent edits."
+                    onClicked: root.requestNavigation("home")
+                }
+                StudioButton {
                     visible: !studio.quickMode
-                    text: root.narrow ? "" : "Open"
+                    text: "Open"
                     glyph: "image"
                     quiet: true
                     enabled: !root.working
@@ -596,6 +645,7 @@ ApplicationWindow {
                     glyph: "settings"
                     quiet: true
                     hint: "Settings"
+                    enabled: !root.working
                     onClicked: settingsPopup.open()
                 }
             }
@@ -635,8 +685,10 @@ ApplicationWindow {
                 activeFocusOnTab: true
                 Accessible.role: Accessible.Button
                 Accessible.name: title
-                Keys.onReturnPressed: activated()
-                Keys.onSpacePressed: activated()
+                Keys.onReturnPressed: if (enabled) activated()
+                Keys.onSpacePressed: if (enabled) activated()
+                Accessible.onPressAction: if (enabled) activated()
+                opacity: enabled ? 1 : 0.45
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 16
@@ -701,7 +753,7 @@ ApplicationWindow {
                     ActionCard {
                         glyph: "record"
                         title: "Record video"
-                        detail: "Same selection, with sound and a Stop button kept out of the video."
+                        detail: "Choose what to record, then review, trim and share."
                         key: shortcuts.recordKey
                         enabled: !root.working && !recorder.active
                         onActivated: root.requestNavigation("record")
@@ -715,22 +767,14 @@ ApplicationWindow {
                         onActivated: openDialog.open()
                     }
                 }
-                Rectangle {
-                    visible: !shortcuts.ready || !studio.welcomed || shortcuts.message.length > 0
+                Text {
                     Layout.fillWidth: true
-                    implicitHeight: shortcutColumn.implicitHeight + 36
-                    radius: theme.radius
-                    color: theme.controlFill
-                    border.width: 1
-                    border.color: theme.controlBorder
-                    ColumnLayout {
-                        id: shortcutColumn
-                        anchors.fill: parent
-                        anchors.margins: 18
-                        spacing: 10
-                        Text { text: "Shortcuts"; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
-                        ShortcutPanel { Layout.fillWidth: true }
-                    }
+                    visible: text.length > 0 && text !== "Ready when you are."
+                    text: root.operationStatus
+                    color: theme.text
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    Accessible.role: Accessible.StaticText
                 }
                 Rectangle {
                     visible: !studio.welcomed
@@ -748,9 +792,9 @@ ApplicationWindow {
                         Text { text: "How it works"; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
                         Repeater {
                             model: [
-                                "Choose Screenshot above, then click a window, drag an area, or press F for the display. Tab switches to video.",
-                                "Press a number to pick a finish. It is copied and saved at once. Press E first to crop, blur or add labels.",
-                                "Paste anywhere. Screenshots go to " + root.home(studio.outputDirectory) + ", recordings to " + root.home(video.outputDirectory) + "."
+                                "Choose Screenshot, then click a window or drag an area. Whole display captures everything on that screen.",
+                                "Click a finish to copy and save, or choose Edit to crop, hide details and add labels.",
+                                "Paste into a chat, document or folder. Find your files in " + root.home(studio.outputDirectory) + " and " + root.home(video.outputDirectory) + "."
                             ]
                             RowLayout {
                                 required property string modelData
@@ -768,10 +812,27 @@ ApplicationWindow {
                         }
                         StudioButton {
                             Layout.alignment: Qt.AlignRight
-                            text: "Got it"
+                            text: "Dismiss guide"
                             quiet: true
                             onClicked: studio.welcomed = true
                         }
+                    }
+                }
+                Rectangle {
+                    visible: !shortcuts.ready || !studio.welcomed || shortcuts.message.length > 0
+                    Layout.fillWidth: true
+                    implicitHeight: shortcutColumn.implicitHeight + 36
+                    radius: theme.radius
+                    color: theme.controlFill
+                    border.width: 1
+                    border.color: theme.controlBorder
+                    ColumnLayout {
+                        id: shortcutColumn
+                        anchors.fill: parent
+                        anchors.margins: 18
+                        spacing: 10
+                        Text { text: "Optional shortcuts"; color: theme.text; font.pixelSize: 14; font.weight: Font.Medium }
+                        ShortcutPanel { Layout.fillWidth: true }
                     }
                 }
                 ColumnLayout {
@@ -785,7 +846,7 @@ ApplicationWindow {
                         columnSpacing: 12
                         rowSpacing: 8
                         Repeater {
-                            model: studio.drafts.concat(video.drafts)
+                            model: root.recentDrafts
                             delegate: Rectangle {
                                 id: draftCard
                                 required property var modelData
@@ -797,6 +858,7 @@ ApplicationWindow {
                                 border.color: activeFocus ? theme.focusBorder : theme.controlBorder
                                 activeFocusOnTab: true
                                 Accessible.role: Accessible.Button
+                                enabled: !root.working
                                 Accessible.name: modelData.name + ". Resume edit"
                                 Accessible.onPressAction: root.resumeRecent(modelData)
                                 Keys.onReturnPressed: root.resumeRecent(modelData)
@@ -832,7 +894,9 @@ ApplicationWindow {
                                         spacing: 2
                                         Text { Layout.fillWidth: true; text: draftCard.modelData.name; color: theme.text; font.pixelSize: 12; elide: Text.ElideMiddle }
                                         Text {
-                                            text: (draftCard.modelData.kind === "video" ? "Video · " : "") + draftCard.modelData.when + " · " + draftCard.modelData.edits + (draftCard.modelData.edits === 1 ? " mark" : " marks") + (draftCard.modelData.exported ? " · saved" : "")
+                                            Layout.fillWidth: true
+                                            elide: Text.ElideRight
+                                            text: (draftCard.modelData.kind === "video" ? "Video · " : "") + draftCard.modelData.when + (draftCard.modelData.kind === "video" ? "" : " · " + draftCard.modelData.edits + (draftCard.modelData.edits === 1 ? " edit" : " edits")) + (draftCard.modelData.exported ? " · exported" : "")
                                             color: theme.muted
                                             font.pixelSize: 11
                                         }
@@ -1029,7 +1093,8 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignHCenter
-                    text: root.editing ? (markCanvas.typing ? "Typing a label. Enter adds a line; Esc or a click outside finishes it." : root.toolDescription) : studio.rendering ? "Refining the preview…" : "Output: " + studio.outputDimensions + " · PNG · full resolution"
+                    visible: !root.editing || markCanvas.typing
+                    text: markCanvas.typing ? "Enter adds a line; Esc or a click outside finishes the label." : studio.rendering ? "Refining the preview…" : "Output: " + studio.outputDimensions + " · PNG · full resolution"
                     font.pixelSize: 11
                     color: theme.faint
                     wrapMode: Text.Wrap
@@ -1052,6 +1117,7 @@ ApplicationWindow {
                 // settings appear below them.
                 ScrollView {
                     id: editSidebar
+                    enabled: !root.working
                     visible: root.editing
                     anchors.fill: parent
                     clip: true
@@ -1097,7 +1163,7 @@ ApplicationWindow {
                             Layout.leftMargin: 14
                             Layout.rightMargin: 14
                             Layout.fillWidth: true
-                            text: "Clear crop"
+                            text: "Reset crop"
                             quiet: true
                             onClicked: studio.marks.clearCrop()
                         }
@@ -1204,10 +1270,14 @@ ApplicationWindow {
                                         required property string modelData
                                         width: 24; height: 24; radius: theme.radius > 0 ? 12 : 2
                                         color: modelData
-                                        border.width: studio.marks.selectedAnnotation.color === modelData ? 3 : 1
-                                        border.color: studio.marks.selectedAnnotation.color === modelData ? theme.focusBorder : theme.controlBorder
+                                        border.width: activeFocus || studio.marks.selectedAnnotation.color === modelData ? 3 : 1
+                                        border.color: activeFocus || studio.marks.selectedAnnotation.color === modelData ? theme.focusBorder : theme.controlBorder
                                         Accessible.role: Accessible.Button
                                         Accessible.name: "Color " + modelData
+                                        activeFocusOnTab: true
+                                        Accessible.onPressAction: studio.marks.setSelectedColor(modelData)
+                                        Keys.onReturnPressed: studio.marks.setSelectedColor(modelData)
+                                        Keys.onSpacePressed: studio.marks.setSelectedColor(modelData)
                                         MouseArea {
                                             anchors.fill: parent
                                             enabled: !studio.busy
@@ -1218,6 +1288,8 @@ ApplicationWindow {
                                 }
                                 TextField {
                                     id: colorInput
+                                    Accessible.name: "Mark color as a hex value"
+                                    Keys.onEscapePressed: { text = studio.marks.selectedAnnotation.color || ""; root.contentItem.forceActiveFocus(); }
                                     width: 78
                                     height: 28
                                     property bool validColor: /^#[0-9a-fA-F]{6}$/.test(text)
@@ -1300,10 +1372,14 @@ ApplicationWindow {
                                         required property string modelData
                                         width: 24; height: 24; radius: theme.radius > 0 ? 12 : 2
                                         color: modelData
-                                        border.width: studio.marks.selectedAnnotation.background === modelData ? 3 : 1
-                                        border.color: studio.marks.selectedAnnotation.background === modelData ? theme.focusBorder : theme.controlBorder
+                                        border.width: activeFocus || studio.marks.selectedAnnotation.background === modelData ? 3 : 1
+                                        border.color: activeFocus || studio.marks.selectedAnnotation.background === modelData ? theme.focusBorder : theme.controlBorder
                                         Accessible.role: Accessible.Button
                                         Accessible.name: "Box color " + modelData
+                                        activeFocusOnTab: true
+                                        Accessible.onPressAction: studio.marks.setSelectedBackground(modelData)
+                                        Keys.onReturnPressed: studio.marks.setSelectedBackground(modelData)
+                                        Keys.onSpacePressed: studio.marks.setSelectedBackground(modelData)
                                         MouseArea {
                                             anchors.fill: parent
                                             enabled: !studio.busy
@@ -1314,6 +1390,8 @@ ApplicationWindow {
                                 }
                                 TextField {
                                     id: boxColorInput
+                                    Accessible.name: "Label background as a hex value"
+                                    Keys.onEscapePressed: { text = studio.marks.selectedAnnotation.background || ""; root.contentItem.forceActiveFocus(); }
                                     width: 78
                                     height: 28
                                     property bool validColor: /^#[0-9a-fA-F]{6}$/.test(text)
@@ -1369,6 +1447,7 @@ ApplicationWindow {
                 // Finish sidebar
                 ScrollView {
                     id: finishSidebar
+                    enabled: !root.working
                     visible: !root.editing
                     anchors.fill: parent
                     clip: true
@@ -1592,6 +1671,7 @@ ApplicationWindow {
                             implicitHeight: 24
                             padding: 6
                             font.pixelSize: 10
+                            enabled: !root.working
                             Accessible.name: root.videoMode ? "Change the recordings folder" : "Change the screenshots folder"
                             onClicked: root.videoMode ? videoFolderDialog.open() : imageFolderDialog.open()
                         }
@@ -1606,21 +1686,12 @@ ApplicationWindow {
                     onClicked: video.revealSource()
                 }
                 StudioButton {
-                    visible: root.videoSavedCurrent && !root.recordingReview
-                    text: "Copy file"
-                    glyph: "copy"
-                    quiet: true
-                    enabled: !video.busy
-                    hint: "Put the video on the clipboard to paste into a chat or folder"
-                    onClicked: video.copyFile()
-                }
-                StudioButton {
-                    visible: root.currentSaved.length > 0 && (!root.videoMode || root.videoSavedCurrent)
+                    visible: root.videoMode ? root.videoSavedCurrent || (root.videoUnchanged && !root.recordingReview) : root.currentSaved.length > 0
                     text: root.narrow ? "" : "Show file"
                     glyph: "folder"
                     quiet: true
                     hint: "Open the folder with the saved file"
-                    onClicked: root.videoMode ? video.revealSaved() : studio.revealSaved()
+                    onClicked: root.videoMode ? (root.videoSavedCurrent ? video.revealSaved() : video.revealSource()) : studio.revealSaved()
                 }
                 StudioButton {
                     id: gifButton
@@ -1636,6 +1707,7 @@ ApplicationWindow {
                         y: -height - 8
                         width: 280; padding: 16; modal: true; focus: true
                         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                        onOpened: gifAction.forceActiveFocus()
                         readonly property bool current: video.gifPath.length > 0 && root.gifSignature === videoPane.signature
                         background: Rectangle { color: theme.alpha(theme.background, 1); radius: theme.radius; border.width: 2; border.color: theme.frame }
                         contentItem: ColumnLayout {
@@ -1663,6 +1735,7 @@ ApplicationWindow {
                                 StudioButton { text: "Show file"; glyph: "folder"; quiet: true; enabled: !root.working; onClicked: video.revealGif() }
                             }
                             StudioButton {
+                                id: gifAction
                                 Layout.fillWidth: true
                                 text: root.working ? "Exporting…" : gifMenu.current ? "Copy GIF" : "Export GIF"
                                 primary: true
@@ -1674,6 +1747,7 @@ ApplicationWindow {
                                     }
                                     videoPane.commitText();
                                     videoPane.pause();
+                                    gifMenu.close();
                                     video.exportGif(videoPane.clipStart, videoPane.clipEnd, videoPane.cuts);
                                 }
                             }
@@ -1682,15 +1756,15 @@ ApplicationWindow {
                 }
                 StudioButton {
                     readonly property string label: root.working ? "Working…"
-                        : root.videoMode ? (root.recordingReview ? (root.videoUnchanged || root.videoSavedCurrent ? "Copy and close" : "Save and copy") : root.videoSavedCurrent ? "Saved" : root.videoUnchanged ? "No edits yet" : "Export video")
+                        : root.videoMode ? (root.recordingReview ? (root.videoUnchanged || root.videoSavedCurrent ? "Copy and close" : "Save and copy") : root.videoSavedCurrent || root.videoUnchanged ? "Copy video" : "Export video")
                         : studio.recoveryAction.length ? studio.recoveryAction : "Copy and save"
                     text: label
-                    hint: root.videoMode ? (root.recordingReview && (root.videoUnchanged || root.videoSavedCurrent) ? "The video is saved in " + root.home(video.outputDirectory) + ". Copy it to the clipboard and close · Ctrl+S" : root.recordingReview ? "Save a new MP4 with your changes, copy it and close · Ctrl+S" : "Save a new MP4 with your changes · Ctrl+S") : "Copy to the clipboard and save a PNG · Ctrl+C"
-                    glyph: root.videoMode && !root.recordingReview ? "check" : "copy"
+                    hint: root.videoMode ? (root.recordingReview && (root.videoUnchanged || root.videoSavedCurrent) ? "The video is saved in " + root.home(video.outputDirectory) + ". Copy it to the clipboard and close · Ctrl+S" : root.recordingReview ? "Save a new MP4 with your changes, copy it and close · Ctrl+S" : root.videoSavedCurrent || root.videoUnchanged ? "Copy the video file to paste into a chat or folder · Ctrl+S" : "Save a new MP4 with your changes · Ctrl+S") : "Copy to the clipboard and save a PNG · Ctrl+C"
+                    glyph: root.videoMode && !root.recordingReview && !root.videoSavedCurrent && !root.videoUnchanged ? "record" : "copy"
                     primary: true
                     implicitHeight: 44
                     implicitWidth: Math.max(170, implicitContentWidth + 26)
-                    enabled: !root.working && (root.videoMode ? root.videoLoaded && !(root.videoSavedCurrent && !root.recordingReview) && (root.recordingReview || !root.videoUnchanged) : !studio.rendering)
+                    enabled: !root.working && (root.videoMode ? root.videoLoaded : !studio.rendering)
                     onClicked: root.acceptCurrent()
                 }
             }

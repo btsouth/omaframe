@@ -34,7 +34,8 @@ Item {
     readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations, video.marks.cropBounds, video.cameraLayout])
     // The mark tool: select, blur, redact, arrow, box, text or step.
     property string tool: "select"
-    readonly property bool typing: markCanvas.typing
+    readonly property bool typing: markCanvas.typing || startField.activeFocus || endField.activeFocus
+        || markStartField.activeFocus || markEndField.activeFocus || partStartField.activeFocus || partEndField.activeFocus
     readonly property var selectedMark: video.marks.selectedAnnotation
     readonly property bool markSelected: selectedMark.type !== undefined
     readonly property bool hasMarks: video.marks.annotations.length > 0
@@ -55,7 +56,7 @@ Item {
     property real anchorClock: 0
 
     function time(seconds) {
-        let n = Math.max(0, seconds);
+        let n = Math.round(Math.max(0, seconds) * 10) / 10;
         return Math.floor(n / 60).toString().padStart(2, "0") + ":" + (n % 60).toFixed(1).padStart(4, "0");
     }
     function pause() {
@@ -108,6 +109,8 @@ Item {
     }
     Component.onCompleted: if (loaded) loadEditState()
     function changeCamera(layout) {
+        if (Object.keys(layout).every(key => video.cameraLayout[key] === layout[key]))
+            return;
         pushUndo();
         video.setCameraLayout(Object.assign({}, video.cameraLayout, layout));
     }
@@ -283,7 +286,7 @@ Item {
             return;
         const updated = withCut(cuts, selStart, selEnd);
         if (keptAfter(updated) + 0.000001 < 0.1) {
-            notice = "Keep at least a tenth of a second of the clip.";
+            notice = "Keep at least 0.1 seconds of the clip.";
             return;
         }
         pushUndo();
@@ -318,7 +321,7 @@ Item {
         others.splice(index, 1);
         const updated = withCut(others, start, end);
         if (keptAfter(updated) + 0.000001 < 0.1) {
-            notice = "Keep at least a tenth of a second of the clip.";
+            notice = "Keep at least 0.1 seconds of the clip.";
             return;
         }
         pushUndo();
@@ -458,6 +461,7 @@ Item {
     component TimeField: TextField {
         id: field
         property string display
+        property string label: "Time"
         signal committed(real seconds)
         implicitWidth: 84
         implicitHeight: 32
@@ -472,9 +476,11 @@ Item {
         padding: 6
         hoverEnabled: true
         opacity: enabled ? 1 : 0.5
+        Accessible.name: label
         onActiveFocusChanged: if (activeFocus)
             selectAll()
         onAccepted: focus = false
+        Keys.onEscapePressed: { text = Qt.binding(() => field.display); focus = false; }
         // Accepts "12.5", "1:04" or "01:04.2".
         onEditingFinished: {
             const m = text.trim().match(/^(?:(\d+):)?(\d+(?:\.\d*)?)$/);
@@ -598,16 +604,21 @@ Item {
                             Layout.fillWidth: true; text: "Show camera"; checked: video.cameraLayout.visible
                             onToggled: pane.changeCamera({ visible: checked })
                         }
+                        Caption { text: "SIZE" }
                         Choice {
                             Layout.fillWidth: true; model: ["Small", "Medium", "Large"]
                             currentIndex: video.cameraLayout.width <= 0.2 ? 0 : video.cameraLayout.width <= 0.3 ? 1 : 2
                             enabled: video.cameraLayout.visible
                             onActivated: pane.changeCamera({ width: [0.18, 0.24, 0.34][currentIndex] })
                         }
+                        Caption { text: "MOVE TO CORNER" }
                         Choice {
                             Layout.fillWidth: true; model: ["Bottom right", "Bottom left", "Top right", "Top left"]
-                            currentIndex: -1; displayText: "Position…"; enabled: video.cameraLayout.visible
-                            onActivated: pane.changeCamera({ x: currentIndex % 2 ? 0.02 : 0.98 - video.cameraLayout.width, y: currentIndex < 2 ? 0.98 : 0.02 })
+                            currentIndex: -1; displayText: "Choose a corner…"; enabled: video.cameraLayout.visible
+                            onActivated: pane.changeCamera({
+                                x: currentIndex % 2 ? 0.02 : 0.98 - video.cameraBounds.width,
+                                y: currentIndex < 2 ? 0.98 - video.cameraBounds.height : 0.02
+                            })
                         }
                         Text { Layout.fillWidth: true; text: "Pause playback, then drag the camera to move it. Changes can be undone."; color: theme.muted; font.pixelSize: 11; wrapMode: Text.Wrap }
                     }
@@ -773,8 +784,9 @@ Item {
                     property real startY
                     property real layoutX
                     property real layoutY
+                    property bool moved: false
                     onPressed: mouse => {
-                        pane.pushUndo();
+                        moved = false;
                         const point = mapToItem(viewport, mouse.x, mouse.y);
                         startX = point.x; startY = point.y;
                         layoutX = video.cameraBounds.x; layoutY = video.cameraBounds.y;
@@ -782,6 +794,11 @@ Item {
                     onPositionChanged: mouse => {
                         if (!pressed) return;
                         const point = mapToItem(viewport, mouse.x, mouse.y);
+                        if (!moved) {
+                            if (Math.hypot(point.x - startX, point.y - startY) < 3) return;
+                            pane.pushUndo();
+                            moved = true;
+                        }
                         video.setCameraLayout(Object.assign({}, video.cameraLayout, {
                             x: layoutX + (point.x - startX) / viewport.width,
                             y: layoutY + (point.y - startY) / viewport.height
@@ -818,7 +835,7 @@ Item {
                 spacing: 8
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Open a video to trim it."
+                    text: video.busy ? "Opening your video…" : "Open a video to edit it."
                     color: theme.text
                     font.pixelSize: 15
                 }
@@ -831,24 +848,29 @@ Item {
             }
             Rectangle {
                 visible: player.error !== MediaPlayer.NoError
+                z: 5
                 anchors.centerIn: parent
                 width: parent.width - 80
-                height: 80
+                height: Math.min(stage.height - 24, playbackError.implicitHeight + 30)
                 radius: theme.radius
                 color: theme.alpha(theme.urgent, 0.1)
                 border.width: 1
                 border.color: theme.alpha(theme.urgent, 0.4)
                 Text {
+                    id: playbackError
                     anchors.fill: parent
                     anchors.margins: 15
                     text: "Playback unavailable: " + player.errorString
                     color: theme.urgent
                     wrapMode: Text.Wrap
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
                     font.pixelSize: 12
                 }
             }
             Rectangle {
                 anchors.fill: parent
+                z: 10
                 visible: video.exporting
                 color: theme.alpha(theme.background, 0.82)
                 MouseArea {
@@ -856,14 +878,16 @@ Item {
                 }
                 ColumnLayout {
                     anchors.centerIn: parent
-                    width: 280
-                    spacing: 14
+                    width: Math.min(280, stage.width - 32)
+                    spacing: pane.compact ? 8 : 14
                     Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: video.status.startsWith("Checking") ? "Checking the new video" : "Saving the edited video"
+                        Layout.fillWidth: true
+                        text: video.status
                         color: theme.text
                         font.pixelSize: 15
                         font.weight: Font.Medium
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
                     }
                     Rectangle {
                         Layout.fillWidth: true
@@ -934,6 +958,8 @@ Item {
                 text: "START"
             }
             TimeField {
+                id: startField
+                label: "Video start"
                 display: pane.time(pane.clipStart)
                 enabled: pane.editable
                 onCommitted: seconds => pane.setStart(seconds, true)
@@ -946,6 +972,8 @@ Item {
                 text: "END"
             }
             TimeField {
+                id: endField
+                label: "Video end"
                 display: pane.time(pane.clipEnd)
                 enabled: pane.editable
                 onCommitted: seconds => pane.setEnd(seconds, true)
@@ -977,7 +1005,8 @@ Item {
                 quiet: true
                 implicitHeight: 36
                 enabled: pane.editable && video.audioTracks > 0
-                hint: pane.muted ? "The saved video will be silent. Click to keep the sound." : "Click to save the video without sound"
+                hint: video.audioTracks === 0 ? "This video has no audio track."
+                    : pane.muted ? "The saved video will be silent. Click to keep the sound." : "Click to save the video without sound"
                 onClicked: pane.toggleSound()
             }
         }
@@ -1068,6 +1097,8 @@ Item {
                 color: theme.selectedText
             }
             TimeField {
+                id: markStartField
+                label: "Mark start"
                 visible: pane.barMode === "mark"
                 display: pane.time(pane.selectedMark.start || 0)
                 enabled: pane.editable
@@ -1083,6 +1114,8 @@ Item {
                 font.pixelSize: 12
             }
             TimeField {
+                id: markEndField
+                label: "Mark end"
                 visible: pane.barMode === "mark"
                 display: pane.time(pane.selectedMark.end || 0)
                 enabled: pane.editable
@@ -1140,6 +1173,8 @@ Item {
                 color: pane.hasSelection ? theme.selectedText : theme.urgent
             }
             TimeField {
+                id: partStartField
+                label: pane.hasSelection ? "Selected part start" : "Removed part start"
                 visible: pane.barMode === "part" || pane.barMode === "cut"
                 display: pane.time(pane.hasSelection ? pane.selStart : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].start : 0)
                 enabled: pane.editable
@@ -1152,6 +1187,8 @@ Item {
                 font.pixelSize: 12
             }
             TimeField {
+                id: partEndField
+                label: pane.hasSelection ? "Selected part end" : "Removed part end"
                 visible: pane.barMode === "part" || pane.barMode === "cut"
                 display: pane.time(pane.hasSelection ? pane.selEnd : pane.selectedCut >= 0 ? pane.cuts[pane.selectedCut].end : 0)
                 enabled: pane.editable

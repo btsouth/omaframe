@@ -66,7 +66,7 @@ Window {
                           : recorder.state === "countdown" ? "Starting in " + recorder.remaining
                           : recorder.state === "starting" ? "Starting…"
                           : recorder.state === "stopping" ? "Saving…"
-                          : control.paused ? "Paused" : recorder.elapsed
+                          : recorder.elapsed
                     elide: Text.ElideRight
                     font.pixelSize: 13
                     font.family: theme.fontFamily
@@ -77,8 +77,8 @@ Window {
                 }
                 Text {
                     Layout.fillWidth: true
-                    visible: control.countdownOnly
-                    text: recorder.stopKey + " stops" + (recorder.pauseKey.length ? " · " + recorder.pauseKey + " pauses" : "")
+                    visible: control.countdownOnly || control.paused
+                    text: control.paused ? "Paused" : recorder.stopKey + " stops" + (recorder.pauseKey.length ? " · " + recorder.pauseKey + " pauses" : "")
                     color: theme.muted
                     font.family: theme.fontFamily
                     font.pixelSize: 11
@@ -90,6 +90,7 @@ Window {
                 objectName: "recordingPause"
                 visible: control.live || control.paused
                 enabled: !recorder.pausePending
+                hint: recorder.pausePending ? "Waiting for recorder…" : control.paused ? "Continue recording" : "Pause recording"
                 implicitWidth: 74
                 implicitHeight: 32
                 padding: 7
@@ -109,6 +110,7 @@ Window {
                 enabled: recorder.state !== "stopping"
                 implicitWidth: 60; implicitHeight: 32
                 hoverEnabled: true
+                opacity: enabled ? 1 : 0.45
                 onClicked: recorder.stop()
                 Accessible.name: recorder.state === "countdown" ? "Cancel recording" : "Stop recording"
                 Accessible.description: recorder.stopKey.length ? recorder.stopKey + " also stops" : ""

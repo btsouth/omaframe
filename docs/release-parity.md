@@ -1,13 +1,13 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.5.0**. This tracks shipped behavior and possible future
+Current release: **0.5.1**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.5.0 | Future work |
+| Workflow | Omaframe 0.5.1 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
 | Capture and finish | Window, area or display; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
@@ -66,11 +66,26 @@ GIF export makes a silent loop with the same edits, at up to 720 pixels and
 15 fps for clips up to 30 seconds. It keeps the editor open and leaves an
 existing MP4 export available. Copy or show the GIF after saving.
 
+## Since 0.5.0
+
+Version 0.5.1 improves first-run guidance, small-screen capture controls,
+recording options, screenshot labels, keyboard focus and folder pickers.
+Export progress and cancellation stay above the video preview. Opened videos
+can return to the start screen, and Copy video selects the original after
+undoing back to an unchanged clip. Failed screenshot saves can retry with a
+new folder without losing the capture.
+
 ## Possible next work
 
 Animated zoom, automatic focus, captions and clip assembly remain backlog.
 
 ## Validation notes
+
+For 0.5.1, all nine suites passed in an isolated desktop, with focused
+clipboard and failed-save regressions rerun after the fixes. UI checks
+covered first launch, retained settings, area/window/whole-display capture,
+editing, pause/resume and export in light/dark themes and smaller windows.
+Recording checks used fixtures, not physical camera or audio devices.
 
 For 0.5.0, all nine suites passed in an isolated desktop for crop, recovery
 and camera changes. Focused GIF export and navigation tests then passed,
