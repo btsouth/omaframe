@@ -1,4 +1,5 @@
 #pragma once
+#include "webcam.hpp"
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QLocalSocket>
@@ -50,6 +51,7 @@ QPair<QString, QStringList> recorderCommand(const QStringList &arguments);
 
 class Recorder final : public QObject {
   Q_OBJECT
+  Q_PROPERTY(Webcam *camera READ camera CONSTANT)
   Q_PROPERTY(QString state READ state NOTIFY changed)
   Q_PROPERTY(QString status READ status NOTIFY changed)
   Q_PROPERTY(bool active READ active NOTIFY changed)
@@ -79,6 +81,7 @@ class Recorder final : public QObject {
   Q_PROPERTY(QString savedPath READ savedPath NOTIFY changed)
 public:
   explicit Recorder(QObject *parent = nullptr);
+  Webcam *camera() { return &m_webcam; }
   ~Recorder() override;
   QString state() const { return m_state; }
   QString status() const { return m_status; }
@@ -169,6 +172,10 @@ private:
   void finishPause(bool success, const QString &error = {},
                    bool uncertain = false);
   void freezeClock();
+  void completeWhenCameraReady();
+  Webcam m_webcam;
+  bool m_screenReady = false;
+  QString m_cameraWarning;
   QString m_state = "idle", m_status, m_screen, m_target, m_path, m_error,
           m_defaultSink, m_preferredMic, m_stopKey, m_pauseKey;
   QList<Recording::Display> m_displays;

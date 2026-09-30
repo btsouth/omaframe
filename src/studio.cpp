@@ -2,6 +2,7 @@
 #include "capture-session.hpp"
 #include "capture.hpp"
 #include "displays.hpp"
+#include "edit-json.hpp"
 #include "ocr.hpp"
 #include "window-targets.hpp"
 #include <QBuffer>
@@ -45,55 +46,6 @@ static constexpr qint64 maxDraftMetadataBytes = 32 * 1024 * 1024;
 static bool validDraftId(const QString &id) {
   static const QRegularExpression format("^[0-9a-f]{32}$");
   return format.match(id).hasMatch();
-}
-static QJsonObject editToJson(const Frame::Edit &edit) {
-  QJsonArray points;
-  for (const auto &point : edit.points)
-    points.append(QJsonObject{{"x", point.x()}, {"y", point.y()}});
-  return {{"type", edit.type},
-          {"x1", edit.from.x()}, {"y1", edit.from.y()},
-          {"x2", edit.to.x()}, {"y2", edit.to.y()},
-          {"text", edit.text}, {"color", edit.color.name(QColor::HexArgb)},
-          {"size", edit.size}, {"textStyle", edit.textStyle},
-          {"textAlign", edit.textAlign},
-          {"background", edit.background.name(QColor::HexArgb)},
-          {"backgroundOpacity", edit.backgroundOpacity}, {"points", points}};
-}
-static std::optional<Frame::Edit> editFromJson(const QJsonObject &item) {
-  const QString type = item.value("type").toString();
-  if (!QStringList{"crop", "arrow", "line", "box", "ellipse", "highlight",
-                   "redact", "blur", "pen", "step", "text"}.contains(type))
-    return std::nullopt;
-  const double x1 = item.value("x1").toDouble(), y1 = item.value("y1").toDouble();
-  const double x2 = item.value("x2").toDouble(), y2 = item.value("y2").toDouble();
-  const double size = item.value("size").toDouble(1);
-  const double opacity = item.value("backgroundOpacity").toDouble(1);
-  for (double value : {x1, y1, x2, y2})
-    if (!std::isfinite(value) || qAbs(value) > 10)
-      return std::nullopt;
-  if (!std::isfinite(size) || size <= 0 || size > 10000 ||
-      !std::isfinite(opacity) || opacity < 0 || opacity > 1)
-    return std::nullopt;
-  Frame::Edit edit{type, {x1, y1}, {x2, y2}, item.value("text").toString().left(240)};
-  edit.color = QColor(item.value("color").toString());
-  edit.background = QColor(item.value("background").toString());
-  if (!edit.color.isValid() || !edit.background.isValid())
-    return std::nullopt;
-  edit.size = size;
-  edit.textStyle = item.value("textStyle").toString("box");
-  edit.textAlign = item.value("textAlign").toString("center");
-  edit.backgroundOpacity = opacity;
-  const QJsonArray points = item.value("points").toArray();
-  if (points.size() > 2048)
-    return std::nullopt;
-  for (const auto &value : points) {
-    const auto point = value.toObject();
-    const double x = point.value("x").toDouble(), y = point.value("y").toDouble();
-    if (!std::isfinite(x) || !std::isfinite(y) || qAbs(x) > 10 || qAbs(y) > 10)
-      return std::nullopt;
-    edit.points.append({x, y});
-  }
-  return edit;
 }
 static QString summarizeOriginals(int *count) {
   const auto files = QDir(originalsDirectory()).entryInfoList(
@@ -499,7 +451,7 @@ void Studio::saveDraftNow() {
   }
   QJsonArray edits;
   for (const auto &edit : m_marks.edits())
-    edits.append(editToJson(edit));
+    edits.append(Frame::editToJson(edit));
   const QJsonObject document{{"version", 1}, {"name", m_name},
                              {"style", m_options.style},
                              {"padding", m_options.padding},
@@ -540,7 +492,7 @@ void Studio::resumeDraft(const QString &id) {
   }
   QVector<Frame::Edit> edits;
   for (const auto &value : savedEdits) {
-    const auto edit = editFromJson(value.toObject());
+    const auto edit = Frame::editFromJson(value.toObject());
     if (!edit) {
       m_status = "This editable draft contains a damaged annotation.";
       emit changed();

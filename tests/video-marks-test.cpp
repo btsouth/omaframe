@@ -1,7 +1,10 @@
 #include "marks.hpp"
 #include "video.hpp"
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -74,6 +77,110 @@ class VideoMarksTest : public QObject {
   }
 
 private slots:
+  void cropAndCameraAreComposedBeforeCuts() {
+    const QString source = temp.filePath("screen-camera.mp4");
+    const QString camera = temp.filePath("screen-camera-webcam.mp4");
+    QVERIFY(QFile::copy(plain, source));
+    QVERIFY(makeClip("color=c=red:size=640x360:rate=24", camera));
+    QFile sidecar(source + ".camera.json");
+    QVERIFY(sidecar.open(QIODevice::WriteOnly));
+    sidecar.write(
+        QJsonDocument(QJsonObject{{"version", 1},
+                                  {"file", QFileInfo(camera).fileName()},
+                                  {"duration", 4.0}})
+            .toJson());
+    sidecar.close();
+    Video video;
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("crop-camera")));
+    video.open(QUrl::fromLocalFile(source));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QCOMPARE(video.cameraSource(), QUrl::fromLocalFile(camera));
+    video.marks()->edit("redact", 0.25, 0.25, 0.5, 0.5);
+    video.marks()->edit("crop", 0.25, 0.25, 0.75, 0.75);
+    QCOMPARE(video.outputSize(), QSize(160, 120));
+    video.setCameraLayout(
+        {{"visible", true}, {"width", 0.5}, {"x", 0.5}, {"y", 0.6}});
+    video.exportEdited(0.5, 3.5, false,
+                       {QVariantMap{{"start", 1.0}, {"end", 2.0}}});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    const QImage frame = frameAt(video.savedPath(), 0.1, {160, 120});
+    QVERIFY(!frame.isNull());
+    QVERIFY(redacted(frame, 10, 10));
+    const QColor face = frame.pixelColor(120, 90);
+    QVERIFY(face.red() > 220 && face.green() < 30);
+    video.setCameraLayout({{"visible", false}});
+    video.exportEdited(0, 4, false, {});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    const QImage hidden = frameAt(video.savedPath(), 0.1, {160, 120});
+    QVERIFY(!hidden.isNull() && white(hidden, 120, 90));
+  }
+  void draftRestoresCropTimesAndPointingMarks() {
+    Video video;
+    video.open(QUrl::fromLocalFile(pattern));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.marks()->edit("arrow", 0.8, 0.6, 0.2, 0.4);
+    video.marks()->setSelectedTimes(1, 3);
+    video.marks()->edit("text", 0.4, 0.4, 0.4, 0.4, "Resume this edit");
+    video.marks()->edit("crop", 0.1, 0.1, 0.9, 0.9);
+    const auto before = video.marks()->edits();
+    video.setEditState(
+        {{"clipStart", 0.5},
+         {"clipEnd", 3.5},
+         {"muted", true},
+         {"cuts", QVariantList{QVariantMap{{"start", 1.5}, {"end", 2.0}}}},
+         {"signature", "edited-pattern"}});
+    QVERIFY(video.saveDraftNow());
+    QString id;
+    for (const auto &draft : video.drafts())
+      if (draft.toMap().value("name").toString() == "pattern.mp4")
+        id = draft.toMap().value("id").toString();
+    QVERIFY(!id.isEmpty());
+    Video reopened;
+    reopened.resumeDraft(id);
+    QTRY_VERIFY_WITH_TIMEOUT(!reopened.busy(), 12000);
+    QCOMPARE(reopened.source(), video.source());
+    QCOMPARE(reopened.editState(), video.editState());
+    QCOMPARE(reopened.marks()->edits().size(), before.size());
+    QCOMPARE(reopened.marks()->edits()[0].from, before[0].from);
+    QCOMPARE(reopened.marks()->edits()[0].to, before[0].to);
+    QCOMPARE(reopened.marks()->edits()[0].start, 1.0);
+    QCOMPARE(reopened.marks()->edits()[0].end, 3.0);
+    QCOMPARE(reopened.marks()->edits()[1].text, QString("Resume this edit"));
+    QCOMPARE(reopened.cropPixels(), video.cropPixels());
+    reopened.deleteDraft(id);
+    QVERIFY(reopened.saveDraftNow());
+    for (const auto &draft : reopened.drafts())
+      QVERIFY(draft.toMap().value("id").toString() != id);
+  }
+  void changedOriginalDoesNotSilentlyRestoreDraft() {
+    const QString source = temp.filePath("changed-original.mp4");
+    QVERIFY(QFile::copy(plain, source));
+    Video video;
+    video.open(QUrl::fromLocalFile(source));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.setEditState({{"clipStart", 0.0},
+                        {"clipEnd", 4.0},
+                        {"muted", true},
+                        {"cuts", QVariantList{}},
+                        {"signature", "muted"}});
+    QVERIFY(video.saveDraftNow());
+    QString id;
+    for (const auto &draft : video.drafts())
+      if (draft.toMap().value("name").toString() == "changed-original.mp4")
+        id = draft.toMap().value("id").toString();
+    QVERIFY(!id.isEmpty());
+    QFile changed(source);
+    QVERIFY(changed.open(QIODevice::Append));
+    changed.write("changed");
+    changed.close();
+    QVERIFY(!video.saveDraftNow());
+    Video reopened;
+    reopened.resumeDraft(id);
+    QVERIFY(reopened.source().isEmpty());
+    QVERIFY(reopened.status().contains("has changed"));
+    reopened.deleteDraft(id);
+  }
   void initTestCase() {
     QCoreApplication::setOrganizationName("Omaframe-test");
     QCoreApplication::setApplicationName("VideoMarks");

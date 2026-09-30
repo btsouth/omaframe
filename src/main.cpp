@@ -681,7 +681,8 @@ int main(int argc, char **argv) {
                      if (window) {
                        // Keep the current editor alive while an open is
                        // checked. A failed open must retain its edit state.
-                       if (cmd != "open" && cmd != "review")
+                       if (cmd != "open" && cmd != "review" &&
+                           cmd != "video-draft")
                          window->setProperty("videoMode", false);
                        window->setProperty("recordingReview", false);
                      }
@@ -698,7 +699,13 @@ int main(int argc, char **argv) {
                        studio.capture(cmd == "capture");
                      else if (cmd == "review")
                        openReview(path, pendingReviewReturnsToStudio);
-                     else if (cmd == "open") {
+                     else if (cmd == "video-draft") {
+                       video.resumeDraft(path.toString());
+                       showStudioWindow();
+                     } else if (cmd == "image-draft") {
+                       studio.resumeDraft(path.toString());
+                       showStudioWindow();
+                     } else if (cmd == "open") {
                        if (!ensureWindow()) {
                          app.exit(1);
                          return;

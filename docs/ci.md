@@ -6,7 +6,7 @@ a GitHub-hosted runner, builds the app and every test binary, and checks the
 CMake install layout and desktop entry. It uploads CTest results and the test
 log, including when tests fail. It does not publish packages or releases.
 
-Six CTest suites have the `headless` label:
+Seven CTest suites have the `headless` label:
 
 | Suite | Coverage |
 | --- | --- |
@@ -15,7 +15,8 @@ Six CTest suites have the `headless` label:
 | displays | Display geometry, window targets and powered-off display filtering from fixtures |
 | renderer | Finishes, edge room, annotations and output dimensions |
 | theme | Color parsing, fixture themes and theme-change handling |
-| video-marks | Timed marks, cuts and rendered video export using FFmpeg fixtures |
+| video-marks | Timed marks, cuts, crop, camera composition and draft restoration using FFmpeg fixtures |
+| webcam | Bounded FFmpeg camera encoding, pause-aware timestamps, aspect ratio and encoder failures using fixture frames |
 
 Qt GUI tests in this group use CTest's offscreen setting. No compositor,
 session bus or GPU capture is required. The theme suite's installed Omarchy
@@ -30,7 +31,7 @@ hosted CI. No recognition assertions are removed from that suite.
 
 The `pipelines` suite has the `desktop` label because it exercises native
 Wayland capture and clipboard handoff. It is not run in hosted CI. Run all
-eight suites locally inside omabox:
+nine suites locally inside omabox:
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
@@ -48,6 +49,7 @@ omabox run --net isolated -- env QT_QPA_PLATFORM=offscreen ./build/ocr-tests \
 ```
 
 A passing CI run establishes build and fixture-test results. It does not
-establish real GPU recording, microphone quality or physical monitor behavior.
+establish real GPU recording, microphone quality, physical camera acquisition
+or physical monitor behavior.
 Those configurations do not require owner-run acceptance before release;
 reports from users guide targeted fixes.
