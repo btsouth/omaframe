@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
   mark("GUI application ready");
   app.setOrganizationName("Omaframe");
   app.setApplicationName("Omaframe");
-  app.setApplicationVersion("0.5.0");
+  app.setApplicationVersion("0.5.1");
   app.setDesktopFileName("io.github.btsouth.omaframe");
   app.setQuitOnLastWindowClosed(false);
   QThreadPool::globalInstance()->setMaxThreadCount(2);
@@ -344,14 +344,17 @@ int main(int argc, char **argv) {
   // started there), and a notification says where the file is. A failed copy
   // or export keeps the review open. Videos opened in the studio stay open.
   auto finishReview = [&] {
+    const bool original = window && window->property("videoUnchanged").toBool() &&
+                          !window->property("videoSavedCurrent").toBool();
     if (navigation.saving() || !quickRecordingReview || !window ||
-        !video.copyFile())
+        !video.copyFile(original))
       return;
-    const bool edited = !video.savedPath().isEmpty();
+    const bool edited = !original && !video.savedPath().isEmpty();
     quickRecordingReview = false;
     const QString folder =
-        QFileInfo(video.savedPath().isEmpty() ? video.source().toLocalFile()
-                                              : video.savedPath())
+        QFileInfo(original || video.savedPath().isEmpty()
+                      ? video.source().toLocalFile()
+                      : video.savedPath())
             .absolutePath()
             .replace(QDir::homePath(), "~");
     notify(edited ? "Edited video copied" : "Video copied", "Saved in " + folder,
@@ -691,6 +694,11 @@ int main(int argc, char **argv) {
                        if (window)
                          window->setProperty("closingApproved", true);
                        QTimer::singleShot(0, &app, &QCoreApplication::quit);
+                     } else if (cmd == "home") {
+                       studio.closeImage();
+                       if (window)
+                         window->setProperty("operationStatus", "");
+                       showStudioWindow();
                      } else if (cmd == "record")
                        studio.captureVideo();
                      else if (cmd == "repeat")

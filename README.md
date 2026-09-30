@@ -27,6 +27,9 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
+Version 0.5.1 improves capture controls, editing, export feedback and settings.
+See [the release notes](docs/release-notes-0.5.1.md) for the fixes.
+
 ## Take a screenshot
 
 Press Print Screen. Click a window, drag an area, or press F for the whole
@@ -53,9 +56,9 @@ Every mark stays movable and editable, and Esc takes you back to the finishes.
 ## Record your screen
 
 Press Alt+Print Screen, then click a window, drag an area, or press F. The Stop
-button always sits outside what you are recording, so it never ends up in the
-video. When you stop, trim the ends or cut out a slow part, then **Copy and
-close**. The video is on your clipboard.
+button sits outside what you are recording. If there is no room for it, use
+Alt+Print Screen or the Omarchy bar to stop. When you stop, trim the ends or
+cut out a slow part, then **Copy and close**. The video is on your clipboard.
 
 If something private showed up while you recorded, press G to blur it or R to
 cover it, and drag over it. It stays hidden for the whole clip. To point
@@ -78,8 +81,10 @@ Version 0.5.0 adds video crop, recovery drafts, camera overlay and GIF export:
   GIFs use up to 720 pixels at 15 fps and clips up to 30 seconds. They can be
   larger than MP4, especially with lots of movement. MP4 export stays available.
 
-Export saves a new MP4 with your edits. If a draft cannot be saved, Omaframe
-asks before leaving the editor. A failed export keeps your edits open.
+Export saves a new MP4 with your edits. **Copy video** copies an opened
+original or your current export for pasting into a chat or folder. If a draft
+cannot be saved, Omaframe asks before leaving the editor. A failed export
+keeps your edits open.
 
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 

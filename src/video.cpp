@@ -905,8 +905,9 @@ void Video::keepOriginal() {
 QString Video::savedName() const {
   return m_saved.isEmpty() ? QString() : QFileInfo(m_saved).fileName();
 }
-bool Video::copyFile() {
-  const QString path = m_saved.isEmpty() ? m_source.toLocalFile() : m_saved;
+bool Video::copyFile(bool original) {
+  const QString path =
+      original || m_saved.isEmpty() ? m_source.toLocalFile() : m_saved;
   return copyPath(path);
 }
 bool Video::copyGif() { return copyPath(m_gifSaved); }

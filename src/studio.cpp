@@ -381,6 +381,10 @@ void Studio::setOutputDirectory(const QUrl &url) {
     return;
   m_directory = url.toLocalFile();
   QSettings().setValue("outputDirectory", m_directory);
+  if (m_quickMode && m_quickState == "failed" && recoveryAction().isEmpty()) {
+    m_quickState = "choosing";
+    m_status = "Save folder changed. Choose a finish to try again.";
+  }
   emit changed();
 }
 void Studio::revealSaved() {
@@ -408,6 +412,7 @@ void Studio::refreshDrafts() {
         {"id", id},
         {"name", document.value("name").toString("Screenshot")},
         {"when", file.lastModified().toString("MMM d, h:mm AP")},
+        {"modified", file.lastModified().toMSecsSinceEpoch()},
         {"edits", document.value("edits").toArray().size()},
         {"image", QUrl::fromLocalFile(directory.filePath(id + ".png")).toString()},
         {"exported", QFileInfo::exists(document.value("savedPath").toString())}});

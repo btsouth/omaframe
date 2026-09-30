@@ -180,6 +180,10 @@ Canvas {
                 c.moveTo(18, 6.5);
                 c.quadraticCurveTo(22, 12, 18, 17.5);
             }
+        } else if (name === "back") {
+            line(20, 12, 4, 12);
+            line(4, 12, 10, 6);
+            line(4, 12, 10, 18);
         } else if (name === "close") {
             line(6, 6, 18, 18);
             line(18, 6, 6, 18);

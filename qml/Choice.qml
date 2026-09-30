@@ -10,6 +10,7 @@ ComboBox {
     rightPadding: 28
     implicitHeight: 36
     hoverEnabled: true
+    Keys.onEscapePressed: { if (popup.opened) popup.close(); else focus = false; }
     contentItem: Text {
         text: control.displayText
         color: control.enabled ? theme.text : theme.faint
@@ -36,6 +37,7 @@ ComboBox {
         width: control.width
         padding: 4
         implicitHeight: Math.min(list.contentHeight + 8, 320)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
         background: Rectangle {
             color: theme.alpha(theme.background, 1)
             radius: theme.radius
@@ -48,6 +50,9 @@ ComboBox {
             implicitHeight: contentHeight
             model: control.popup.visible ? control.delegateModel : null
             currentIndex: control.highlightedIndex
+            highlightMoveDuration: 0
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollIndicator.vertical: ScrollIndicator {}
         }
     }
     delegate: ItemDelegate {

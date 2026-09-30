@@ -544,6 +544,20 @@ private slots:
     QCOMPARE(QString::fromUtf8(paste.readAllStandardOutput()).trimmed(),
              QUrl::fromLocalFile(video.savedPath()).toString());
     QVERIFY(video.status().contains("on the clipboard"));
+    // Returning to the unchanged source must copy it, while the previous
+    // edited export remains available if the user redoes those edits.
+    const QString saved = video.savedPath();
+    QVERIFY(video.copyFile(true));
+    paste.start("wl-paste", {"--type", "text/uri-list"});
+    QVERIFY(paste.waitForFinished(3000));
+    QCOMPARE(QString::fromUtf8(paste.readAllStandardOutput()).trimmed(),
+             QUrl::fromLocalFile(source).toString());
+    QCOMPARE(video.savedPath(), saved);
+    QVERIFY(video.copyFile());
+    paste.start("wl-paste", {"--type", "text/uri-list"});
+    QVERIFY(paste.waitForFinished(3000));
+    QCOMPARE(QString::fromUtf8(paste.readAllStandardOutput()).trimmed(),
+             QUrl::fromLocalFile(saved).toString());
     QVERIFY(QFileInfo::exists(source));
   }
   void editableDraftSurvivesRestartAndCanBeRemoved() {
@@ -955,7 +969,13 @@ private slots:
     changed.cancelSelection();
     QSettings().remove("lastArea");
   }
+  void failedQuickSaveKeepsCaptureForRetry_data() {
+    QTest::addColumn<bool>("throughEditor");
+    QTest::newRow("chooser") << false;
+    QTest::newRow("editor") << true;
+  }
   void failedQuickSaveKeepsCaptureForRetry() {
+    QFETCH(bool, throughEditor);
     ImageStore store;
     Studio studio(&store);
     const auto blocked = temp.filePath("not-a-directory");
@@ -973,10 +993,17 @@ private slots:
     QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("failed"), 8000);
     QCOMPARE(dismissed.count(), 0);
     QVERIFY(studio.savedPath().isEmpty());
-    studio.openEditor();
-    QCOMPARE(studio.quickState(), QString("editing"));
+    if (throughEditor) {
+      studio.openEditor();
+      QCOMPARE(studio.quickState(), QString("editing"));
+    }
     studio.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("retry")));
-    studio.showFinishes();
+    if (throughEditor)
+      studio.showFinishes();
+    else {
+      QCOMPARE(studio.quickState(), QString("choosing"));
+      QVERIFY(studio.status().contains("Save folder changed"));
+    }
     studio.chooseFinish(8);
     QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 8000);
     QVERIFY(QFileInfo::exists(studio.savedPath()));

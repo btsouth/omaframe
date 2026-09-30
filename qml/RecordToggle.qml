@@ -10,6 +10,7 @@ CheckBox {
     padding: 0
     rightPadding: 6
     hoverEnabled: true
+    opacity: enabled ? 1 : 0.45
     font.family: theme.fontFamily
     font.pixelSize: 13
     indicator: Rectangle {
