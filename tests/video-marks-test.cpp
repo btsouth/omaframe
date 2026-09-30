@@ -1,6 +1,8 @@
 #include "marks.hpp"
 #include "video.hpp"
+#include <QDir>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -15,11 +17,13 @@ class VideoMarksTest : public QObject {
   QTemporaryDir temp;
   QString plain, pattern;
 
-  static bool makeClip(const QString &source, const QString &path) {
+  static bool makeClip(const QString &source, const QString &path,
+                       int duration = 4) {
     QProcess ffmpeg;
-    ffmpeg.start("ffmpeg", {"-hide_banner", "-loglevel", "error", "-f", "lavfi",
-                            "-i", source, "-t", "4", "-c:v", "libx264",
-                            "-preset", "ultrafast", "-pix_fmt", "yuv420p", path});
+    ffmpeg.start("ffmpeg",
+                 {"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                  source, "-t", QString::number(duration), "-c:v", "libx264",
+                  "-preset", "ultrafast", "-pix_fmt", "yuv420p", path});
     return ffmpeg.waitForFinished(20000) && ffmpeg.exitCode() == 0;
   }
   // The frame shown `seconds` into a file, as RGB.
@@ -109,11 +113,92 @@ private slots:
     QVERIFY(redacted(frame, 10, 10));
     const QColor face = frame.pixelColor(120, 90);
     QVERIFY(face.red() > 220 && face.green() < 30);
+    const QString mp4 = video.savedPath();
+    const QString summary = video.savedSummary();
+    QSignalSpy gifSaved(&video, &Video::gifExported);
+    QSignalSpy mp4Saved(&video, &Video::exported);
+    video.exportGif(0.5, 3.5, {QVariantMap{{"start", 1.0}, {"end", 2.0}}});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QCOMPARE(gifSaved.count(), 1);
+    QCOMPARE(mp4Saved.count(), 0);
+    QCOMPARE(video.savedPath(), mp4);
+    QCOMPARE(video.savedSummary(), summary);
+    const QImage gif = frameAt(video.gifPath(), 0.1, {160, 120});
+    QVERIFY(!gif.isNull() && redacted(gif, 10, 10));
+    QVERIFY(gif.pixelColor(120, 90).red() > 220);
+    QProcess probe;
+    probe.start("ffprobe", {"-v", "error", "-show_entries",
+                            "format=duration:stream=codec_name,codec_type",
+                            "-of", "json", video.gifPath()});
+    QVERIFY(probe.waitForFinished(5000) && probe.exitCode() == 0);
+    const auto info =
+        QJsonDocument::fromJson(probe.readAllStandardOutput()).object();
+    QCOMPARE(info.value("streams").toArray().size(), 1);
+    QCOMPARE(info.value("streams")
+                 .toArray()[0]
+                 .toObject()
+                 .value("codec_name")
+                 .toString(),
+             QString("gif"));
+    QVERIFY(qAbs(info.value("format")
+                     .toObject()
+                     .value("duration")
+                     .toString()
+                     .toDouble() -
+                 2.0) < 0.1);
+    QFile gifFile(video.gifPath());
+    QVERIFY(gifFile.open(QIODevice::ReadOnly));
+    QVERIFY(gifFile.readAll().contains(QByteArray("NETSCAPE2.0") +
+                                       QByteArray::fromHex("03010000")));
     video.setCameraLayout({{"visible", false}});
     video.exportEdited(0, 4, false, {});
     QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
     const QImage hidden = frameAt(video.savedPath(), 0.1, {160, 120});
     QVERIFY(!hidden.isNull() && white(hidden, 120, 90));
+  }
+  void gifWithoutEditsKeepsOriginalSizeAndCancellationKeepsMp4() {
+    Video video;
+    video.setOutputDirectory(
+        QUrl::fromLocalFile(temp.filePath("gif-unedited")));
+    video.open(QUrl::fromLocalFile(pattern));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    video.exportGif(0, 0.1, {});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QVERIFY2(!video.gifPath().isEmpty(), qPrintable(video.status()));
+    QVERIFY(!frameAt(video.gifPath(), 0, {320, 240}).isNull());
+    video.exportClip(0, 4, false);
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    const QString mp4 = video.savedPath();
+    QVERIFY(!mp4.isEmpty());
+    QSignalSpy failed(&video, &Video::exportFailed);
+    QSignalSpy gifSaved(&video, &Video::gifExported);
+    video.exportGif(0, 4, {});
+    video.cancel();
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 12000);
+    QCOMPARE(gifSaved.count(), 0);
+    QCOMPARE(video.savedPath(), mp4);
+    QVERIFY(QDir(temp.filePath("gif-unedited"))
+                .entryList({"*.part.gif"}, QDir::Files | QDir::Hidden)
+                .isEmpty());
+  }
+  void gifSizeAndLengthStaySuitableForSharing() {
+    const QString source = temp.filePath("portrait.mp4");
+    QVERIFY(makeClip("color=c=red:size=800x1200:rate=1", source, 31));
+    Video video;
+    video.setOutputDirectory(
+        QUrl::fromLocalFile(temp.filePath("gif-portrait")));
+    video.open(QUrl::fromLocalFile(source));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QSignalSpy failed(&video, &Video::exportFailed);
+    video.exportGif(0, 31, {});
+    QCOMPARE(failed.count(), 1);
+    QVERIFY(!video.busy() && video.gifPath().isEmpty());
+    QVERIFY(video.status().contains("30 seconds"));
+    video.exportGif(0, 31, {QVariantMap{{"start", 1.0}, {"end", 31.0}}});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QVERIFY2(!video.gifPath().isEmpty(), qPrintable(video.status()));
+    const QImage frame = frameAt(video.gifPath(), 0, {480, 720});
+    QVERIFY(!frame.isNull() && frame.pixelColor(240, 360).red() > 220);
   }
   void draftRestoresCropTimesAndPointingMarks() {
     Video video;

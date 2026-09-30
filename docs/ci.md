@@ -15,7 +15,7 @@ Seven CTest suites have the `headless` label:
 | displays | Display geometry, window targets and powered-off display filtering from fixtures |
 | renderer | Finishes, edge room, annotations and output dimensions |
 | theme | Color parsing, fixture themes and theme-change handling |
-| video-marks | Timed marks, cuts, crop, camera composition and draft restoration using FFmpeg fixtures |
+| video-marks | Timed marks, cuts, crop, camera composition, draft restoration and looping GIF export using FFmpeg fixtures |
 | webcam | Bounded FFmpeg camera encoding, pause-aware timestamps, aspect ratio and encoder failures using fixture frames |
 
 Qt GUI tests in this group use CTest's offscreen setting. No compositor,

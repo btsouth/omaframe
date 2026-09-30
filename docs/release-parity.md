@@ -54,12 +54,16 @@ physical microphone quality or GPU-specific capture timing.
 
 ## Possible next work
 
-Source builds after 0.4.0 add manual video crop, automatic recovery drafts
-and optional webcam overlay. Crop applies to the whole clip. Drafts retain
-edits and reference the original video, which must stay in place. Camera is
+Source builds after 0.4.0 add manual video crop, automatic recovery drafts,
+optional webcam overlay and GIF export. Crop applies to the whole clip.
+Drafts retain edits and reference the original video, which must stay in place. Camera is
 off by default and records a separate track using recorded time, so pause,
 trim and cuts apply to both tracks. Review lets you move, resize or hide the
 camera before exporting a new MP4.
+
+GIF export makes a silent loop with the same edits, at up to 720 pixels and
+15 fps for clips up to 30 seconds. It keeps the editor open and leaves an
+existing MP4 export available. Copy or show the GIF after saving.
 
 Animated zoom, automatic focus, captions and clip assembly remain backlog.
 The current published release is still 0.4.0.
