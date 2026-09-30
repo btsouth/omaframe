@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -81,6 +82,35 @@ class VideoMarksTest : public QObject {
   }
 
 private slots:
+  void styledMarksMatchExportedVideo() {
+    const auto cleanup = qScopeGuard([] { QSettings().remove("tools"); });
+    QSettings().remove("tools");
+    Video video;
+    video.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("styled-marks")));
+    video.open(QUrl::fromLocalFile(plain));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    auto *marks = video.marks();
+    marks->setToolStyle("box", {{"filled", true}, {"background", "#ff0000"}, {"opacity", .5}});
+    marks->edit("box", .1, .5, .5, .9);
+    marks->setToolStyle("arrow", {{"size", 2.}, {"arrowHead", "filled"}, {"outline", true}});
+    marks->edit("arrow", .1, .2, .8, .2);
+    marks->setToolStyle("step", {{"numberColor", "#151a20"}});
+    marks->edit("step", .7, .7, .7, .7);
+    video.exportEdited(0, 1, false, {});
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QVERIFY2(!video.savedPath().isEmpty(), qPrintable(video.status()));
+    const QImage frame = frameAt(video.savedPath(), .1, {320, 240});
+    QVERIFY(!frame.isNull());
+    const auto fill = frame.pixelColor(90, 170);
+    QVERIFY(fill.red() > 235 && qAbs(fill.green()-128) < 18 && qAbs(fill.blue()-128) < 18);
+    const auto head = frame.pixelColor(242, 54);
+    QVERIFY(head.red() > 190 && head.green() < 150 && head.blue() < 120);
+    int darkNumber = 0;
+    for (int y = 160; y < 176; ++y)
+      for (int x = 216; x < 232; ++x)
+        darkNumber += qGray(frame.pixel(x,y)) < 65;
+    QVERIFY(darkNumber > 8);
+  }
   void cropAndCameraAreComposedBeforeCuts() {
     const QString source = temp.filePath("screen-camera.mp4");
     const QString camera = temp.filePath("screen-camera-webcam.mp4");

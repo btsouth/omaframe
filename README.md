@@ -27,8 +27,8 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.5.1 improves capture controls, editing, export feedback and settings.
-See [the release notes](docs/release-notes-0.5.1.md) for the fixes.
+Version 0.6.0 adds annotation styles, easier resizing and fixes for capture
+hints, recording review and settings. See [the release notes](docs/release-notes-0.6.0.md).
 
 ## Take a screenshot
 
@@ -49,7 +49,18 @@ screenshot instead.
 
 Press E before you pick a finish. Press T and click to type a label right on
 the image, then add arrows, boxes, highlights, blur or redaction, or crop.
-Every mark stays movable and editable, and Esc takes you back to the finishes.
+Drag marks to move them, or hold Shift to move straight. Side handles resize
+width or height; text wraps without changing its font size. Drag text corners
+to scale the font. Arrow keys move a selected mark one pixel, or ten with Shift.
+Crop frames and pen strokes have resize handles too. Use the contextual
+**Style** button to change a tool's appearance. Labels offer text and background colors, opacity,
+size and alignment. Arrows offer open or filled heads, color, thickness and a
+contrast outline; lines and pen strokes offer the same color, thickness and
+outline controls. Boxes and ovals can have a colored fill with opacity.
+Highlights offer color and opacity, steps offer circle and number colors and
+size, and blur offers strength. Choices are remembered for new marks of each
+type. Video annotations use the same controls. Click outside a style panel
+to close it. Esc takes you back to the finishes.
 
 <p align="center"><img src="docs/media/edit.gif" width="800" alt="Typing a label on a screenshot, drawing an arrow and blurring a list"></p>
 

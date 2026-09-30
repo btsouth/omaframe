@@ -1,4 +1,5 @@
 #include "capture-session.hpp"
+#include "edit-json.hpp"
 #include "capture.hpp"
 #include "studio.hpp"
 #include "video.hpp"
@@ -15,6 +16,7 @@
 #include <QScreen>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -203,6 +205,107 @@ private slots:
     studio.closeImage();
     QVERIFY(!studio.hasImage());
     QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
+  }
+  void sideHandlesKeepTextReadableAndPersistBox() {
+    QImage source(1000, 800, QImage::Format_ARGB32_Premultiplied);
+    source.fill(Qt::white);
+    MarkDocument doc;
+    doc.reset(source);
+    doc.edit("text", .1, .1, .1, .1, "A clear label with several words to wrap");
+    const auto original = doc.edits().first();
+    const int font = Frame::textPixelSize(original, source);
+    doc.resizeSelected(5, .4, .9); // Right edge changes width, not font or top.
+    const auto narrow = doc.edits().first();
+    QCOMPARE(Frame::textPixelSize(narrow, source), font);
+    QCOMPARE(narrow.from, original.from);
+    QVERIFY(qAbs(narrow.textBox.width() - .3) < 1e-8);
+    const auto narrowBounds = Frame::annotationBounds(narrow, source);
+    QVERIFY(narrowBounds.height() > Frame::annotationBounds(original, source).height());
+    doc.resizeSelected(6, .9, .7);
+    QCOMPARE(doc.edits().first().textBox.width(), narrow.textBox.width());
+    QCOMPARE(Frame::textPixelSize(doc.edits().first(), source), font);
+    QVERIFY(qAbs(Frame::annotationBounds(doc.edits().first(), source).height() - .6) < 1e-8);
+    const auto saved = Frame::editFromJson(Frame::editToJson(doc.edits().first()));
+    QVERIFY(saved.has_value());
+    QCOMPARE(saved->textBox, doc.edits().first().textBox);
+    QCOMPARE(Frame::applyEdits(source, {*saved}), Frame::applyEdits(source, doc.edits()));
+    // Older drafts retain automatic sizing.
+    auto legacy = Frame::editToJson(original);
+    legacy.remove("textBoxWidth"); legacy.remove("textBoxHeight");
+    QCOMPARE(Frame::editFromJson(legacy)->textBox, QSizeF(0, 0));
+    doc.resizeSelected(4, .5, .2);
+    const auto raised = Frame::annotationBounds(doc.edits().first(), source);
+    QVERIFY(qAbs(raised.bottom() - .7) < 1e-8);
+    doc.resizeSelected(7, .05, .5);
+    const auto left = Frame::annotationBounds(doc.edits().first(), source);
+    QVERIFY(qAbs(left.right() - .4) < 1e-8);
+    MarkDocument longLabel;
+    longLabel.reset(source);
+    longLabel.edit("text", .1, .1, .1, .1, QString("Readable words ").repeated(16));
+    const int longFont = Frame::textPixelSize(longLabel.edits().first(), source);
+    longLabel.resizeSelected(5, .12, .5);
+    QCOMPARE(Frame::textPixelSize(longLabel.edits().first(), source), longFont);
+    QVERIFY(Frame::annotationBounds(longLabel.edits().first(), source).height() <= 1.);
+    // A crop maps the side handle back to source coordinates.
+    doc.edit("crop", 0, 0, .8, .8);
+    doc.select(0);
+    doc.resizeSelected(5, .75, .5);
+    QVERIFY(qAbs(Frame::annotationBounds(doc.edits().first(), source).right() - .6) < 1e-8);
+  }
+  void allAreaToolsAndPenResizeFromSides() {
+    QImage source(1000, 800, QImage::Format_ARGB32_Premultiplied);
+    for (const QString type : {"box", "ellipse", "highlight", "redact", "blur", "pen"}) {
+      MarkDocument doc;
+      doc.reset(source);
+      if (type == "pen")
+        doc.addStroke({QVariantMap{{"x", .2}, {"y", .2}}, QVariantMap{{"x", .4}, {"y", .4}}});
+      else doc.edit(type, .2, .2, .4, .4);
+      doc.resizeSelected(5, .7, .9);
+      auto bounds = Frame::annotationBounds(doc.edits().first(), source);
+      QVERIFY(qAbs(bounds.right() - .7) < 1e-8);
+      QVERIFY(qAbs(bounds.top() - .2) < 1e-8);
+      QVERIFY(qAbs(bounds.bottom() - .4) < 1e-8);
+      doc.resizeSelected(4, .9, .1);
+      doc.resizeSelected(6, .9, .6);
+      doc.resizeSelected(7, .1, .9);
+      bounds = Frame::annotationBounds(doc.edits().first(), source);
+      QCOMPARE(bounds, QRectF(.1, .1, .6, .5));
+    }
+    MarkDocument doc;
+    doc.reset(source);
+    doc.edit("step", .5, .5, .5, .5);
+    doc.resizeSelected(5, .6, .5);
+    const auto step = Frame::annotationBounds(doc.edits().first(), source);
+    QCOMPARE(step.center(), QPointF(.5, .5));
+    QVERIFY(qAbs(step.width() * 1000 - step.height() * 800) < 1e-6);
+  }
+  void dragPreviewHasOneUndoAndCanCancel() {
+    QImage source(1000, 800, QImage::Format_ARGB32_Premultiplied);
+    MarkDocument doc;
+    doc.reset(source);
+    doc.edit("box", .1, .1, .3, .3);
+    const auto original = doc.edits();
+    QSignalSpy edited(&doc, &MarkDocument::edited);
+    doc.beginTransform();
+    doc.previewTransform(-1, .1, .2);
+    doc.previewTransform(-1, .2, .3);
+    QVERIFY(qAbs(doc.edits().first().from.x() - .3) < 1e-8);
+    QVERIFY(!edited.last().first().toBool());
+    doc.previewTransform(-1, 0, 0);
+    QVERIFY(doc.edits() == original);
+    doc.previewTransform(5, .8, .1);
+    doc.endTransform(false);
+    QVERIFY(doc.edits() == original);
+    QVERIFY(!doc.canRedo());
+    doc.beginTransform();
+    doc.previewTransform(5, .7, .1);
+    doc.previewTransform(5, .8, .1);
+    doc.endTransform(true);
+    QVERIFY(edited.last().first().toBool());
+    doc.undo();
+    QVERIFY(doc.edits() == original);
+    doc.redo();
+    QVERIFY(qAbs(doc.edits().first().to.x() - .8) < 1e-8);
   }
   void annotationsCanMoveResizeDeleteAndReframe() {
     ImageStore store;
@@ -1019,6 +1122,139 @@ private slots:
     QVERIFY(studio.savedPath().isEmpty());
     studio.chooseFinish(0);
     QVERIFY(!studio.busy());
+  }
+  void toolStylesPersistUndoAndKeepRedactionsOpaque() {
+    const auto cleanup = qScopeGuard([] { QSettings().remove("tools"); });
+    QSettings().remove("tools");
+    QImage source(1000, 800, QImage::Format_ARGB32_Premultiplied);
+    source.fill(Qt::blue);
+    MarkDocument doc;
+    doc.reset(source);
+    QSignalSpy edited(&doc, &MarkDocument::edited);
+    doc.setToolStyle("arrow", {{"color", "#ffffff"}, {"size", 2.},
+                                {"outline", true}, {"arrowHead", "filled"}});
+    QVERIFY(!doc.canUndo());
+    QCOMPARE(edited.count(), 0);
+    doc.edit("arrow", .1, .1, .7, .3);
+    const auto arrow = doc.edits().first();
+    QVERIFY(arrow.outline);
+    QCOMPARE(arrow.arrowHead, QString("filled"));
+    const auto signature = doc.annotations();
+    doc.setToolStyle("arrow", {{"outline", false}, {"arrowHead", "open"}});
+    QVERIFY(doc.annotations() != signature);
+    doc.undo();
+    QVERIFY(doc.edits().first() == arrow);
+    doc.redo();
+    QVERIFY(!doc.edits().first().outline);
+    const auto unchanged = doc.edits();
+    doc.setToolStyle("arrow", {{"color", "#e75439"}, {"size", "invalid"}});
+    QVERIFY(doc.edits() == unchanged);
+    doc.setToolStyle("arrow", {{"arrowHead", "invalid"}});
+    QVERIFY(doc.edits() == unchanged);
+    doc.clearSelection();
+    doc.setToolStyle("box", {{"filled", true}, {"background", "#ff0000"}, {"opacity", .5}});
+    doc.edit("box", .2, .2, .8, .8);
+    const auto box = doc.edits().last();
+    const QColor mixed = Frame::applyEdits(source, {box}).pixelColor(500, 400);
+    QVERIFY(qAbs(mixed.red()-128) <= 1 && qAbs(mixed.blue()-128) <= 1);
+    doc.setToolStyle("box", {{"opacity", 0.}});
+    QCOMPARE(Frame::applyEdits(source, {doc.edits().last()}).pixelColor(500, 400), QColor(Qt::blue));
+    doc.clearSelection();
+    doc.setToolStyle("highlight", {{"color", "#00ff00"}, {"opacity", .5}});
+    doc.edit("highlight", .2, .2, .8, .8);
+    const QColor highlighted = Frame::applyEdits(source, {doc.edits().last()}).pixelColor(500, 400);
+    QVERIFY(qAbs(highlighted.green()-128) <= 1 && qAbs(highlighted.blue()-128) <= 1);
+    doc.setToolStyle("step", {{"numberColor", "#151a20"}});
+    doc.edit("step", .5, .5, .5, .5);
+    QCOMPARE(doc.edits().last().numberColor, QColor("#151a20"));
+    doc.setToolStyle("pen", {{"color", "#ffffff"}, {"outline", true}});
+    doc.addStroke({QVariantMap{{"x", .1}, {"y", .1}}, QVariantMap{{"x", .8}, {"y", .8}}});
+    QVERIFY(doc.edits().last().outline);
+    QCOMPARE(doc.edits().last().color, QColor(Qt::white));
+    doc.setToolStyle("blur", {{"size", 3.}});
+    doc.edit("blur", .2, .2, .8, .8);
+    QCOMPARE(doc.edits().last().size, 3.);
+    doc.setToolStyle("ellipse", {{"filled", true}, {"opacity", .25}});
+    doc.edit("ellipse", .2, .2, .8, .8);
+    for (const auto &edit : doc.edits()) {
+      const auto restored = Frame::editFromJson(Frame::editToJson(edit));
+      QVERIFY(restored && *restored == edit);
+    }
+    QSettings().sync();
+    MarkDocument reopened;
+    reopened.reset(source);
+    reopened.edit("box", .2, .2, .8, .8);
+    QVERIFY(reopened.edits().first().filled);
+    QCOMPARE(reopened.edits().first().opacity, 0.);
+    reopened.edit("step", .5, .5, .5, .5);
+    QCOMPARE(reopened.edits().last().numberColor, QColor("#151a20"));
+    reopened.edit("redact", .2, .2, .8, .8);
+    const auto redact = reopened.edits().last();
+    reopened.setToolStyle("redact", {{"opacity", 0.}});
+    QVERIFY(reopened.edits().last() == redact);
+    QCOMPARE(Frame::applyEdits(source, {redact}).pixelColor(500, 400), QColor("#151a20"));
+    auto legacy = Frame::editToJson(Frame::Edit{"highlight", {.2,.2}, {.8,.8}});
+    legacy.remove("opacity");
+    const auto oldHighlight = Frame::editFromJson(legacy);
+    QVERIFY(oldHighlight);
+    QCOMPARE(oldHighlight->color, QColor("#eab841"));
+  }
+  void labelAppearanceIsSharedRememberedAndUndoable() {
+    const auto cleanup = qScopeGuard([] { QSettings().remove("labels"); });
+    QSettings().remove("labels");
+    QImage source(1000, 800, QImage::Format_ARGB32_Premultiplied);
+    source.fill(QColor("#0000ff"));
+    MarkDocument doc;
+    doc.reset(source);
+    QSignalSpy edited(&doc, &MarkDocument::edited);
+    doc.setLabelStyle({{"color", "#eab841"}, {"background", "#ff0000"},
+                       {"backgroundOpacity", .5}, {"fontPx", 36}, {"textAlign", "left"}});
+    QCOMPARE(edited.count(), 0);
+    QVERIFY(!doc.canUndo());
+    doc.edit("text", .2, .2, .2, .2, "My label");
+    const auto original = doc.edits().first();
+    QCOMPARE(original.color, QColor("#eab841"));
+    QCOMPARE(original.background, QColor("#ff0000"));
+    QCOMPARE(original.backgroundOpacity, .5);
+    QCOMPARE(Frame::textPixelSize(original, source), 36);
+    QCOMPARE(original.textAlign, QString("left"));
+    const auto bounds = Frame::annotationBounds(original, source);
+    const auto image = Frame::applyEdits(source, {original});
+    const auto pixel = image.pixelColor(qRound(bounds.center().x()*1000), qRound(bounds.top()*800)+2);
+    QVERIFY(qAbs(pixel.red()-128) <= 1);
+    QVERIFY(qAbs(pixel.blue()-128) <= 1);
+    const auto signature = doc.annotations();
+    doc.setLabelStyle({{"color", "#ffffff"}, {"backgroundOpacity", 0.},
+                       {"textStyle", "shadow"}, {"textAlign", "right"}});
+    const auto styled = doc.edits().first();
+    QCOMPARE(styled.color, QColor(Qt::white));
+    QCOMPARE(styled.backgroundOpacity, 0.);
+    QCOMPARE(styled.textStyle, QString("shadow"));
+    QVERIFY(doc.annotations() != signature);
+    // All fields of the single choice undo together. Preferences remain deliberate choices.
+    doc.undo();
+    QVERIFY(doc.edits().first() == original);
+    doc.redo();
+    QVERIFY(doc.edits().first() == styled);
+    MarkDocument reopened;
+    reopened.reset(source);
+    reopened.edit("text", .1, .1, .1, .1, "Remember me");
+    QCOMPARE(reopened.edits().first().color, styled.color);
+    QCOMPARE(reopened.edits().first().backgroundOpacity, 0.);
+    QCOMPARE(reopened.edits().first().textStyle, styled.textStyle);
+    const auto roundTrip = Frame::editFromJson(Frame::editToJson(styled));
+    QVERIFY(roundTrip.has_value());
+    QVERIFY(*roundTrip == styled);
+    doc.setLabelStyle({{"color", "invalid"}, {"backgroundOpacity", .3}});
+    QVERIFY(doc.edits().first() == styled);
+    doc.setLabelStyle({{"backgroundOpacity", "invalid"}});
+    QVERIFY(doc.edits().first() == styled);
+    doc.resetLabelStyle();
+    QCOMPARE(doc.edits().first().color, QColor(Qt::white));
+    QCOMPARE(doc.edits().first().backgroundOpacity, 1.);
+    QCOMPARE(doc.edits().first().textStyle, QString("box"));
+    doc.clearSelection();
+    QCOMPARE(doc.labelDefaults().value("fontPx").toInt(), doc.newTextPixels());
   }
   void nativeCaptureHasDisplayPixels() {
     const QString name = QGuiApplication::primaryScreen()->name();

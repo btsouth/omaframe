@@ -97,6 +97,10 @@ void Video::recordSavedSignature(const QString &signature) {
   emit changed();
 }
 bool Video::saveDraftNow() {
+  if (m_marks.transforming()) {
+    m_draftTimer.start();
+    return false;
+  }
   m_draftTimer.stop();
   if (m_draftDeleted)
     return true;

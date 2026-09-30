@@ -29,11 +29,12 @@ struct Placement {
 /** Where the timer and Stop control can sit during a recording without
  *  appearing in it. Beside a region on its own display when there is room,
  *  otherwise on the nearest other display, at the edge that faces the
- *  recording. Returns an empty placement when no position is outside the
- *  capture: Omaframe never puts its control inside the video. */
+ *  recording. Includes room for hints below the buttons. Returns an empty
+ *  placement when no position is outside the capture: Omaframe never puts
+ *  its control inside the video. */
 Placement placeStop(const QList<Display> &displays,
                     const QString &capturedDisplay, const QRect &capture,
-                    QSize size = {232, 48});
+                    QSize size = {232, 96});
 /** A countdown shown before capture starts, when the control has nowhere
  *  to go during the recording. It is hidden before the first frame. */
 Placement placeCountdown(const QList<Display> &displays,

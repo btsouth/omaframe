@@ -1,17 +1,17 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.5.1**. This tracks shipped behavior and possible future
+Current release: **0.6.0**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.5.1 | Future work |
+| Workflow | Omaframe 0.6.0 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
 | Capture and finish | Window, area or display; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
-| Screenshot editing | Movable and resizable marks, inline multiline labels, crop, blur/redaction, layers, undo/redo and editable drafts | Pinning, scrolling capture, curved arrows |
+| Screenshot editing | Movable marks, side and corner resize handles, inline multiline labels, contextual styles, crop, blur/redaction, layers, undo/redo and editable drafts | Pinning, scrolling capture, curved arrows |
 | Screenshot text | Copy text with T; hide possible secrets with H in the picker or Shift+H in the editor; optional local Tesseract | Selectable OCR regions |
 | Record and stop | Display or region, computer sound and selected microphone, countdown, pause/resume, optional webcam overlay; controls outside the capture or shortcut/bar stop when no safe placement exists | Window-follow capture |
 | Video review | Playback, trim and middle cuts, sound on/off, timed marks, crop, camera placement, recovery drafts, undo/redo, copy/save MP4 and short looping GIFs | Animated zoom and speed sections |
@@ -75,11 +75,26 @@ can return to the start screen, and Copy video selects the original after
 undoing back to an unchanged clip. Failed screenshot saves can retry with a
 new folder without losing the capture.
 
+## Since 0.5.1
+
+Version 0.6.0 adds per-tool styles with remembered choices, text and shape
+colors, opacity, arrowheads and contrast outlines. Side handles resize one
+dimension at a time, while text corners scale the font. Crop and pen editing
+use the same movement and resize controls. Capture hints no longer block
+buttons, settings borders fit correctly and recording review closes reliably
+after annotation edits.
+
 ## Possible next work
 
 Animated zoom, automatic focus, captions and clip assembly remain backlog.
 
 ## Validation notes
+
+For 0.6.0, all nine suites passed in an isolated desktop. Annotation styles
+were checked for persistence, undo, rendering and exported video appearance.
+Isolated UI checks covered contextual controls, custom colors, settings,
+small windows and closing with Super+W. Physical camera, audio and
+GPU-specific recording behavior were not retested.
 
 For 0.5.1, all nine suites passed in an isolated desktop, with focused
 clipboard and failed-save regressions rerun after the fixes. UI checks

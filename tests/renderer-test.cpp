@@ -6,6 +6,24 @@
 class RendererTest : public QObject {
   Q_OBJECT
 private slots:
+  void contrastOutlinesKeepLightStrokesVisible() {
+    QImage white(600, 400, QImage::Format_ARGB32_Premultiplied);
+    white.fill(Qt::white);
+    for (const auto *type : {"line", "pen", "arrow"}) {
+      Frame::Edit edit{type, {.2, .5}, {.8, .5}};
+      edit.color = Qt::white;
+      edit.size = 2;
+      if (edit.type == "pen") edit.points = {{.2,.5}, {.8,.5}};
+      QCOMPARE(Frame::applyEdits(white, {edit}), white);
+      edit.outline = true;
+      const QImage outlined = Frame::applyEdits(white, {edit});
+      int dark = 0;
+      for (int y = 180; y < 220; ++y)
+        for (int x = 120; x < 480; ++x)
+          dark += qGray(outlined.pixel(x,y)) < 100;
+      QVERIFY2(dark > 200, type);
+    }
+  }
   void adaptiveKeepsDominantHue_data() {
     QTest::addColumn<QColor>("color");
     QTest::newRow("bright-green") << QColor("#00ff00");

@@ -24,6 +24,14 @@ struct Edit {
   double end = -1;
   /** The number a step shows. 0 counts the steps in the list, in order. */
   int number = 0;
+  /** Optional text box dimensions, as fractions of the source. Zero sizes to content. */
+  QSizeF textBox = {0, 0};
+  bool outline = false;
+  QString arrowHead = "open";
+  bool filled = false;
+  double opacity = 95. / 255.;
+  QColor numberColor = Qt::white;
+  bool operator==(const Edit &) const = default;
 };
 struct Options {
   int style = 0;
