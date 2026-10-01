@@ -1313,6 +1313,14 @@ ManualCapture::Outcome ManualCapture::feed(const QImage &input) {
       est = bounded;
   }
 
+  // Manual capture has no lookahead to verify a merely plausible peak.
+  // Near-periodic content can give a large out-of-overlap jump a strong
+  // relative confidence, so require low absolute error before keeping it.
+  if ((est.motion.kind == MotionKind::Forward ||
+       est.motion.kind == MotionKind::Reverse) &&
+      est.error > kAmbiguousMaxError)
+    est.motion = {MotionKind::Unmatchable, 0};
+
   // Motion since the previous grab tells "at rest but looks different" (a
   // video or hover UI changed in place) from real scrolling when the
   // reference cannot be matched.
