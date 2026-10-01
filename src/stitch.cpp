@@ -268,13 +268,13 @@ double scoreShift(const GrayView &prev, const GrayView &cur, Axis axis,
   const long magnitude = std::abs(shift);
   if (magnitude > maxShift || maxShift >= axisLen)
     return kInf;
-  const int matchExtent = axisLen - maxShift;
-  const long available = axisLen - magnitude;
-  if (available < matchExtent || matchExtent == 0)
+  // Use all overlapping content. A fixed central comparison window can
+  // land entirely in a blank gap and give many wrong shifts a zero score.
+  const int matchExtent = axisLen - static_cast<int>(magnitude);
+  if (matchExtent <= 0)
     return kInf;
-  const long centered = (available - matchExtent) / 2;
-  const long prevStart = shift >= 0 ? centered + magnitude : centered;
-  const long curStart = shift >= 0 ? centered : centered + magnitude;
+  const long prevStart = shift >= 0 ? magnitude : 0;
+  const long curStart = shift >= 0 ? 0 : magnitude;
   const int margin = crossMargin(crossLen);
   const int crossStart = margin;
   const int crossEnd = crossLen - margin;
@@ -318,13 +318,13 @@ double scoreShiftReference(const GrayView &prev, const GrayView &cur, Axis axis,
   const long magnitude = std::abs(shift);
   if (magnitude > maxShift || maxShift >= axisLen)
     return kInf;
-  const int matchExtent = axisLen - maxShift;
-  const long available = axisLen - magnitude;
-  if (available < matchExtent || matchExtent == 0)
+  // Use all overlapping content. A fixed central comparison window can
+  // land entirely in a blank gap and give many wrong shifts a zero score.
+  const int matchExtent = axisLen - static_cast<int>(magnitude);
+  if (matchExtent <= 0)
     return kInf;
-  const long centered = (available - matchExtent) / 2;
-  const long prevStart = shift >= 0 ? centered + magnitude : centered;
-  const long curStart = shift >= 0 ? centered : centered + magnitude;
+  const long prevStart = shift >= 0 ? magnitude : 0;
+  const long curStart = shift >= 0 ? 0 : magnitude;
   const int margin = crossMargin(crossLen);
   const int aStep = std::max(1, axisStep);
   const int cStep = std::max(1, crossStep);

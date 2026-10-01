@@ -118,8 +118,8 @@ public:
 
 // --- Correlation core (exposed for the smoke's bit-exact scoring check) -----
 /// Mean absolute grayscale error for aligning `cur` onto `prev` at `shift`
-/// along `axis`, sampling every `axisStep`/`crossStep` pixel over a fixed
-/// window `axisLen - maxShift`. +inf on any geometry guard.
+/// along `axis`, sampling every `axisStep`/`crossStep` pixel over all
+/// overlapping content. +inf on any geometry guard.
 [[nodiscard]] double scoreShift(const GrayView &prev, const GrayView &cur,
                                 Axis axis, long shift, int maxShift,
                                 int axisStep, int crossStep);
