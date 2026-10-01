@@ -370,7 +370,11 @@ QImage Session::capture(QString &error) {
       break;
     }
     const int step = probe ? stitch::kProbeNotches : notches;
-    if (!m_desktop.scroll(step * direction)) {
+    // Mapping the control can steal pointer focus without moving the mouse.
+    // With non-exclusive keyboard focus, a tiny park motion restores the
+    // page underneath before each wheel event.
+    if (!m_desktop.park(m_plan.anchor) ||
+        !m_desktop.scroll(step * direction)) {
       toManual("Scroll the page to capture it.");
       break;
     }

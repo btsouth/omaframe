@@ -45,6 +45,24 @@ and each one gets a redaction you can still move or undo in the editor. It can
 miss things, so look before you share. Press T to copy the text in the
 screenshot instead.
 
+## Capture a scrolling page
+
+Press S in the screenshot selector, or run `omaframe --scroll`. Click a browser
+window or drag an area that scrolls. Omaframe scrolls and stitches the page until
+it reaches the end. Move the pointer to take over and scroll by hand if needed.
+
+Choose Done, Enter or Esc to keep what has been captured. Cancel discards it.
+For keyboard controls, point at the progress panel to focus it. The panel sits
+outside the capture when there is room; otherwise its rows come from the first
+frame, before the panel appeared. Fixed headers and footers are kept once.
+
+The result uses the same finishes and editor as an ordinary screenshot. Long
+pages fit to width; use the wheel or scrollbar to reach the bottom while editing.
+Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If an
+alignment cannot be verified, Omaframe switches to manual scrolling instead of
+joining guessed rows. Pages with large animations, overlays or replaced content
+may still need a smaller capture area or manual scrolling.
+
 ## Mark it up
 
 Press E before you pick a finish. Press T and click to type a label right on

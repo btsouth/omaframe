@@ -90,7 +90,7 @@ constexpr qint64 kThumbnailPixels = 600000;
 /// allocation; this only leaves the decoder room to work.
 constexpr int kImageAllocationLimitMb = 512;
 /// An image this much taller than wide is shown fit to width and scrolled.
-constexpr int kTallImageRatio = 3;
+constexpr int kTallImageRatio = 2;
 } // namespace
 
 namespace ScrollUi {
@@ -1165,7 +1165,9 @@ void Studio::captureScroll(int monitor) {
 void Studio::finishScrollSelection(const QString &monitor, double x1, double y1,
                                    double x2, double y2, double clickX,
                                    double clickY, bool windowTarget) {
-  if (m_quickState != "selecting" || m_busy)
+  // The selector intentionally owns m_busy until a selection completes.
+  // Its state, not the general busy flag, authorizes this transition.
+  if (m_quickState != "selecting")
     return;
   QScreen *screen = nullptr;
   for (auto *candidate : QGuiApplication::screens())

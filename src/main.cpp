@@ -570,8 +570,10 @@ int main(int argc, char **argv) {
     layer->setScope("omaframe-scroll-control");
     layer->setLayer(LayerShellQt::Window::LayerOverlay);
     layer->setExclusiveZone(-1);
+    // Exclusive keyboard layers also capture pointer events on Hyprland,
+    // which would swallow the page's wheel events after the first frame.
     layer->setKeyboardInteractivity(
-        LayerShellQt::Window::KeyboardInteractivityExclusive);
+        LayerShellQt::Window::KeyboardInteractivityOnDemand);
     layer->setAnchors(LayerShellQt::Window::Anchors::fromInt(
         LayerShellQt::Window::AnchorTop | LayerShellQt::Window::AnchorLeft));
     const QPoint origin = bounds.topLeft() - screen->geometry().topLeft();

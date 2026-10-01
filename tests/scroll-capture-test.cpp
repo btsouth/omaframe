@@ -102,6 +102,7 @@ struct FakeDisplay {
   int wheel = 1;
   bool ignoresWheel = false;
   bool canPoint = true;
+  bool losesWheelFocus = false, wheelFocused = false;
   /// A spinner in the toolbar that never holds still.
   bool spinner = false;
   int spin = 0;
@@ -218,12 +219,15 @@ struct FakeDisplay {
     d.openPointer = [this] { return canPoint; };
     d.park = [this](QPointF at) {
       parked = at;
+      wheelFocused = true;
       return true;
     };
     d.scroll = [this](int notches) {
       ++scrolls;
-      if (!ignoresWheel)
+      if (!ignoresWheel && (!losesWheelFocus || wheelFocused))
         target = std::clamp(target + notches * perNotch * wheel, 0.0, maxScroll());
+      if (losesWheelFocus)
+        wheelFocused = false; // mapping/updating a layer can steal pointer focus
       return true;
     };
     d.pointerMoved = [this](QPointF) {
@@ -333,6 +337,17 @@ private slots:
     const QPointF drawn = Scrolling::anchorFor(area, false, 0.1, {1920, 1080});
     QCOMPARE(drawn.x(), area.center().x());
     QVERIFY(drawn.y() > area.top() + 0.1);
+  }
+
+  void restoresWheelFocusAfterControlUpdates() {
+    FakeDisplay display;
+    display.page = makeDocument(display.window.width() - display.bar, 4200);
+    display.losesWheelFocus = true;
+    QString error;
+    const auto image = capture(display, error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(image.height(), display.expected().height());
+    QCOMPARE(differingRows(image, display.expected()), 0);
   }
 
   void capturesAWholePageExactly() {

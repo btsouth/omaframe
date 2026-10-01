@@ -1084,9 +1084,27 @@ ApplicationWindow {
                     }
                     Item {
                         id: canvasArea
+                        readonly property bool tallCanvas: root.editing && root.tool === "crop"
+                            ? studio.sourceSize.height > studio.sourceSize.width * 2
+                            : studio.tallImage
                         anchors.fill: parent
                         anchors.margins: root.editing ? 16 : 26
                         clip: true
+                        // Keep the wheel handler outside the non-interactive
+                        // Flickable, whose disabled input filtering also blocks
+                        // handlers attached to it while annotation drags own input.
+                        WheelHandler {
+                            enabled: root.editing && canvasArea.tallCanvas
+                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                            target: null
+                            onWheel: event => {
+                                const delta = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
+                                canvasScroll.contentY = Math.max(0, Math.min(
+                                    canvasScroll.contentHeight - canvasScroll.height,
+                                    canvasScroll.contentY - delta));
+                                event.accepted = true;
+                            }
+                        }
                         Flickable {
                             id: canvasScroll
                             anchors.fill: parent
@@ -1100,24 +1118,13 @@ ApplicationWindow {
                             // While editing, drags belong to the marks: scroll with
                             // the wheel or the bar instead.
                             interactive: !root.editing
-                            WheelHandler {
-                                enabled: root.editing && studio.tallImage
-                                target: null
-                                onWheel: event => {
-                                    const delta = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
-                                    canvasScroll.contentY = Math.max(0, Math.min(
-                                        canvasScroll.contentHeight - canvasScroll.height,
-                                        canvasScroll.contentY - delta));
-                                    event.accepted = true;
-                                }
-                            }
                             ScrollBar.vertical: ScrollBar {
-                                policy: studio.tallImage ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                                policy: canvasArea.tallCanvas ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                             }
                             Item {
                                 id: imageView
                                 width: canvasScroll.width
-                                height: studio.tallImage && preview.implicitWidth > 0
+                                height: canvasArea.tallCanvas && preview.implicitWidth > 0
                                     ? Math.max(canvasScroll.height, canvasScroll.width * preview.implicitHeight / preview.implicitWidth)
                                     : canvasScroll.height
                                 Image {

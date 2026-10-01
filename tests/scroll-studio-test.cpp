@@ -153,6 +153,9 @@ private slots:
     QVERIFY(!studio.tallImage());
     studio.scrollFinished(pageImage(800, 3200), false, false);
     QVERIFY(studio.tallImage());
+    // A full 60-row browser page is already unreadable when fitted to height.
+    studio.scrollFinished(pageImage(1200, 2800), false, false);
+    QVERIFY(studio.tallImage());
   }
 
   void scrollSelectionIsOffUntilTheSelectorAsksForIt() {
