@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 
 
 def run(*args):
@@ -63,7 +64,7 @@ def main():
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     repo = Path(__file__).resolve().parents[1]
-    scratch = Path(os.environ["TMPDIR"])
+    scratch = Path(tempfile.gettempdir())
     evidence = scratch / f"omaframe-scroll-e2e-{os.getpid()}"
     evidence.mkdir()
     box = f"omaframe-scroll-smoke-{os.getpid()}"
@@ -104,7 +105,7 @@ def main():
 
         # Interruptions use a focused on-demand panel so the browser keeps
         # receiving wheel events. Exercise S, Escape, Enter and Cancel for real.
-        for mode in ("escape", "enter", "cancel"):
+        for mode in ("escape", "enter", "cancel", "cancel-enter", "cancel-space"):
             boxed("keys", "--window", "title:Omaframe scrolling fixture", "Home")
             launch = "--capture" if mode == "enter" else "--scroll"
             boxed("run", "-d", "--wait", "--", str(binary), launch)
@@ -114,9 +115,18 @@ def main():
             before = len(list((box_root / "home/Pictures/Omaframe").glob("*.png")))
             boxed("click", "400", "400")
             boxed("wait", "--timeout", "8s", "layer", "omaframe-scroll-control")
-            if mode == "cancel":
-                boxed("click", "1070", "55")
+            if mode.startswith("cancel"):
+                if mode == "cancel":
+                    boxed("click", "1070", "55")
+                else:
+                    boxed("click", "825", "50")
+                    boxed("keys", "Tab", "Tab")
+                    boxed("shot", "-o", str(evidence / (mode + "-focused.png")))
+                    boxed("keys", "Return" if mode == "cancel-enter" else "space")
                 boxed("wait", "--timeout", "8s", "layer", "omaframe-scroll-control", "--gone")
+                # Cancellation closes the app without opening the chooser.
+                boxed("wait", "--timeout", "8s", "cmd", "--", "bash", "-c",
+                      "! pgrep -x omaframe")
                 assert len(list((box_root / "home/Pictures/Omaframe").glob("*.png"))) == before
             else:
                 boxed("click", "825", "50")
@@ -133,6 +143,7 @@ def main():
                 assert 1000 <= kh < 4456, f"{mode} did not stop early: {kh}"
                 boxed("wait", "--timeout", "5s", "layer", "omaframe-finishes", "--gone")
         result.update({"escape_keeps": True, "enter_keeps": True, "cancel_discards": True,
+                       "keyboard_cancel_enter": True, "keyboard_cancel_space": True,
                        "selector_s": True})
         base_count = len(list((box_root / "home/Pictures/Omaframe").glob("*.png")))
 
@@ -200,10 +211,12 @@ def main():
                        "crop_undo_exact": True, "reopened": True})
         print(json.dumps(result))
     finally:
-        if "box_root" in locals():
-            for log in (box_root / "home").glob("*.log"):
-                shutil.copy2(log, evidence / log.name)
-        run("omabox", "down", box)
+        try:
+            if "box_root" in locals():
+                for log in (box_root / "home").glob("*.log"):
+                    shutil.copy2(log, evidence / log.name)
+        finally:
+            run("omabox", "down", box)
 
 
 if __name__ == "__main__":

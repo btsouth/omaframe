@@ -159,6 +159,30 @@ private slots:
             0.01);
   }
 
+  void tallComposedPreviewsRespectThePixelBudget() {
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.scrollFinished(pageImage(400, 12000), false, true);
+    studio.setStyle(0);
+    for (int aspect = 0; aspect < 5; ++aspect) {
+      studio.setAspect(aspect);
+      QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 20000);
+      QSize size;
+      QVERIFY(!store.requestImage("preview", &size, {}).isNull());
+      QVERIFY(qint64(size.width()) * size.height() <= 6000000);
+      for (int style = 0; style < 9; ++style) {
+        QVERIFY(!store.requestImage(QString("style%1").arg(style), &size, {})
+                     .isNull());
+        QVERIFY2(qint64(size.width()) * size.height() <= 600000,
+                 qPrintable(QString("aspect %1, style %2: %3x%4")
+                                .arg(aspect).arg(style)
+                                .arg(size.width()).arg(size.height())));
+      }
+    }
+    QCOMPARE(studio.sourceSize(), QSize(400, 12000));
+    QCOMPARE(studio.workingSize(), QSize(400, 12000));
+  }
+
   void scrollFinishedLoadsTheImageAndOpensTheChooser() {
     ImageStore store;
     Studio studio(&store, false);

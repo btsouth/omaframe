@@ -121,10 +121,19 @@ Window {
         id: keys
         anchors.fill: parent
         focus: true
-        Keys.onReturnPressed: studio.scrollCapture.finish()
-        Keys.onEnterPressed: studio.scrollCapture.finish()
+        Keys.onReturnPressed: function (event) {
+            if (keys.activeFocus) studio.scrollCapture.finish();
+            else event.accepted = false;
+        }
+        Keys.onEnterPressed: function (event) {
+            if (keys.activeFocus) studio.scrollCapture.finish();
+            else event.accepted = false;
+        }
         Keys.onEscapePressed: studio.scrollCapture.finish()
-        Keys.onSpacePressed: studio.scrollCapture.finish()
+        Keys.onSpacePressed: function (event) {
+            if (keys.activeFocus) studio.scrollCapture.finish();
+            else event.accepted = false;
+        }
     }
     onClosing: function (event) {
         if (visible) {

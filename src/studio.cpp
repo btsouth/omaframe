@@ -406,11 +406,11 @@ void Studio::scheduleRender() {
         result.uncropped = scaledTo(uncropped, kPreviewPixels, kPreviewMaxEdge);
         result.source = scaledTo(working, kPreviewPixels, kPreviewMaxEdge);
         if (tall) {
-          // compose() can grow the image again with its frame's padding, so it
-          // is given the edge cap too and never emits a texture past it.
+          // Framing and aspect changes can grow the image again, so cap the
+          // composed result before its allocation too.
           result.preview = Frame::compose(
               scaledTo(working, kPreviewPixels, kPreviewMaxEdge), options,
-              kPreviewMaxEdge);
+              kPreviewMaxEdge, kPreviewPixels);
         } else {
           result.preview = Frame::compose(working, options, 1600);
         }
@@ -421,7 +421,8 @@ void Studio::scheduleRender() {
           auto opt = options;
           opt.style = i;
           result.thumbnails.append(
-              Frame::compose(thumbSource, opt, tall ? kPreviewMaxEdge : 640));
+              Frame::compose(thumbSource, opt, tall ? kPreviewMaxEdge : 640,
+                             tall ? kThumbnailPixels : 0));
         }
         return result;
       }));

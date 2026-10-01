@@ -47,6 +47,8 @@ screenshot instead.
 
 ## Capture a scrolling page
 
+[Watch the scrolling capture demo](https://github.com/btsouth/omaframe/releases/download/v0.7.0/omaframe-0.7.0-scrolling-capture.mp4).
+
 Press S in the screenshot selector, or run `omaframe --scroll`. Click a browser
 window or drag an area that scrolls. Omaframe scrolls and stitches the page until
 it reaches the end. Move the pointer to take over and scroll by hand if needed.

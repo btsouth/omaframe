@@ -499,17 +499,20 @@ bool checkAutoResume() {
     const stitch::AutoCapture::Outcome out = session.feed(frameAt(offset));
     static_cast<void>(out);
   }
-  const int keptBefore = session.keptFrames();
   // The screen goes still, as it does when the pointer leaves the frame.
   for (int still = 0; still < 8; ++still)
     static_cast<void>(session.feed(frameAt(40)));
   if (!session.reachedEnd())
-    return true; // never concluded; nothing to resume, and nothing to prove
+    CHECK_FAILED;
+  const int keptBefore = session.keptFrames();
   session.resumeFromEnd();
   if (session.reachedEnd())
     CHECK_FAILED;
-  static_cast<void>(session.feed(frameAt(60)));
-  return session.keptFrames() >= keptBefore;
+  const auto resumed = session.feed(frameAt(60));
+  if (resumed.event != stitch::AutoCapture::Event::Appended ||
+      session.keptFrames() != keptBefore + 1)
+    CHECK_FAILED;
+  return true;
 }
 
 bool runStitchChecks() {
