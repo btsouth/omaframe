@@ -80,14 +80,16 @@ void ImageStore::put(const QString &name, const QImage &image) {
 }
 
 namespace {
-/// Preview images are bounded by pixels, not by their long edge, so a tall
-/// page keeps a width that can be read (about 24 MB of ARGB32 at most).
+/// Bound preview pixels while keeping tall pages readable (about 24 MB of
+/// ARGB32 at most). A separate edge cap avoids oversized GUI textures.
 constexpr qint64 kPreviewPixels = 6000000;
 /// Finish thumbnails are small; a tall page still gets a usable width.
 constexpr qint64 kThumbnailPixels = 600000;
-/// A decoded source may hold the stitcher's whole 200 MiB budget. The reader
-/// is what enforces it, through ScrollUi::withinImageBudget, before any
-/// allocation; this only leaves the decoder room to work.
+/// Conservative GUI texture cap, independent of the capture budget. The
+/// editable original and exported PNG keep their full size.
+constexpr int kPreviewMaxEdge = 8192;
+/// Header and decoded dimensions are checked with withinImageBudget. This
+/// separate allocation limit leaves the decoder room to work.
 constexpr int kImageAllocationLimitMb = 512;
 /// An image this much taller than wide is shown fit to width and scrolled.
 constexpr int kTallImageRatio = 2;
@@ -401,25 +403,25 @@ void Studio::scheduleRender() {
           return image.scaled(target, Qt::IgnoreAspectRatio,
                               Qt::SmoothTransformation);
         };
-        result.uncropped = scaledTo(uncropped, kPreviewPixels, stitch::kMaxStitchedEdge);
-        result.source = scaledTo(working, kPreviewPixels, stitch::kMaxStitchedEdge);
+        result.uncropped = scaledTo(uncropped, kPreviewPixels, kPreviewMaxEdge);
+        result.source = scaledTo(working, kPreviewPixels, kPreviewMaxEdge);
         if (tall) {
-          // compose() caps by the long edge too, so it gets an image already
-          // inside the budget and no cap of its own.
+          // compose() can grow the image again with its frame's padding, so it
+          // is given the edge cap too and never emits a texture past it.
           result.preview = Frame::compose(
-              scaledTo(working, kPreviewPixels, stitch::kMaxStitchedEdge),
-              options, 0);
+              scaledTo(working, kPreviewPixels, kPreviewMaxEdge), options,
+              kPreviewMaxEdge);
         } else {
           result.preview = Frame::compose(working, options, 1600);
         }
         const QImage thumbSource =
-            tall ? scaledTo(working, kThumbnailPixels, stitch::kMaxStitchedEdge)
+            tall ? scaledTo(working, kThumbnailPixels, kPreviewMaxEdge)
                  : working;
         for (int i = 0; thumbnails && i < 9; ++i) {
           auto opt = options;
           opt.style = i;
           result.thumbnails.append(
-              Frame::compose(thumbSource, opt, tall ? 0 : 640));
+              Frame::compose(thumbSource, opt, tall ? kPreviewMaxEdge : 640));
         }
         return result;
       }));
@@ -500,15 +502,18 @@ void Studio::open(const QUrl &url) {
     QImageReader reader(url.toLocalFile());
     reader.setAutoTransform(true);
     // The same budget a scrolling capture stops at: whatever it produces can
-    // be opened, edited and saved again.
+    // be opened, edited and saved again. A format whose header has no size
+    // still gets its decoded pixels checked before they are handed on.
     const QSize s = reader.size();
     if (s.isValid() && !ScrollUi::withinImageBudget(s))
       return Result{{}, ScrollUi::imageBudgetError(s)};
     reader.setAllocationLimit(kImageAllocationLimitMb);
     QImage image = reader.read();
-    return Result{image, image.isNull()
-                             ? "Could not open image: " + reader.errorString()
-                             : QString()};
+    if (image.isNull())
+      return Result{{}, "Could not open image: " + reader.errorString()};
+    if (!ScrollUi::withinImageBudget(image.size()))
+      return Result{{}, ScrollUi::imageBudgetError(image.size())};
+    return Result{std::move(image), QString()};
   }));
 }
 void Studio::setOutputDirectory(const QUrl &url) {
@@ -646,15 +651,20 @@ void Studio::resumeDraft(const QString &id) {
   }
   QImageReader reader(directory + "/" + id + ".png");
   const QSize size = reader.size();
-  if (size.isValid() && !ScrollUi::withinImageBudget(size)) {
+  // A draft is always a PNG written here, so its header always carries the
+  // size. An unreadable header means a damaged file whose size the budget
+  // cannot check: reject it rather than decoding on the hope it is small.
+  if (!size.isValid() || !ScrollUi::withinImageBudget(size)) {
     m_status = "This editable draft has an invalid source image.";
     emit changed();
     return;
   }
   reader.setAllocationLimit(kImageAllocationLimitMb);
   QImage image = reader.read();
-  if (image.isNull()) {
-    m_status = "Could not reopen the draft image.";
+  // The decoded pixels, not just the header, must fit the budget before this
+  // becomes the editable original.
+  if (image.isNull() || !ScrollUi::withinImageBudget(image.size())) {
+    m_status = "This editable draft has an invalid source image.";
     emit changed();
     return;
   }
@@ -1228,7 +1238,12 @@ void Studio::scrollFinished(const QImage &image, bool reachedLimit,
   m_scrollReachedEnd = reachedEnd;
   emit scrollEnded();
   if (image.isNull()) {
+    // Nothing was stitched. End the session terminally so the scrolling state
+    // and its already-hidden controls do not linger with no way out.
+    m_quickState = "cancelled";
+    m_status = "The scrolling capture ended without an image.";
     emit changed();
+    emit dismissRequested();
     return;
   }
   loadImage(image, "Scrolling capture", false);

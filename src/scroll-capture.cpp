@@ -493,7 +493,6 @@ QImage Session::capture(QString &error) {
     probe = out.ack == stitch::AutoCapture::Ack::Probe;
     report(Progress::Mode::Auto, length(), "Scrolling…");
   }
-  m_reachedEnd = ended && automatic.has_value();
   // Put the pointer back where the user left it, unless they have moved it.
   if (canScroll && !userHasPointer && m_desktop.pointerMoved &&
       !m_desktop.pointerMoved(m_plan.anchor))
@@ -555,20 +554,42 @@ QImage Session::capture(QString &error) {
   QImage body = automatic ? automatic->finish(error) : manual->finish(error);
   if (body.isNull())
     return {};
-  QImage image(body.width(), body.height() + cover, QImage::Format_RGBA8888);
+  // The stitcher holds the scrolling body to the size budget, but the rows
+  // the control covered are restored on top from the first picture and are
+  // part of the finished image too. Hold the whole image to the same budget,
+  // trimming only the rows the budget makes necessary from the bottom, so
+  // the capture stays usable and openable.
+  const long long bodyPixels =
+      body.width() > 0 ? static_cast<long long>(body.width()) : 0;
+  const long long byPixels = bodyPixels > 0
+      ? stitch::kMaxStitchedPixels / bodyPixels
+      : stitch::kMaxStitchedEdge;
+  const long long total = static_cast<long long>(body.height()) + cover;
+  const long long allowed = std::max(
+      0LL, std::min({total, static_cast<long long>(stitch::kMaxStitchedEdge),
+                     byPixels}));
+  const int restore = int(std::min<long long>(cover, allowed));
+  if (total > allowed) {
+    body = body.copy(0, 0, body.width(), int(allowed) - restore);
+    limit = true;
+  }
+  QImage image(body.width(), body.height() + restore, QImage::Format_RGBA8888);
   if (image.isNull()) {
     error = "Not enough memory for this capture.";
     return {};
   }
-  for (int y = 0; y < cover; ++y)
+  for (int y = 0; y < restore; ++y)
     std::memcpy(image.scanLine(y), area.constScanLine(y), image.bytesPerLine());
   for (int y = 0; y < body.height(); ++y)
-    std::memcpy(image.scanLine(cover + y), body.constScanLine(y),
+    std::memcpy(image.scanLine(restore + y), body.constScanLine(y),
                 image.bytesPerLine());
   // A scroll bar repeats its thumb at every seam; leave it out of the page.
   if (const int bar = strip.width(); bar > 0 && bar < image.width() / 4)
     image = image.copy(0, 0, image.width() - bar, image.height());
   m_reachedLimit = limit;
+  // A capture that hit the budget did not reach the end of the page, even
+  // when the limit only showed while the image was assembled here.
+  m_reachedEnd = ended && !limit && automatic.has_value();
   return image;
 }
 } // namespace Scrolling

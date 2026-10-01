@@ -93,6 +93,40 @@ def main():
         result = {**verify_page(output), "passed": True,
                   "evidence": str(evidence), "output": str(output)}
 
+        # Interruptions use a focused on-demand panel so the browser keeps
+        # receiving wheel events. Exercise S, Escape, Enter and Cancel for real.
+        for mode in ("escape", "enter", "cancel"):
+            boxed("keys", "--window", "title:Omaframe scrolling fixture", "Home")
+            launch = "--capture" if mode == "enter" else "--scroll"
+            boxed("run", "-d", "--wait", "--", str(binary), launch)
+            if mode == "enter":
+                boxed("keys", "s")
+                boxed("shot", "-o", str(evidence / "selector-s.png"))
+            before = len(list((box_root / "home/Pictures/Omaframe").glob("*.png")))
+            boxed("click", "400", "400")
+            boxed("wait", "--timeout", "8s", "layer", "omaframe-scroll-control")
+            if mode == "cancel":
+                boxed("click", "1070", "55")
+                boxed("wait", "--timeout", "8s", "layer", "omaframe-scroll-control", "--gone")
+                assert len(list((box_root / "home/Pictures/Omaframe").glob("*.png"))) == before
+            else:
+                boxed("click", "825", "50")
+                boxed("keys", "Escape" if mode == "escape" else "Return")
+                boxed("wait", "--timeout", "8s", "layer", "omaframe-finishes")
+                boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
+                boxed("shot", "-o", str(evidence / (mode + "-keeps.png")))
+                boxed("keys", "9")
+                boxed("wait", "--timeout", "10s", "cmd", "--", "python", "-c",
+                      "from pathlib import Path; assert len(list(Path('/home/sbx/Pictures/Omaframe').glob('*.png'))) == " + str(before + 1))
+                kept = max((box_root / "home/Pictures/Omaframe").glob("*.png"),
+                           key=lambda p: p.stat().st_mtime_ns)
+                kh = int(run("magick", "identify", "-format", "%h", str(kept)))
+                assert 1000 <= kh < 4456, f"{mode} did not stop early: {kh}"
+                boxed("wait", "--timeout", "5s", "layer", "omaframe-finishes", "--gone")
+        result.update({"escape_keeps": True, "enter_keeps": True, "cancel_discards": True,
+                       "selector_s": True})
+        base_count = len(list((box_root / "home/Pictures/Omaframe").glob("*.png")))
+
         # Reopen the real capture in the actual editor. This also exercises
         # loading tall PNGs independently of the capture/chooser path.
         original = files[0]
@@ -117,7 +151,7 @@ def main():
             return max((box_root / "home/Pictures/Omaframe").glob("*.png"),
                        key=lambda p: p.stat().st_mtime_ns)
 
-        annotated = save(2)
+        annotated = save(base_count + 1)
         shutil.copy2(annotated, evidence / "annotated.png")
         bounds = run("magick", str(original), str(annotated), "-compose", "difference",
                      "-composite", "-alpha", "off", "-threshold", "0", "-format", "%@", "info:")
@@ -138,13 +172,13 @@ def main():
             "magick", str(crop_view), "-crop", "1x1+200+740", "-depth", "8", "RGB:-"
         ])
         assert sum(pixel) > 550, "Crop tool collapsed the tall page instead of preserving scroll position"
-        cropped = save(3)
+        cropped = save(base_count + 2)
         cw, ch = map(int, run("magick", "identify", "-format", "%w %h", str(cropped)).split())
         assert 1500 < cw < 1884 and 200 < ch < 500, (cw, ch)
         shutil.copy2(cropped, evidence / "cropped.png")
         boxed("keys", "ctrl+z")
         boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
-        restored = save(4)
+        restored = save(base_count + 3)
         changed = run("magick", str(annotated), str(restored), "-compose", "difference",
                       "-composite", "-alpha", "off", "-threshold", "0", "-format", "%[fx:mean]", "info:")
         assert float(changed) == 0, f"Crop undo changed the full-resolution annotations: {changed}"

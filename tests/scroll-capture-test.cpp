@@ -501,10 +501,12 @@ private slots:
     display.window = {100, 40, 300, 900};
     display.page = makeDocument(300, 40000, 23);
     QString error;
-    bool limit = false;
-    const QImage image = capture(display, error, {}, {}, &limit);
+    bool limit = false, end = true;
+    const QImage image = capture(display, error, {}, {}, &limit, &end);
     QVERIFY2(!image.isNull(), qPrintable(error));
     QVERIFY(limit);
+    // Hitting the budget is not reaching the end of the page.
+    QVERIFY(!end);
     QVERIFY(image.height() <= stitch::kMaxStitchedEdge);
     QVERIFY(qint64(image.width()) * image.height() <= stitch::kMaxStitchedPixels);
     QVERIFY(image.height() > 30000);
@@ -512,16 +514,45 @@ private slots:
 
   void restoredControlRowsCountTowardTheSizeLimit() {
     FakeDisplay display;
-    display.page = makeDocument(display.window.width() - display.bar, 34000);
+    // A page whose whole capture lands just past the edge budget once the
+    // control rows restored on top are counted: the scrolling body alone
+    // fits, so the overrun is only found when the image is assembled.
+    display.page = makeDocument(display.window.width() - display.bar, 31870);
     display.coverRows = display.toolbar;
+    Scrolling::Plan plan = planFor(display);
+    plan.coverTop = double(display.coverRows) / display.size.height();
     QString error;
-    bool limit = false;
-    const QImage image = capture(display, error, {}, {}, &limit);
+    bool limit = false, end = true;
+    const QImage image = capture(display, error, {}, plan, &limit, &end);
     QVERIFY2(!image.isNull(), qPrintable(error));
-    QVERIFY(limit);
     QVERIFY(image.height() <= stitch::kMaxStitchedEdge);
     QVERIFY(qint64(image.width()) * image.height() <= stitch::kMaxStitchedPixels);
     QVERIFY(image.height() > 31000);
+    QVERIFY(limit);
+    // Reaching the budget is not reaching the end of the page.
+    QVERIFY(!end);
+  }
+
+  void restoredControlRowsCountTowardThePixelLimit() {
+    // A wide window makes the pixel budget bind before the edge budget. A
+    // page captured whole lands just past it once the restored rows are
+    // added, so the overrun has to be trimmed at assembly.
+    FakeDisplay display;
+    display.size = {2000, 1200};
+    display.window = {100, 60, 1800, 1000};
+    display.page = makeDocument(display.window.width() - display.bar, 29010);
+    display.coverRows = display.toolbar;
+    Scrolling::Plan plan = planFor(display);
+    plan.coverTop = double(display.coverRows) / display.size.height();
+    QString error;
+    bool limit = false, end = true;
+    const QImage image = capture(display, error, {}, plan, &limit, &end);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QVERIFY(image.height() <= stitch::kMaxStitchedEdge);
+    QVERIFY(qint64(image.width()) * image.height() <= stitch::kMaxStitchedPixels);
+    QVERIFY(image.height() > 28000);
+    QVERIFY(limit);
+    QVERIFY(!end);
   }
 
   void pendingManualFramesRespectTheSizeLimit() {

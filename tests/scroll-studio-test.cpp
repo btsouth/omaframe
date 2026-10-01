@@ -3,9 +3,14 @@
  *  editor share. The capture loop itself is covered by scroll-capture-test. */
 #include "stitch.hpp"
 #include "studio.hpp"
+#include <QDir>
+#include <QFile>
 #include <QGuiApplication>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTest>
 #include <cmath>
 
@@ -70,6 +75,34 @@ private slots:
          stitch::kMaxStitchedEdge}));
   }
 
+  void damagedDraftSourceImageIsRejected() {
+    // A draft whose PNG header cannot be read must not fall through to a
+    // decode: its size is unknown, so the budget cannot be checked.
+    const QString directory = QStandardPaths::writableLocation(
+                                  QStandardPaths::AppLocalDataLocation) +
+                              "/drafts";
+    QVERIFY(QDir().mkpath(directory));
+    const QString id = QStringLiteral("deadbeefdeadbeefdeadbeefdeadbeef");
+    QFile image(directory + "/" + id + ".png");
+    QVERIFY(image.open(QIODevice::WriteOnly));
+    QVERIFY(image.write("\x89PNG\r\n\x1a\n not really a png") > 0);
+    image.close();
+    QFile metadata(directory + "/" + id + ".json");
+    QVERIFY(metadata.open(QIODevice::WriteOnly));
+    QVERIFY(metadata.write(
+                QJsonDocument(QJsonObject{{"version", 1}}).toJson()) > 0);
+    metadata.close();
+
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.resumeDraft(id);
+    QVERIFY(!studio.hasImage());
+    QVERIFY2(studio.status().contains("invalid source image", Qt::CaseInsensitive),
+             qPrintable(studio.status()));
+    QFile::remove(directory + "/" + id + ".png");
+    QFile::remove(directory + "/" + id + ".json");
+  }
+
   void tallPreviewKeepsItsWidth() {
     // A 20000 px page must not become an unreadable sliver: scaling by a pixel
     // budget keeps a usable width instead of capping the long edge alone.
@@ -83,6 +116,35 @@ private slots:
     // An image already inside the budget keeps every pixel.
     QCOMPARE(ScrollUi::fitBudget({1000, 800}, 6000000, 32000),
              QSize(1000, 800));
+  }
+
+  void tallPreviewProvidersRespectTheGpuTextureLimit() {
+    // A 64x32000 page fits the 6 MP preview budget yet is far past the
+    // longest texture a GPU is guaranteed to accept, so every image the GUI
+    // loads must be capped while the editable original keeps every pixel.
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.scrollFinished(pageImage(64, 32000), false, true);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 20000);
+    QCOMPARE(studio.sourceSize(), QSize(64, 32000));
+    QCOMPARE(studio.workingSize(), QSize(64, 32000));
+    for (const QString &provider :
+         {QStringLiteral("source"), QStringLiteral("uncropped"),
+          QStringLiteral("preview"), QStringLiteral("style0")}) {
+      QSize size;
+      const QImage image = store.requestImage(provider, &size, {});
+      QVERIFY2(!image.isNull(), qPrintable(provider));
+      QVERIFY2(std::max(size.width(), size.height()) <= 8192,
+               qPrintable(QString("%1: %2x%3")
+                              .arg(provider)
+                              .arg(size.width())
+                              .arg(size.height())));
+    }
+    // Capping the long edge must keep the page's shape, not squash it.
+    QSize size;
+    store.requestImage("source", &size, {});
+    QVERIFY(std::abs(double(size.width()) / size.height() - 64.0 / 32000.0) <
+            0.01);
   }
 
   void scrollFinishedLoadsTheImageAndOpensTheChooser() {
@@ -115,10 +177,17 @@ private slots:
     Studio studio(&store, false);
     QSignalSpy chooser(&studio, &Studio::chooserRequested);
     QSignalSpy ended(&studio, &Studio::scrollEnded);
+    QSignalSpy dismiss(&studio, &Studio::dismissRequested);
     studio.scrollFinished({}, false, false);
     QVERIFY(!studio.hasImage());
     QCOMPARE(chooser.count(), 0);
     QCOMPARE(ended.count(), 1);
+    // No image means the session is over: it must end terminally instead of
+    // leaving the scrolling state up with its controls already hidden.
+    QCOMPARE(dismiss.count(), 1);
+    QCOMPARE(studio.quickState(), QString("cancelled"));
+    QVERIFY(!studio.busy());
+    QVERIFY(!studio.status().isEmpty());
   }
 
   void cancellingDiscardsAndEndsTheControl() {
