@@ -13,7 +13,10 @@ import subprocess
 
 
 def run(*args):
-    result = subprocess.run(args, check=True, text=True, capture_output=True)
+    result = subprocess.run(args, text=True, capture_output=True)
+    if result.returncode:
+        print(result.stdout, result.stderr, flush=True)
+        result.check_returncode()
     return result.stdout.strip()
 
 
@@ -66,6 +69,12 @@ def main():
     box = f"omaframe-scroll-smoke-{os.getpid()}"
 
     def boxed(*command):
+        # Avoid whole-second boundaries in omabox's timed status reader.
+        # A timed-out partial read can otherwise drop the first bytes of its
+        # successful answer. This still waits for actual rendered stability.
+        command = tuple("350ms" if arg in ("1s", "2s") and
+                        index > 0 and command[index - 1] == "--quiet" else arg
+                        for index, arg in enumerate(command))
         return run("omabox", command[0], "-b", box, *command[1:])
 
     try:
@@ -191,6 +200,9 @@ def main():
                        "crop_undo_exact": True, "reopened": True})
         print(json.dumps(result))
     finally:
+        if "box_root" in locals():
+            for log in (box_root / "home").glob("*.log"):
+                shutil.copy2(log, evidence / log.name)
         run("omabox", "down", box)
 
 

@@ -9,6 +9,7 @@
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTest>
@@ -26,6 +27,17 @@ QImage pageImage(int width, int height) {
 class ScrollStudioTest : public QObject {
   Q_OBJECT
 private slots:
+  void exitsWhileTallPreviewsAreStillRendering() {
+    // Run a whole GUI application lifetime: assertions in this process alone
+    // cannot catch workers touching GUI resources after QGuiApplication dies.
+    QProcess child;
+    child.start(QCoreApplication::applicationFilePath(), {"--shutdown-probe"});
+    QVERIFY(child.waitForStarted());
+    QVERIFY2(child.waitForFinished(15000), child.readAllStandardError().constData());
+    QCOMPARE(child.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(child.exitCode(), 0);
+  }
+
   void controlSitsOutsideTheCapture() {
     const QList<ScrollUi::Display> displays{
         {"eDP-1", QRect(0, 0, 1920, 1080)}};
@@ -238,5 +250,17 @@ private slots:
   }
 };
 
-QTEST_MAIN(ScrollStudioTest)
+int main(int argc, char **argv) {
+  QGuiApplication app(argc, argv);
+  if (app.arguments().contains("--shutdown-probe")) {
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.scrollFinished(pageImage(1200, 6000), false, true);
+    for (int style = 0; style < 9; ++style)
+      studio.setStyle(style);
+    return 0;
+  }
+  ScrollStudioTest test;
+  return QTest::qExec(&test, argc, argv);
+}
 #include "scroll-studio-test.moc"

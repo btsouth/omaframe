@@ -6,6 +6,7 @@
 #include <QMutex>
 #include <QObject>
 #include <QQuickImageProvider>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -297,6 +298,9 @@ private:
   QVector<QRectF> uncoveredSecrets() const;
   void writeText();
   ImageStore *m_store;
+  // Preview workers must finish before this studio and the GUI application
+  // are destroyed. The global pool otherwise outlives Qt's GUI resources.
+  QThreadPool m_previewPool;
   QImage m_original;
   QHash<QString, QImage> m_frozen;
   QVariantList m_windowTargets;

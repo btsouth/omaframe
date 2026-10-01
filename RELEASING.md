@@ -1,7 +1,7 @@
 # Releasing Omaframe
 
-Omaframe 0.6.0 is a screenshot and recording beta.
-See [the release notes](docs/release-notes-0.6.0.md) for what ships.
+Omaframe 0.7.0 is a screenshot and recording beta.
+See [the release notes](docs/release-notes-0.7.0.md) for what ships.
 
 Releases use automated regression checks and accurate notes about known
 limitations. Manual monitor power changes, hardware acceptance sessions and
@@ -13,7 +13,7 @@ release blockers.
 ## Build an exact package
 
 `packaging/build-package.sh` requires a clean checkout at the tag matching
-`CMakeLists.txt`, currently `v0.6.0`. It archives that tag, computes the
+`CMakeLists.txt`, currently `v0.7.0`. It archives that tag, computes the
 source SHA-256, fills `packaging/PKGBUILD.in`, and runs `makepkg` without
 installing dependencies or changing the host package database. The output
 contains the source archive, a resolved PKGBUILD, and an Arch package.
@@ -30,13 +30,16 @@ sharing a candidate.
 
 ## Automated checks
 
-- GitHub CI builds the app and all test binaries on Arch, runs seven
+- GitHub CI builds the app and all test binaries on Arch, runs nine
   headless suites plus OCR pattern tests, and checks the installed desktop entry, icon and licenses.
   See [docs/ci.md](docs/ci.md) for coverage and local commands.
-- Run the complete nine-suite CTest set in an isolated omabox for changes
+- Run the complete eleven-suite CTest set in an isolated omabox for changes
   to capture, clipboard or desktop integration. These tests use a simulated
   recorder and fixture camera frames; they do not establish real GPU,
   microphone or physical camera behavior.
+- For scrolling capture, run `python tests/scrolling-e2e.py /path/to/omaframe`.
+  It creates its own isolated desktop and checks a real Chromium page,
+  interruptions, annotation placement, cropping, undo and reopening.
 - When changing packaging, check dependency resolution and the affected
   install, upgrade or uninstall path in a disposable Arch environment.
   Keep captures, drafts and settings intact.

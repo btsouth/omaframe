@@ -383,7 +383,7 @@ void Studio::scheduleRender() {
   const QVector<Frame::Edit> edits = m_marks.visibleEdits();
   const bool thumbnails = !m_editing;
   m_thumbnailsStale = !thumbnails;
-  watcher->setFuture(QtConcurrent::run(
+  watcher->setFuture(QtConcurrent::run(&m_previewPool,
       [source = m_original, edits, options = m_options, thumbnails] {
         PreviewResult result;
         const QImage uncropped = Frame::applyEdits(source, edits, false);

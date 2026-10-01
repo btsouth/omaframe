@@ -27,8 +27,8 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.6.0 adds annotation styles, easier resizing and fixes for capture
-hints, recording review and settings. See [the release notes](docs/release-notes-0.6.0.md).
+Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
+See [the release notes](docs/release-notes-0.7.0.md).
 
 ## Take a screenshot
 
@@ -58,10 +58,11 @@ frame, before the panel appeared. Fixed headers and footers are kept once.
 
 The result uses the same finishes and editor as an ordinary screenshot. Long
 pages fit to width; use the wheel or scrollbar to reach the bottom while editing.
-Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If an
-alignment cannot be verified, Omaframe switches to manual scrolling instead of
-joining guessed rows. Pages with large animations, overlays or replaced content
-may still need a smaller capture area or manual scrolling.
+Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If it
+loses track of the page, Omaframe switches to manual scrolling. Completely
+repeating content uses wheel cadence and ranked matches to resolve ambiguous
+seams, so check the result before sharing. Pages with large animations, overlays
+or replaced content may need a smaller capture area or manual scrolling.
 
 ## Mark it up
 
