@@ -161,7 +161,7 @@ MotionEstimate classifyMotionCropped(const GrayView &prev, const GrayView &cur,
   const int matchExtent = axisLen - maxShift;
   const int coarseAxis = std::max(1, matchExtent / 32);
   const int coarseCross = std::max(1, crossLen / 48);
-  const int fineAxis = std::max(1, matchExtent / 128);
+  const int fineAxis = 1;
   const int fineCross = std::max(1, crossLen / 128);
 
   const double zeroError =
@@ -229,7 +229,8 @@ MotionEstimate classifyMotionCropped(const GrayView &prev, const GrayView &cur,
   if (!std::isfinite(best.error) || best.error > kMaxMatchError)
     return {{MotionKind::Unmatchable, 0}, best.error, confidence};
 
-  if (confidence < kMinConfidence || margin < kMinErrorMargin) {
+  if (confidence < kMinConfidence ||
+      (best.error > std::numeric_limits<double>::epsilon() && margin < kMinErrorMargin)) {
     if (best.error <= kMaxAmbiguousError) {
       const int signed_ = best.shift > 0 ? sourceDelta : -sourceDelta;
       return {{MotionKind::Ambiguous, signed_}, best.error, confidence};
@@ -806,7 +807,9 @@ bool errorsAreDistinct(double best, double runner) {
     confidence = runner <= std::numeric_limits<double>::epsilon() ? 1.0 : kInf;
   else
     confidence = runner / best;
-  return confidence >= kMinConfidence && runner - best >= kMinErrorMargin;
+  return confidence >= kMinConfidence &&
+         (best <= std::numeric_limits<double>::epsilon() ||
+          runner - best >= kMinErrorMargin);
 }
 
 bool forwardCandidateLess(const ForwardMatchCandidate &a,
@@ -994,7 +997,7 @@ ForwardCandidateSet forwardCandidateSetCropped(const GrayView &prev,
   const int matchExtent = axisLen - maxShift;
   const int coarseAxis = std::max(1, matchExtent / 32);
   const int coarseCross = std::max(1, crossLen / 48);
-  const int fineAxis = std::max(1, matchExtent / 256);
+  const int fineAxis = 1;
   const int fineCross = std::max(1, crossLen / 256);
 
   // Search only the physically possible direction; every forward shift that

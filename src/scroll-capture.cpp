@@ -83,11 +83,24 @@ void EdgeStrip::observe(const QImage &before, const QImage &after, int delta) {
   std::nth_element(content.begin(), content.begin() + 4, content.end());
   const int baseline = content[4];
   const int noise = std::max(4, (h - delta) / 60);
-  if (m_votes.size() != static_cast<size_t>(window))
+  if (m_votes.size() != static_cast<size_t>(window)) {
     m_votes.assign(window, 0);
-  for (int i = 0; i < window; ++i)
-    if (mismatches(w - window + i) > baseline + noise)
+    m_trackVotes.assign(window, 0);
+  }
+  for (int i = 0; i < window; ++i) {
+    const int x = w - window + i;
+    if (mismatches(x) > baseline + noise)
       ++m_votes[i];
+    // The thumb changes, but its track borders match the outer track
+    // column. Keep those borders with the thumb rather than leaving a
+    // repeated sliver of the scrollbar behind.
+    int different = 0;
+    for (int y = 0; y < h; ++y)
+      if (std::abs(luma(after.pixel(x, y)) - luma(after.pixel(w - 1, y))) > 8)
+        ++different;
+    if (different <= std::max(3, h / 100))
+      ++m_trackVotes[i];
+  }
   ++m_steps;
 }
 
@@ -112,7 +125,12 @@ int EdgeStrip::width() const {
   // moving on its own.
   if (bar < 3 || bar > 32)
     return 0;
-  return std::min(window, bar + quiet + 1);
+  int track = 0;
+  while (i >= 0 && m_trackVotes[i] * 2 > m_steps && track < 4) {
+    --i;
+    ++track;
+  }
+  return std::min(window, bar + quiet + track);
 }
 
 QRect areaPixels(QRectF area, QSize size) {

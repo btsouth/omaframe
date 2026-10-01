@@ -147,7 +147,7 @@ public:
   int width() const;
 
 private:
-  std::vector<int> m_votes;
+  std::vector<int> m_votes, m_trackVotes;
   int m_steps = 0;
 };
 } // namespace Scrolling

@@ -180,6 +180,16 @@ AutoCapture::Outcome AutoCapture::feed(const QImage &input) {
         autoProbeDecision(resolution, stationaryProbes_, calibratedEnd);
     switch (decision.kind) {
     case AutoProbeDecision::Kind::Commit: {
+      // Check the whole verified pair before committing either frame. A
+      // normal budget stop keeps the previous reference and every band.
+      if (accumulator_->wouldExceedBudget(decision.path.firstDelta +
+                                          decision.path.secondDelta)) {
+        state_ = State::Halted;
+        haltReason_ = HaltReason::ReachedLimit;
+        Outcome result = outcome(Event::Halted, Ack::Hold);
+        result.haltReason = haltReason_;
+        return result;
+      }
       if (!accumulator_->pushForward(heldF1_, decision.path.firstDelta, error) ||
           !accumulator_->pushForward(cropped, decision.path.secondDelta, error)) {
         state_ = State::Halted;
@@ -206,6 +216,13 @@ AutoCapture::Outcome AutoCapture::feed(const QImage &input) {
       return outcome(Event::ProbeAgain, Ack::Probe);
     case AutoProbeDecision::Kind::End: {
       // The probe frames are stationary duplicates of F1; commit only F1.
+      if (accumulator_->wouldExceedBudget(decision.endCandidate->delta)) {
+        state_ = State::Halted;
+        haltReason_ = HaltReason::ReachedLimit;
+        Outcome result = outcome(Event::Halted, Ack::Hold);
+        result.haltReason = haltReason_;
+        return result;
+      }
       if (!accumulator_->pushForward(heldF1_, decision.endCandidate->delta,
                                      error)) {
         state_ = State::Halted;
@@ -314,6 +331,13 @@ AutoCapture::Outcome AutoCapture::continueAnyway() {
     return outcome(Event::Paused, Ack::Hold);
   QString error;
   const ForwardMatchPath path = *pausedBestEffort_;
+  if (accumulator_->wouldExceedBudget(path.firstDelta + path.secondDelta)) {
+    state_ = State::Halted;
+    haltReason_ = HaltReason::ReachedLimit;
+    Outcome result = outcome(Event::Halted, Ack::Hold);
+    result.haltReason = haltReason_;
+    return result;
+  }
   if (!accumulator_->pushForward(heldF1_, path.firstDelta, error) ||
       !accumulator_->pushForward(heldF2_, path.secondDelta, error)) {
     state_ = State::Halted;
