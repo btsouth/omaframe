@@ -999,6 +999,26 @@ private slots:
     QVERIFY(failed.images.isEmpty());
     QVERIFY(failed.error.contains("right"));
   }
+  void scrollSelectionStartsWhileTheSelectorOwnsTheBusyState() {
+    ImageStore store;
+    Studio studio(&store, false);
+    QSignalSpy selections(&studio, &Studio::selectionReady);
+    QSignalSpy ended(&studio, &Studio::scrollEnded);
+    studio.captureScroll();
+    QTRY_COMPARE_WITH_TIMEOUT(selections.count(), 1, 8000);
+    QCOMPARE(studio.quickState(), QString("selecting"));
+    QVERIFY(studio.busy());
+    QVERIFY(studio.scrollSelection());
+    const auto monitor = selections.first().first().toStringList().first();
+    studio.finishScrollSelection(monitor, 0.1, 0.1, 0.8, 0.8, 0.5, 0.5, false);
+    QCOMPARE(studio.quickState(), QString("scrolling"));
+    QVERIFY(studio.scrollCapture()->active());
+    studio.scrollCapture()->cancel();
+    QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, 8000);
+    QVERIFY(!studio.busy());
+    QCOMPARE(studio.quickState(), QString("cancelled"));
+  }
+
   void quickCaptureKeepsEditsAndAcceptsExactlyOnce() {
     ImageStore store;
     Studio studio(&store, false);

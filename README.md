@@ -27,8 +27,8 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.6.0 adds annotation styles, easier resizing and fixes for capture
-hints, recording review and settings. See [the release notes](docs/release-notes-0.6.0.md).
+Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
+See [the release notes](docs/release-notes-0.7.0.md).
 
 ## Take a screenshot
 
@@ -44,6 +44,27 @@ address or a card number, a **Hide possible secrets** button appears. Press H
 and each one gets a redaction you can still move or undo in the editor. It can
 miss things, so look before you share. Press T to copy the text in the
 screenshot instead.
+
+## Capture a scrolling page
+
+[Watch the scrolling capture demo](https://github.com/btsouth/omaframe/releases/download/v0.7.0/omaframe-0.7.0-scrolling-capture.mp4).
+
+Press S in the screenshot selector, or run `omaframe --scroll`. Click a browser
+window or drag an area that scrolls. Omaframe scrolls and stitches the page until
+it reaches the end. Move the pointer to take over and scroll by hand if needed.
+
+Choose Done, Enter or Esc to keep what has been captured. Cancel discards it.
+For keyboard controls, point at the progress panel to focus it. The panel sits
+outside the capture when there is room; otherwise its rows come from the first
+frame, before the panel appeared. Fixed headers and footers are kept once.
+
+The result uses the same finishes and editor as an ordinary screenshot. Long
+pages fit to width; use the wheel or scrollbar to reach the bottom while editing.
+Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If it
+loses track of the page, Omaframe switches to manual scrolling. Completely
+repeating content uses wheel cadence and ranked matches to resolve ambiguous
+seams, so check the result before sharing. Pages with large animations, overlays
+or replaced content may need a smaller capture area or manual scrolling.
 
 ## Mark it up
 

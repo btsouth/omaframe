@@ -1,9 +1,12 @@
 #pragma once
 #include "marks.hpp"
 #include "renderer.hpp"
+#include "scroll-capture.hpp"
+#include "stitch.hpp"
 #include <QMutex>
 #include <QObject>
 #include <QQuickImageProvider>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -23,11 +26,62 @@ private:
   QHash<QString, QImage> images;
 };
 
+/** Where the scrolling capture's progress control goes, and how much of the
+ *  capture it hides. */
+namespace ScrollUi {
+/** A display in the desktop layout, in logical pixels. */
+struct Display {
+  QString name;
+  QRect bounds;
+};
+struct Control {
+  /** The display the control sits on. */
+  QString monitor;
+  /** Its place in the desktop layout, in logical pixels. */
+  QRect bounds;
+  /** Fraction of the captured display's height the control hides under the
+   *  top of the capture. Zero when the control is outside the capture. */
+  double coverTop = 0;
+  /** True when the control has nowhere to go but inside the capture. */
+  bool inside = false;
+};
+/** The progress control's size in logical pixels: room for the mode line, the
+ *  captured length, a hint and the Done and Cancel buttons. */
+QSize controlSize();
+/** Places the control on a display outside `capture` when there is room,
+ *  otherwise just inside the top of the capture, reporting how many of the
+ *  first frame's rows the capture must keep out of the stitched body. */
+Control placeControl(const QList<Display> &displays, const QString &captured,
+                     const QRect &capture, QSize size = {});
+/** Whether an image of `size` is within the scrolling capture budget: the
+ *  same 32000 pixel edge and 200 MiB the stitcher enforces, so anything a
+ *  scrolling capture can produce can be opened, edited and saved again. */
+bool withinImageBudget(QSize size);
+/** Why `size` cannot be opened, or an empty string when it can. */
+QString imageBudgetError(QSize size);
+/** `size` scaled down to fit `maxPixels` and `maxEdge`, keeping its shape.
+ *  Returns `size` unchanged when it already fits. Scaling by a pixel budget
+ *  rather than the long edge alone is what keeps a tall page's preview wide
+ *  enough to read instead of a sliver. */
+QSize fitBudget(QSize size, qint64 maxPixels, int maxEdge);
+} // namespace ScrollUi
+
 class Studio final : public QObject {
   Q_OBJECT
   Q_PROPERTY(bool recordingSelection READ recordingSelection NOTIFY changed)
   Q_PROPERTY(int revision READ revision NOTIFY changed)
   Q_PROPERTY(bool hasImage READ hasImage NOTIFY changed)
+  /** True when the image is much taller than it is wide: the editor shows it
+   *  fit to width and scrolls, instead of shrinking it to a sliver. */
+  Q_PROPERTY(bool tallImage READ tallImage NOTIFY changed)
+  /** True while the selector is set to scroll and stitch what it covers. */
+  Q_PROPERTY(bool scrollSelection READ scrollSelection NOTIFY changed)
+  /** The scrolling capture, for the progress control. */
+  Q_PROPERTY(ScrollCapture *scrollCapture READ scrollCapture CONSTANT)
+  /** Whether the last scrolling capture stopped at the size budget or the end
+   *  of the page, for the result note. */
+  Q_PROPERTY(bool scrollReachedLimit READ scrollReachedLimit NOTIFY changed)
+  Q_PROPERTY(bool scrollReachedEnd READ scrollReachedEnd NOTIFY changed)
   Q_PROPERTY(int style READ style WRITE setStyle NOTIFY changed)
   Q_PROPERTY(double padding READ padding WRITE setPadding NOTIFY changed)
   Q_PROPERTY(int aspect READ aspect WRITE setAspect NOTIFY changed)
@@ -75,6 +129,11 @@ public:
   ~Studio() override;
   int revision() const { return m_revision; }
   bool hasImage() const { return !m_original.isNull(); }
+  bool tallImage() const;
+  bool scrollSelection() const { return m_scrollSelection; }
+  ScrollCapture *scrollCapture() { return m_scrollCapture; }
+  bool scrollReachedLimit() const { return m_scrollReachedLimit; }
+  bool scrollReachedEnd() const { return m_scrollReachedEnd; }
   int style() const { return m_options.style; }
   double padding() const { return m_options.padding; }
   int aspect() const { return m_options.aspect; }
@@ -153,10 +212,14 @@ public:
   void leaveQuickMode() {
     m_quickMode = false;
     m_recordingSelection = false;
+    m_scrollSelection = false;
     m_quickState = "idle";
     emit changed();
   }
-  Q_INVOKABLE void useScreenshotSelection() { setRecordingSelection(false); }
+  Q_INVOKABLE void useScreenshotSelection() {
+    m_scrollSelection = false;
+    setRecordingSelection(false);
+  }
   /** Leave region selection for recording setup, which opens on `monitor`:
    *  the display whose capture bar was used. */
   Q_INVOKABLE void recordInstead(const QString &monitor = {});
@@ -170,6 +233,25 @@ public:
   Q_INVOKABLE void repeatLastArea();
   Q_INVOKABLE void finishSelection(const QString &monitor, double x1, double y1,
                                    double x2, double y2);
+  /** Leaves the selector for scroll mode: the same click or drag scrolls the
+   *  window or area and stitches what it shows into one tall image. */
+  Q_INVOKABLE void scrollInstead(const QString &monitor = {});
+  /** Opens the selector ready to scroll and stitch `monitor`'s area. */
+  Q_INVOKABLE void captureScroll(int monitor = 0);
+  /** The selector's Scroll mode finished: `x1..y2` are the area as fractions
+   *  of `monitor`, `clickX/clickY` where the user clicked, and `windowTarget`
+   *  true for a clicked window. Starts the scrolling capture. */
+  Q_INVOKABLE void finishScrollSelection(const QString &monitor, double x1,
+                                         double y1, double x2, double y2,
+                                         double clickX, double clickY,
+                                         bool windowTarget);
+  /** The scrolling capture produced `image`; show it in the finish chooser. */
+  Q_INVOKABLE void scrollFinished(const QImage &image, bool reachedLimit,
+                                  bool reachedEnd);
+  /** The scrolling capture ended without an image. */
+  Q_INVOKABLE void scrollFailed(const QString &error);
+  /** The user cancelled the scrolling capture; nothing is kept. */
+  Q_INVOKABLE void scrollCancelled();
   Q_INVOKABLE void cancelSelection();
   Q_INVOKABLE void chooseFinish(int style);
   Q_INVOKABLE void openEditor();
@@ -193,6 +275,11 @@ signals:
   void editorRequested();
   void dismissRequested();
   void captureFailed();
+  /** The first frame is stitched; the progress control may appear on
+   *  `monitor` at `bounds` (logical, desktop layout). */
+  void scrollRequested(const QString &monitor, const QRect &bounds);
+  /** The scrolling capture is over; the progress control should go. */
+  void scrollEnded();
   /** The selector switched to video; recording options should load. */
   void recordModeEntered();
   void recordOptionsRequested();
@@ -211,6 +298,9 @@ private:
   QVector<QRectF> uncoveredSecrets() const;
   void writeText();
   ImageStore *m_store;
+  // Preview workers must finish before this studio and the GUI application
+  // are destroyed. The global pool otherwise outlives Qt's GUI resources.
+  QThreadPool m_previewPool;
   QImage m_original;
   QHash<QString, QImage> m_frozen;
   QVariantList m_windowTargets;
@@ -231,6 +321,12 @@ private:
   int m_originalsCount = 0;
   bool m_busy = false, m_rendering = false, m_demo = true;
   bool m_quickMode = false, m_recordingSelection = false;
+  bool m_scrollSelection = false, m_scrollReachedLimit = false,
+       m_scrollReachedEnd = false;
+  /** The scrolling capture and where its progress control goes. */
+  ScrollCapture *m_scrollCapture = nullptr;
+  QString m_scrollMonitor;
+  QRect m_scrollBounds;
   bool m_copyPending = false, m_backupPending = false;
   QString m_quickState = "idle", m_captureMonitor, m_pointerMonitor;
   int m_pendingFinish = -1;

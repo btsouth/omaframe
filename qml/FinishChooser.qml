@@ -149,7 +149,10 @@ Window {
                                     visible: !studio.rendering
                                     asynchronous: true
                                     cache: false
-                                    fillMode: Image.PreserveAspectFit
+                                    // A tall page fits the card as a readable band from
+                                    // its top; a sliver would show nothing.
+                                    fillMode: studio.tallImage ? Image.PreserveAspectCrop : Image.PreserveAspectFit
+                                    verticalAlignment: studio.tallImage ? Image.AlignTop : Image.AlignVCenter
                                 }
                                 Text {anchors.centerIn: parent; visible: studio.rendering; text: "Preparing…"; color: theme.faint; font.family: theme.fontFamily; font.pixelSize: 12}
                                 RowLayout {

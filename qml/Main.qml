@@ -442,6 +442,13 @@ ApplicationWindow {
                 onClicked: { captureMenu.close(); root.requestNavigation("capture"); }
             }
             MenuAction {
+                text: "Scrolling capture"
+                detail: "Click a window or drag an area; it scrolls and stitches one tall image"
+                glyph: "image"
+                enabled: !root.working
+                onClicked: { captureMenu.close(); root.requestNavigation("scroll"); }
+            }
+            MenuAction {
                 text: "Record video"
                 detail: "Choose an area, window or display to record"
                 glyph: "record"
@@ -1077,29 +1084,72 @@ ApplicationWindow {
                     }
                     Item {
                         id: canvasArea
+                        readonly property bool tallCanvas: root.editing && root.tool === "crop"
+                            ? studio.sourceSize.height > studio.sourceSize.width * 2
+                            : studio.tallImage
                         anchors.fill: parent
                         anchors.margins: root.editing ? 16 : 26
-                        Image {
-                            id: preview
-                            anchors.fill: parent
-                            source: studio.hasImage && studio.revision > 0 ? "image://frames/" + (root.editing ? (root.tool === "crop" ? "uncropped" : "source") : "preview") + "?" + studio.revision : ""
-                            fillMode: Image.PreserveAspectFit
-                            cache: false
-                            asynchronous: true
-                            retainWhileLoading: true
+                        clip: true
+                        // Keep the wheel handler outside the non-interactive
+                        // Flickable, whose disabled input filtering also blocks
+                        // handlers attached to it while annotation drags own input.
+                        WheelHandler {
+                            enabled: root.editing && canvasArea.tallCanvas
+                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                            target: null
+                            onWheel: event => {
+                                const delta = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
+                                canvasScroll.contentY = Math.max(0, Math.min(
+                                    canvasScroll.contentHeight - canvasScroll.height,
+                                    canvasScroll.contentY - delta));
+                                event.accepted = true;
+                            }
                         }
-                        MarkCanvas {
-                            id: markCanvas
-                            anchors.centerIn: preview
-                            width: preview.paintedWidth
-                            height: preview.paintedHeight
-                            visible: root.editing
-                            doc: studio.marks
-                            tool: root.tool
-                            locked: studio.busy
-                            workingSize: studio.workingSize
-                            sourceSize: studio.sourceSize
-                            onToolRequested: key => root.tool = key
+                        Flickable {
+                            id: canvasScroll
+                            anchors.fill: parent
+                            clip: true
+                            contentWidth: width
+                            // A tall page is shown fit to width and scrolled, so a
+                            // 20000 px capture stays readable and its annotations
+                            // keep their place. Anything shorter fits as before.
+                            contentHeight: imageView.height
+                            boundsBehavior: Flickable.StopAtBounds
+                            // While editing, drags belong to the marks: scroll with
+                            // the wheel or the bar instead.
+                            interactive: !root.editing
+                            ScrollBar.vertical: ScrollBar {
+                                policy: canvasArea.tallCanvas ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                            }
+                            Item {
+                                id: imageView
+                                width: canvasScroll.width
+                                height: canvasArea.tallCanvas && preview.implicitWidth > 0
+                                    ? Math.max(canvasScroll.height, canvasScroll.width * preview.implicitHeight / preview.implicitWidth)
+                                    : canvasScroll.height
+                                Image {
+                                    id: preview
+                                    anchors.fill: parent
+                                    source: studio.hasImage && studio.revision > 0 ? "image://frames/" + (root.editing ? (root.tool === "crop" ? "uncropped" : "source") : "preview") + "?" + studio.revision : ""
+                                    fillMode: Image.PreserveAspectFit
+                                    cache: false
+                                    asynchronous: true
+                                    retainWhileLoading: true
+                                }
+                                MarkCanvas {
+                                    id: markCanvas
+                                    anchors.centerIn: preview
+                                    width: preview.paintedWidth
+                                    height: preview.paintedHeight
+                                    visible: root.editing
+                                    doc: studio.marks
+                                    tool: root.tool
+                                    locked: studio.busy
+                                    workingSize: studio.workingSize
+                                    sourceSize: studio.sourceSize
+                                    onToolRequested: key => root.tool = key
+                                }
+                            }
                         }
                     }
                 }

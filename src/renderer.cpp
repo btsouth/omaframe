@@ -531,22 +531,36 @@ static QImage withEdgeRoom(const QImage &source, QMargins room) {
   return result;
 }
 
-QImage compose(const QImage &capture, const Options &o, int maxEdge) {
+QImage compose(const QImage &capture, const Options &o, int maxEdge,
+               qint64 maxPixels) {
   if (capture.isNull())
     return {};
-  if (o.style == 8)
-    return maxEdge > 0 && std::max(capture.width(), capture.height()) > maxEdge
-               ? capture.scaled(QSize(maxEdge, maxEdge), Qt::KeepAspectRatio,
-                                Qt::SmoothTransformation)
-               : capture;
+  const auto bounded = [maxEdge, maxPixels](QSize size) {
+    if (maxEdge > 0 && std::max(size.width(), size.height()) > maxEdge)
+      size.scale(maxEdge, maxEdge, Qt::KeepAspectRatio);
+    const qint64 pixels = qint64(size.width()) * size.height();
+    if (maxPixels > 0 && pixels > maxPixels) {
+      const double ratio = std::sqrt(double(maxPixels) / pixels);
+      size = QSize(std::max(1, int(std::floor(size.width() * ratio))),
+                   std::max(1, int(std::floor(size.height() * ratio))));
+    }
+    return size;
+  };
+  if (o.style == 8) {
+    const QSize target = bounded(capture.size());
+    return target == capture.size()
+               ? capture
+               : capture.scaled(target, Qt::IgnoreAspectRatio,
+                                Qt::SmoothTransformation);
+  }
   const QImage source = withEdgeRoom(capture, edgeRoom(capture));
-  QSize full = outputSize(source.size(), o), target = full;
-  if (maxEdge > 0 && std::max(full.width(), full.height()) > maxEdge)
-    target.scale(maxEdge, maxEdge, Qt::KeepAspectRatio);
+  const QSize full = outputSize(source.size(), o), target = bounded(full);
   const double scale = double(target.width()) / full.width();
   const double w = source.width() * scale, h = source.height() * scale;
   const QRectF card((target.width() - w) / 2, (target.height() - h) / 2, w, h);
   QImage result(target, QImage::Format_ARGB32_Premultiplied);
+  if (result.isNull())
+    return {};
   result.fill(Qt::transparent);
   QPainter p(&result);
   p.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);

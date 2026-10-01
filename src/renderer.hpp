@@ -52,9 +52,10 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
  *  and which ends close to its content. Zero on edges that are not flat or
  *  already have room. */
 QMargins edgeRoom(const QImage &source);
-/** The framed image. Flat edges get their edgeRoom first, except on Raw. */
+/** The framed image. Flat edges get their edgeRoom first, except on Raw.
+ *  Size caps apply after framing and before allocating the result. */
 QImage compose(const QImage &source, const Options &options,
-               int maximumEdge = 0);
+               int maximumEdge = 0, qint64 maximumPixels = 0);
 QImage demoImage(int variant = 0);
 /** The size compose() gives an image of `source` pixels with `room` from
  *  edgeRoom(). */

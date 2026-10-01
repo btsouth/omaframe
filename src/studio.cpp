@@ -4,6 +4,7 @@
 #include "displays.hpp"
 #include "edit-json.hpp"
 #include "ocr.hpp"
+#include "recording.hpp"
 #include "window-targets.hpp"
 #include <QBuffer>
 #include <QDateTime>
@@ -31,7 +32,9 @@
 #include <QUuid>
 #include <QWindow>
 #include <QtConcurrent>
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
 
 static QString originalsDirectory() {
@@ -76,6 +79,100 @@ void ImageStore::put(const QString &name, const QImage &image) {
   images.insert(name, image);
 }
 
+namespace {
+/// Bound preview pixels while keeping tall pages readable (about 24 MB of
+/// ARGB32 at most). A separate edge cap avoids oversized GUI textures.
+constexpr qint64 kPreviewPixels = 6000000;
+/// Finish thumbnails are small; a tall page still gets a usable width.
+constexpr qint64 kThumbnailPixels = 600000;
+/// Conservative GUI texture cap, independent of the capture budget. The
+/// editable original and exported PNG keep their full size.
+constexpr int kPreviewMaxEdge = 8192;
+/// Header and decoded dimensions are checked with withinImageBudget. This
+/// separate allocation limit leaves the decoder room to work.
+constexpr int kImageAllocationLimitMb = 512;
+/// An image this much taller than wide is shown fit to width and scrolled.
+constexpr int kTallImageRatio = 2;
+} // namespace
+
+namespace ScrollUi {
+QSize controlSize() { return {340, 92}; }
+
+bool withinImageBudget(QSize size) {
+  if (size.isEmpty())
+    return false;
+  return size.width() <= stitch::kMaxStitchedEdge &&
+         size.height() <= stitch::kMaxStitchedEdge &&
+         qint64(size.width()) * size.height() <= stitch::kMaxStitchedPixels;
+}
+
+QString imageBudgetError(QSize size) {
+  if (size.isEmpty())
+    return "This image has no pixels.";
+  if (!withinImageBudget(size))
+    return QString("This image is too large. Omaframe opens up to %1 "
+                   "megapixels and %2 pixels on a side, the same limit a "
+                   "scrolling capture stops at.")
+        .arg(stitch::kMaxStitchedPixels / 1000000)
+        .arg(stitch::kMaxStitchedEdge);
+  return {};
+}
+
+QSize fitBudget(QSize size, qint64 maxPixels, int maxEdge) {
+  if (size.isEmpty())
+    return size;
+  double scale = 1.0;
+  const int longest = std::max(size.width(), size.height());
+  if (maxEdge > 0 && longest > maxEdge)
+    scale = double(maxEdge) / longest;
+  const qint64 pixels = qint64(size.width()) * size.height();
+  if (maxPixels > 0 && pixels > 0 && double(pixels) * scale * scale > maxPixels)
+    scale = std::sqrt(double(maxPixels) / pixels);
+  if (scale >= 1.0)
+    return size;
+  return {std::max(1, int(std::lround(size.width() * scale))),
+          std::max(1, int(std::lround(size.height() * scale)))};
+}
+
+Control placeControl(const QList<Display> &displays, const QString &captured,
+                     const QRect &capture, QSize size) {
+  if (size.isEmpty())
+    size = controlSize();
+  QList<Recording::Display> screens;
+  for (const auto &display : displays)
+    screens.append({display.name, display.bounds, QString(), QString(),
+                    QMargins()});
+  // Outside the capture: beside it on its own display, or on the nearest
+  // other display. Recording::placeStop knows the desktop layout.
+  const Recording::Placement outside =
+      Recording::placeStop(screens, captured, capture, size);
+  if (!outside.bounds.isEmpty())
+    return {outside.display, outside.bounds, 0.0, false};
+  // Nowhere outside: sit just inside the top of the capture. The first frame
+  // is taken before the control appears, so those rows are kept whole and the
+  // stitched body starts below the control.
+  constexpr int inset = 12;
+  QRect screen = capture;
+  for (const auto &display : displays)
+    if (display.name == captured)
+      screen = display.bounds;
+  const QRect room = screen.adjusted(inset, inset, -inset, -inset);
+  const int width = std::min(size.width(), std::max(1, room.width()));
+  const int height = std::min(size.height(), std::max(1, room.height()));
+  const int x = std::clamp(capture.center().x() - width / 2, room.left(),
+                           std::max(room.left(), room.right() - width + 1));
+  const int y = std::clamp(capture.top() + inset, room.top(),
+                           std::max(room.top(), room.bottom() - height + 1));
+  const QRect bounds(x, y, width, height);
+  // Cover a little past the control, so rounding at fractional scales cannot
+  // leave a row of it in the stitch.
+  double cover =
+      double(bounds.bottom() + 2 - capture.top()) / std::max(1, screen.height());
+  cover = std::clamp(cover, 0.0, double(capture.height()) / screen.height());
+  return {captured, bounds, cover, true};
+}
+} // namespace ScrollUi
+
 Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
   m_marks.setLockCheck([this] { return m_busy; });
   connect(&m_marks, &MarkDocument::edited, this, [this](bool modified) {
@@ -118,6 +215,17 @@ Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
           [this](QScreen *) { emit changed(); });
   connect(qGuiApp, &QGuiApplication::screenRemoved, this,
           [this](QScreen *) { emit changed(); });
+  // The scrolling capture runs on its own thread. The control appears only
+  // once the first frame is taken, so it is never part of the stitch.
+  m_scrollCapture = new ScrollCapture(this);
+  connect(m_scrollCapture, &ScrollCapture::ready, this, [this] {
+    emit scrollRequested(m_scrollMonitor, m_scrollBounds);
+  });
+  connect(m_scrollCapture, &ScrollCapture::finished, this,
+          &Studio::scrollFinished);
+  connect(m_scrollCapture, &ScrollCapture::failed, this, &Studio::scrollFailed);
+  connect(m_scrollCapture, &ScrollCapture::cancelled, this,
+          &Studio::scrollCancelled);
   if (withDemo)
     loadDemo();
 }
@@ -146,6 +254,11 @@ QString Studio::dimensions() const {
 QString Studio::outputDimensions() const {
   const QSize s = Frame::outputSize(m_workingSize, m_options, m_edgeRoom);
   return QString("%1 × %2").arg(s.width()).arg(s.height());
+}
+bool Studio::tallImage() const {
+  return !m_workingSize.isEmpty() &&
+         qint64(m_workingSize.height()) >
+             qint64(m_workingSize.width()) * kTallImageRatio;
 }
 QString Studio::recoveryAction() const {
   if (m_savedPath.isEmpty() || (!m_copyPending && !m_backupPending))
@@ -270,22 +383,46 @@ void Studio::scheduleRender() {
   const QVector<Frame::Edit> edits = m_marks.visibleEdits();
   const bool thumbnails = !m_editing;
   m_thumbnailsStale = !thumbnails;
-  watcher->setFuture(QtConcurrent::run(
+  watcher->setFuture(QtConcurrent::run(&m_previewPool,
       [source = m_original, edits, options = m_options, thumbnails] {
         PreviewResult result;
         const QImage uncropped = Frame::applyEdits(source, edits, false);
         const QImage working = Frame::cropImage(uncropped, edits);
         result.workingSize = working.size();
         result.edgeRoom = Frame::edgeRoom(working);
-        result.uncropped = uncropped.scaled(1800, 1800, Qt::KeepAspectRatio,
-                                            Qt::SmoothTransformation);
-        result.source = working.scaled(1800, 1800, Qt::KeepAspectRatio,
-                                       Qt::SmoothTransformation);
-        result.preview = Frame::compose(working, options, 1600);
+        // Scale by a pixel budget, not by the long edge alone: a 20000 pixel
+        // page shown at 1600 keeps only a sliver of width, which makes
+        // annotating and cropping guesswork. At 6 megapixels it stays wide
+        // enough to read and still costs about 24 MB, not the page's 200.
+        const bool tall = qint64(working.height()) >
+                          qint64(working.width()) * kTallImageRatio;
+        const auto scaledTo = [](const QImage &image, qint64 pixels, int edge) {
+          const QSize target = ScrollUi::fitBudget(image.size(), pixels, edge);
+          if (target == image.size())
+            return image;
+          return image.scaled(target, Qt::IgnoreAspectRatio,
+                              Qt::SmoothTransformation);
+        };
+        result.uncropped = scaledTo(uncropped, kPreviewPixels, kPreviewMaxEdge);
+        result.source = scaledTo(working, kPreviewPixels, kPreviewMaxEdge);
+        if (tall) {
+          // Framing and aspect changes can grow the image again, so cap the
+          // composed result before its allocation too.
+          result.preview = Frame::compose(
+              scaledTo(working, kPreviewPixels, kPreviewMaxEdge), options,
+              kPreviewMaxEdge, kPreviewPixels);
+        } else {
+          result.preview = Frame::compose(working, options, 1600);
+        }
+        const QImage thumbSource =
+            tall ? scaledTo(working, kThumbnailPixels, kPreviewMaxEdge)
+                 : working;
         for (int i = 0; thumbnails && i < 9; ++i) {
           auto opt = options;
           opt.style = i;
-          result.thumbnails.append(Frame::compose(working, opt, 640));
+          result.thumbnails.append(
+              Frame::compose(thumbSource, opt, tall ? kPreviewMaxEdge : 640,
+                             tall ? kThumbnailPixels : 0));
         }
         return result;
       }));
@@ -365,15 +502,19 @@ void Studio::open(const QUrl &url) {
   watcher->setFuture(QtConcurrent::run([url] {
     QImageReader reader(url.toLocalFile());
     reader.setAutoTransform(true);
+    // The same budget a scrolling capture stops at: whatever it produces can
+    // be opened, edited and saved again. A format whose header has no size
+    // still gets its decoded pixels checked before they are handed on.
     const QSize s = reader.size();
-    if (s.isValid() && (qint64(s.width()) * s.height() > 40000000))
-      return Result{{},
-                    "This image is too large. The first version supports up to "
-                    "40 megapixels."};
+    if (s.isValid() && !ScrollUi::withinImageBudget(s))
+      return Result{{}, ScrollUi::imageBudgetError(s)};
+    reader.setAllocationLimit(kImageAllocationLimitMb);
     QImage image = reader.read();
-    return Result{image, image.isNull()
-                             ? "Could not open image: " + reader.errorString()
-                             : QString()};
+    if (image.isNull())
+      return Result{{}, "Could not open image: " + reader.errorString()};
+    if (!ScrollUi::withinImageBudget(image.size()))
+      return Result{{}, ScrollUi::imageBudgetError(image.size())};
+    return Result{std::move(image), QString()};
   }));
 }
 void Studio::setOutputDirectory(const QUrl &url) {
@@ -511,14 +652,20 @@ void Studio::resumeDraft(const QString &id) {
   }
   QImageReader reader(directory + "/" + id + ".png");
   const QSize size = reader.size();
-  if (!size.isValid() || qint64(size.width()) * size.height() > 40000000) {
+  // A draft is always a PNG written here, so its header always carries the
+  // size. An unreadable header means a damaged file whose size the budget
+  // cannot check: reject it rather than decoding on the hope it is small.
+  if (!size.isValid() || !ScrollUi::withinImageBudget(size)) {
     m_status = "This editable draft has an invalid source image.";
     emit changed();
     return;
   }
+  reader.setAllocationLimit(kImageAllocationLimitMb);
   QImage image = reader.read();
-  if (image.isNull()) {
-    m_status = "Could not reopen the draft image.";
+  // The decoded pixels, not just the header, must fit the budget before this
+  // becomes the editable original.
+  if (image.isNull() || !ScrollUi::withinImageBudget(image.size())) {
+    m_status = "This editable draft has an invalid source image.";
     emit changed();
     return;
   }
@@ -1009,6 +1156,126 @@ void Studio::finishSelection(const QString &monitor, double x1, double y1,
   emit changed();
   emit chooserRequested();
 }
+void Studio::scrollInstead(const QString &monitor) {
+  if (m_quickState != "selecting")
+    return;
+  if (!monitor.isEmpty())
+    m_captureMonitor = monitor;
+  // Stay in the selector: the same click or drag now scrolls and stitches.
+  m_recordingSelection = false;
+  m_scrollSelection = true;
+  emit changed();
+}
+void Studio::captureScroll(int monitor) {
+  if (m_busy)
+    return;
+  m_recordingSelection = false;
+  m_scrollSelection = true;
+  captureImpl(true, monitor, false);
+}
+void Studio::finishScrollSelection(const QString &monitor, double x1, double y1,
+                                   double x2, double y2, double clickX,
+                                   double clickY, bool windowTarget) {
+  // The selector intentionally owns m_busy until a selection completes.
+  // Its state, not the general busy flag, authorizes this transition.
+  if (m_quickState != "selecting")
+    return;
+  QScreen *screen = nullptr;
+  for (auto *candidate : QGuiApplication::screens())
+    if (candidate->name() == monitor)
+      screen = candidate;
+  if (!screen) {
+    cancelSelection();
+    return;
+  }
+  const QRectF area = QRectF(QPointF(x1, y1), QPointF(x2, y2))
+                          .normalized()
+                          .intersected(QRectF(0, 0, 1, 1));
+  if (area.width() <= 0 || area.height() <= 0) {
+    cancelSelection();
+    return;
+  }
+  const QRect display = screen->geometry();
+  const QRect capture(
+      qRound(display.x() + area.left() * display.width()),
+      qRound(display.y() + area.top() * display.height()),
+      std::max(1, qRound(area.width() * display.width())),
+      std::max(1, qRound(area.height() * display.height())));
+  // The control goes outside the capture when any display has room; when it
+  // cannot, it sits on the capture's top and Plan.coverTop keeps its rows out
+  // of the stitch (they come from the first frame, taken before it appears).
+  QList<ScrollUi::Display> displays;
+  for (const auto &info : Displays::fromScreens())
+    displays.append({info.name, info.bounds});
+  const ScrollUi::Control control =
+      ScrollUi::placeControl(displays, monitor, capture);
+  for (const auto &name : m_frozen.keys())
+    m_store->put("capture/" + name, {});
+  m_frozen.clear();
+  emit selectionDone();
+  m_captureMonitor = monitor;
+  m_recordingSelection = false;
+  m_scrollSelection = false;
+  m_scrollReachedLimit = m_scrollReachedEnd = false;
+  m_scrollMonitor = control.monitor;
+  m_scrollBounds = control.bounds;
+  Scrolling::Plan plan;
+  plan.area = area;
+  plan.coverTop = control.coverTop;
+  plan.anchor =
+      Scrolling::anchorFor(area, windowTarget, plan.coverTop, display.size());
+  plan.home =
+      QPointF(std::clamp(clickX, 0.0, 1.0), std::clamp(clickY, 0.0, 1.0));
+  m_busy = true;
+  m_quickState = "scrolling";
+  m_status = "Scrolling the page…";
+  emit changed();
+  m_scrollCapture->start(monitor, display, plan);
+}
+void Studio::scrollFinished(const QImage &image, bool reachedLimit,
+                            bool reachedEnd) {
+  m_busy = false;
+  m_scrollReachedLimit = reachedLimit;
+  m_scrollReachedEnd = reachedEnd;
+  emit scrollEnded();
+  if (image.isNull()) {
+    // Nothing was stitched. End the session terminally so the scrolling state
+    // and its already-hidden controls do not linger with no way out.
+    m_quickState = "cancelled";
+    m_status = "The scrolling capture ended without an image.";
+    emit changed();
+    emit dismissRequested();
+    return;
+  }
+  loadImage(image, "Scrolling capture", false);
+  if (reachedLimit)
+    m_status = "Stopped at the size limit, near the tallest image most "
+               "software opens. Everything captured is here.";
+  else if (!reachedEnd)
+    m_status = "Scrolling stopped early. Everything captured is here.";
+  else
+    m_status = "Scrolling capture ready.";
+  m_quickState = "choosing";
+  emit changed();
+  emit chooserRequested();
+}
+void Studio::scrollFailed(const QString &error) {
+  m_busy = false;
+  emit scrollEnded();
+  m_quickState = "capture-error";
+  m_status = error.isEmpty() ? "The scrolling capture failed." : error;
+  emit changed();
+  emit captureFailed();
+}
+void Studio::scrollCancelled() {
+  m_busy = false;
+  emit scrollEnded();
+  m_quickState = "cancelled";
+  m_status = "Capture cancelled.";
+  emit selectionDone();
+  emit changed();
+  emit dismissRequested();
+}
 void Studio::cancelSelection() {
   if (m_quickState != "selecting")
     return;
@@ -1208,6 +1475,7 @@ void Studio::recordInstead(const QString &monitor) {
     m_captureMonitor = monitor;
   // Stay in the selector: the same drag or click now starts a recording.
   m_recordingSelection = true;
+  m_scrollSelection = false;
   emit changed();
   emit recordModeEntered();
 }

@@ -24,6 +24,7 @@ Window {
     title: "Omaframe selection"
     Shortcut {sequence: "Escape"; enabled: window.visible; onActivated: studio.cancelSelection()}
     Shortcut {sequence: "Tab"; enabled: window.visible && !window.dragging; onActivated: window.toggleMode()}
+    Shortcut {sequence: "S"; enabled: window.visible && !window.dragging; onActivated: window.toggleScroll()}
     Shortcut {sequence: "F"; enabled: window.visible && !window.dragging; onActivated: window.wholeDisplay()}
     Shortcut {sequence: "D"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
     Shortcut {sequence: "M"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
@@ -59,10 +60,24 @@ Window {
         else
             studio.recordInstead(window.monitorName);
     }
+    function toggleScroll() {
+        if (studio.scrollSelection)
+            studio.useScreenshotSelection();
+        else
+            studio.scrollInstead(window.monitorName);
+    }
+    // One place decides between a plain capture and a scrolling one, so every
+    // way of choosing an area behaves the same.
+    function finish(monitor, x1, y1, x2, y2, clickX, clickY, windowTarget) {
+        if (studio.scrollSelection)
+            studio.finishScrollSelection(monitor, x1, y1, x2, y2, clickX, clickY, windowTarget);
+        else
+            studio.finishSelection(monitor, x1, y1, x2, y2);
+    }
     // Each display has its own selector, but only one gets the keyboard.
     // F records or captures the display the pointer is on.
     function wholeDisplay() {
-        studio.finishSelection(studio.pointerMonitor.length ? studio.pointerMonitor : window.monitorName, 0, 0, 1, 1);
+        window.finish(studio.pointerMonitor.length ? studio.pointerMonitor : window.monitorName, 0, 0, 1, 1, 0.5, 0.5, false);
     }
     function cycleCountdown() {
         recorder.countdown = recorder.countdown === 0 ? 3 : recorder.countdown === 3 ? 5 : 0;
@@ -181,13 +196,15 @@ Window {
             const dx = mouse.x - window.startX;
             const dy = mouse.y - window.startY;
             const target = window.targetAt(mouse.x, mouse.y);
+            const cx = Math.max(0, Math.min(1, mouse.x / width));
+            const cy = Math.max(0, Math.min(1, mouse.y / height));
             if (dx * dx + dy * dy < 36) {
                 if (target)
-                    studio.finishSelection(window.monitorName, target.x, target.y, target.x + target.w, target.y + target.h);
+                    window.finish(window.monitorName, target.x, target.y, target.x + target.w, target.y + target.h, cx, cy, true);
                 else
-                    studio.finishSelection(window.monitorName, 0, 0, 1, 1);
+                    window.finish(window.monitorName, 0, 0, 1, 1, cx, cy, false);
             } else
-                studio.finishSelection(window.monitorName, window.startX / width, window.startY / height, window.endX / width, window.endY / height);
+                window.finish(window.monitorName, window.startX / width, window.startY / height, window.endX / width, window.endY / height, cx, cy, false);
             window.dragging = false;
             window.hoveredTarget = target;
         }
@@ -325,8 +342,8 @@ Window {
             ModeButton {
                 label: "Screenshot"
                 glyph: "capture"
-                chosen: !studio.recordingSelection
-                onActivated: if (studio.recordingSelection) studio.useScreenshotSelection()
+                chosen: !studio.recordingSelection && !studio.scrollSelection
+                onActivated: if (studio.recordingSelection || studio.scrollSelection) studio.useScreenshotSelection()
             }
             ModeButton {
                 label: "Video"
@@ -335,10 +352,18 @@ Window {
                 markColor: theme.recording
                 onActivated: if (!studio.recordingSelection) studio.recordInstead(window.monitorName)
             }
+            ModeButton {
+                label: "Scroll"
+                glyph: "image"
+                chosen: studio.scrollSelection
+                onActivated: if (!studio.scrollSelection) studio.scrollInstead(window.monitorName)
+            }
             Rectangle {visible: bar.showPrompt; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
             Text {
                 visible: bar.showPrompt
-                text: studio.recordingSelection ? "Click a window or drag an area to record" : "Click a window or drag an area"
+                text: studio.recordingSelection ? "Click a window or drag an area to record"
+                    : studio.scrollSelection ? "Click a window or drag an area to scroll and stitch"
+                    : "Click a window or drag an area"
                 color: theme.text
                 font.family: theme.fontFamily
                 font.pixelSize: 13
@@ -348,8 +373,8 @@ Window {
                 label: window.width < 760 ? "" : "Whole display"
                 glyph: "display"
                 checkable: false
-                hint: (studio.recordingSelection ? "Record" : "Capture") + " this entire display · F"
-                onActivated: studio.finishSelection(window.monitorName, 0, 0, 1, 1)
+                hint: (studio.recordingSelection ? "Record" : studio.scrollSelection ? "Scroll-capture" : "Capture") + " this entire display · F"
+                onActivated: window.finish(window.monitorName, 0, 0, 1, 1, 0.5, 0.5, false)
             }
             BarToggle {
                 visible: studio.recordingSelection
@@ -388,6 +413,8 @@ Window {
             Rectangle {visible: bar.showHints; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
             Keycap {visible: bar.showHints; key: "Tab"}
             Text {visible: bar.showHints; text: studio.recordingSelection ? "Screenshot" : "Video"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
+            Keycap {visible: bar.showHints; key: "S"}
+            Text {visible: bar.showHints; text: studio.scrollSelection ? "Screenshot" : "Scroll"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
             Keycap {
                 key: "Esc"
                 Accessible.role: Accessible.Button
@@ -422,7 +449,9 @@ Window {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
-            text: studio.recordingSelection ? "Click a window or drag an area to record" : "Click a window or drag an area"
+            text: studio.recordingSelection ? "Click a window or drag an area to record"
+                : studio.scrollSelection ? "Click a window or drag an area to scroll and stitch"
+                : "Click a window or drag an area"
             color: theme.text
             font.family: theme.fontFamily
             font.pixelSize: 12
