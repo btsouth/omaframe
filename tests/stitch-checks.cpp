@@ -235,16 +235,22 @@ bool runLookaheadChecks() {
       CHECK_FAILED;
   }
 
-  // Periodic terminal content with later unique evidence resolves strictly.
+  // Full-overlap scoring sees the unique evidence near the viewport edge,
+  // rather than delaying it until a fixed central sample happens to see it.
+  // The strict lookahead resolver must confirm the same path independently.
   {
     const GrayView f0 = periodicTerminalWithUniqueGray(0);
     const GrayView f1 = periodicTerminalWithUniqueGray(18);
     const GrayView f2 = periodicTerminalWithUniqueGray(18 + 182);
     const ForwardMatch match =
         classifyForwardWithLookahead(f0, f1, Axis::Vertical);
-    if (match.tag != ForwardMatch::Tag::Ambiguous || !match.ambiguous)
+    if (match.tag != ForwardMatch::Tag::Classified ||
+        match.classified.motion.kind != MotionKind::Forward ||
+        match.classified.motion.delta != 18)
       CHECK_FAILED;
-    const ForwardLookahead &pending = *match.ambiguous;
+    const ForwardLookahead pending(f0, f1, Axis::Vertical,
+                                   forwardCandidateSet(f0, f1, Axis::Vertical),
+                                   match.classified);
     if (std::none_of(pending.candidates().begin(), pending.candidates().end(),
                      [](const ForwardMatchCandidate &c) { return c.delta == 18; }))
       CHECK_FAILED;
