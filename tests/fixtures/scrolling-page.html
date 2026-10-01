@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Omaframe scrolling fixture</title>
+<style>
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; color: #202936; background: #fbfbf8; font: 22px sans-serif; }
+  header { position: sticky; top: 0; z-index: 1; height: 56px; padding: 13px 32px; background: #173454; color: white; }
+  main { padding: 20px 32px 60px; }
+  .row { height: 72px; display: flex; align-items: center; gap: 40px; border-bottom: 1px solid #cdd5df; }
+  .number { width: 180px; font: bold 24px monospace; }
+  .sample { width: 360px; height: 24px; }
+  footer { position: fixed; bottom: 0; height: 32px; width: 100%; padding: 4px 32px; font-size: 18px; background: #dce3ec; }
+  ::-webkit-scrollbar { width: 12px; }
+  ::-webkit-scrollbar-track { background: #eeeeee; }
+  ::-webkit-scrollbar-thumb { border: 2px solid #eeeeee; background: #a0a4aa; }
+</style>
+<header>Scrolling fixture: fixed header</header>
+<main id="rows"></main>
+<footer>Fixed footer: capture through ROW 060</footer>
+<script>
+  const rows = document.getElementById('rows');
+  for (let n = 1; n <= 60; ++n) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const number = document.createElement('span');
+    number.className = 'number';
+    number.textContent = `ROW ${String(n).padStart(3, '0')}`;
+    const text = document.createElement('span');
+    text.textContent = 'A repeated table row with a unique number';
+    const sample = document.createElement('span');
+    sample.className = 'sample';
+    sample.style.background = `hsl(${n * 137.508 % 360} 55% 60%)`;
+    row.append(number, text, sample);
+    rows.append(row);
+  }
+  document.documentElement.dataset.ready = 'true';
+</script>

@@ -78,6 +78,9 @@ int main(int argc, char **argv) {
   parser.addOption({"capture", "Capture a region immediately."});
   parser.addOption({"repeat", "Capture the last selected screen area again."});
   parser.addOption({"screen", "Capture the active monitor immediately."});
+  parser.addOption({"scroll",
+                    "Select a window or area to capture as one tall "
+                    "scrolling image."});
   parser.addPositionalArgument("file", "Image or video to open.", "[file]");
   parser.process(app);
   const bool captureStartup =
@@ -96,6 +99,7 @@ int main(int argc, char **argv) {
       : parser.isSet("studio")                 ? "studio"
       : parser.isSet("repeat")                 ? "repeat"
       : parser.isSet("screen")                 ? "screen"
+      : parser.isSet("scroll")                 ? "scroll"
                                                : "capture";
   const bool recordingControl =
       command == "stop-recording" || command == "pause-recording" ||
@@ -202,6 +206,7 @@ int main(int argc, char **argv) {
   QQuickWindow *chooser = nullptr;
   QQuickWindow *recordSetup = nullptr;
   QQuickWindow *recordControl = nullptr;
+  QQuickWindow *scrollControl = nullptr;
   bool quickRecordingReview = false, reviewReturnsToStudio = false;
   QObject::connect(&video, &Video::opening, &app,
                    [&] { quickRecordingReview = false; });
@@ -543,6 +548,45 @@ int main(int argc, char **argv) {
     recordControl->resize(placement.bounds.size());
     recordControl->show();
   });
+  // The scrolling capture's progress control appears only after the first
+  // frame is taken, at the place Studio reserved for it: outside the capture
+  // when there was room, otherwise just inside its top, which Plan.coverTop
+  // keeps out of the stitch.
+  auto showScrollControl = [&](const QString &monitor, const QRect &bounds) {
+    auto *screen = screenFor(monitor);
+    if (!screen || bounds.isEmpty()) {
+      studio.scrollCapture()->cancel();
+      return;
+    }
+    if (!scrollControl) {
+      QQmlComponent component(&engine, QUrl("qrc:/qml/ScrollControl.qml"));
+      scrollControl = qobject_cast<QQuickWindow *>(component.create());
+      if (!scrollControl) {
+        studio.scrollCapture()->cancel();
+        return;
+      }
+    }
+    auto *layer = LayerShellQt::Window::get(scrollControl);
+    layer->setScope("omaframe-scroll-control");
+    layer->setLayer(LayerShellQt::Window::LayerOverlay);
+    layer->setExclusiveZone(-1);
+    layer->setKeyboardInteractivity(
+        LayerShellQt::Window::KeyboardInteractivityExclusive);
+    layer->setAnchors(LayerShellQt::Window::Anchors::fromInt(
+        LayerShellQt::Window::AnchorTop | LayerShellQt::Window::AnchorLeft));
+    const QPoint origin = bounds.topLeft() - screen->geometry().topLeft();
+    layer->setMargins(QMargins(origin.x(), origin.y(), 0, 0));
+    scrollControl->setScreen(screen);
+    layer->setScreen(screen);
+    scrollControl->resize(bounds.size());
+    scrollControl->show();
+    scrollControl->requestActivate();
+  };
+  QObject::connect(&studio, &Studio::scrollRequested, &app, showScrollControl);
+  QObject::connect(&studio, &Studio::scrollEnded, &app, [&] {
+    if (scrollControl)
+      scrollControl->hide();
+  });
   auto openReview = [&](const QUrl &path, bool returnsToStudio) {
     hideAll();
     studio.leaveQuickMode();
@@ -705,6 +749,8 @@ int main(int argc, char **argv) {
                        studio.repeatLastArea();
                      else if (cmd == "capture" || cmd == "screen")
                        studio.capture(cmd == "capture");
+                     else if (cmd == "scroll")
+                       studio.captureScroll();
                      else if (cmd == "review")
                        openReview(path, pendingReviewReturnsToStudio);
                      else if (cmd == "video-draft") {
@@ -768,7 +814,7 @@ int main(int argc, char **argv) {
           if (!studio.busy() && !video.busy() && !studio.quickMode()) {
             if (cmd == "repeat")
               requestNavigation(cmd);
-            else if (cmd == "capture" || cmd == "screen")
+            else if (cmd == "capture" || cmd == "screen" || cmd == "scroll")
               requestNavigation(cmd);
           }
           return;
@@ -781,7 +827,9 @@ int main(int argc, char **argv) {
             studio.recordInstead();
             return;
           }
-          if (chooser && chooser->isVisible())
+          if (scrollControl && scrollControl->isVisible())
+            scrollControl->requestActivate();
+          else if (chooser && chooser->isVisible())
             chooser->requestActivate();
           else if (window && window->isVisible())
             window->requestActivate();
@@ -791,7 +839,7 @@ int main(int argc, char **argv) {
           requestNavigation(
               cmd, QUrl::fromLocalFile(request.value("file").toString()));
         else if (cmd == "record" || cmd == "repeat" || cmd == "capture" ||
-                 cmd == "screen")
+                 cmd == "screen" || cmd == "scroll")
           requestNavigation(cmd);
         else
           showStudioWindow();
@@ -811,6 +859,8 @@ int main(int argc, char **argv) {
         studio.captureVideo();
       else if (command == "repeat")
         studio.repeatLastArea();
+      else if (command == "scroll")
+        studio.captureScroll();
       else {
         mark("capture requested");
         studio.capture(command != "screen");
@@ -820,5 +870,6 @@ int main(int argc, char **argv) {
   clearSelections();
   delete recordSetup;
   delete recordControl;
+  delete scrollControl;
   return result;
 }

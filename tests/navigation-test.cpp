@@ -8,7 +8,7 @@ private slots:
   void cleanRequestsProceed_data() {
     QTest::addColumn<QString>("command");
     for (const auto *cmd :
-         {"open", "capture", "screen", "repeat", "record", "review", "home", "quit"})
+         {"open", "capture", "scroll", "screen", "repeat", "record", "review", "home", "quit"})
       QTest::newRow(cmd) << QString(cmd);
   }
   void cleanRequestsProceed() {

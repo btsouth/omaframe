@@ -48,7 +48,7 @@ target_link_libraries(navigation-core PUBLIC Qt6::Core)
 target_include_directories(navigation-core PUBLIC src)
 qt_add_executable(omaframe src/main.cpp)
 target_link_libraries(omaframe PRIVATE studio-core theme-core navigation-core Qt6::Network Qt6::QuickControls2 Qt6::Multimedia LayerShellQt::Interface)
-qt_add_resources(omaframe ui PREFIX / FILES qml/Main.qml qml/RecordToggle.qml qml/RecordSetup.qml qml/RecordingControl.qml qml/FinishChooser.qml qml/Selection.qml qml/StudioButton.qml qml/BarHint.qml qml/ColorChoice.qml qml/ToolStyleButton.qml qml/Glyph.qml qml/VideoPane.qml qml/Choice.qml qml/ThemedSlider.qml qml/NumberField.qml qml/ConfirmDialog.qml qml/ShortcutPanel.qml qml/MarkCanvas.qml)
+qt_add_resources(omaframe ui PREFIX / FILES qml/Main.qml qml/RecordToggle.qml qml/RecordSetup.qml qml/RecordingControl.qml qml/ScrollControl.qml qml/FinishChooser.qml qml/Selection.qml qml/StudioButton.qml qml/BarHint.qml qml/ColorChoice.qml qml/ToolStyleButton.qml qml/Glyph.qml qml/VideoPane.qml qml/Choice.qml qml/ThemedSlider.qml qml/NumberField.qml qml/ConfirmDialog.qml qml/ShortcutPanel.qml qml/MarkCanvas.qml)
 if(BUILD_TESTING)
   qt_add_executable(webcam-tests tests/webcam-test.cpp)
   target_link_libraries(webcam-tests PRIVATE studio-core Qt6::Test)
@@ -88,8 +88,12 @@ if(BUILD_TESTING)
   target_link_libraries(scroll-capture-tests PRIVATE studio-core Qt6::Test)
   add_test(NAME scroll-capture COMMAND scroll-capture-tests)
   set_tests_properties(scroll-capture PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  qt_add_executable(scroll-studio-tests tests/scroll-studio-test.cpp)
+  target_link_libraries(scroll-studio-tests PRIVATE studio-core Qt6::Test)
+  add_test(NAME scroll-studio COMMAND scroll-studio-tests)
+  set_tests_properties(scroll-studio PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   # These suites use fixtures or stub tools and need no desktop session.
-  set_tests_properties(webcam navigation recording displays renderer theme video-marks scroll-capture
+  set_tests_properties(webcam navigation recording displays renderer theme video-marks scroll-capture scroll-studio
     PROPERTIES LABELS "headless")
   # Rendered OCR fixtures depend on the desktop's system font choices.
   set_tests_properties(ocr PROPERTIES LABELS "recognition")
