@@ -490,8 +490,49 @@ private slots:
     const QImage image = capture(display, error, {}, {}, &limit);
     QVERIFY2(!image.isNull(), qPrintable(error));
     QVERIFY(limit);
-    QVERIFY(image.height() <= stitch::kMaxStitchedEdge + display.toolbar);
+    QVERIFY(image.height() <= stitch::kMaxStitchedEdge);
+    QVERIFY(qint64(image.width()) * image.height() <= stitch::kMaxStitchedPixels);
     QVERIFY(image.height() > 30000);
+  }
+
+  void restoredControlRowsCountTowardTheSizeLimit() {
+    FakeDisplay display;
+    display.page = makeDocument(display.window.width() - display.bar, 34000);
+    display.coverRows = display.toolbar;
+    QString error;
+    bool limit = false;
+    const QImage image = capture(display, error, {}, {}, &limit);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QVERIFY(limit);
+    QVERIFY(image.height() <= stitch::kMaxStitchedEdge);
+    QVERIFY(qint64(image.width()) * image.height() <= stitch::kMaxStitchedPixels);
+    QVERIFY(image.height() > 31000);
+  }
+
+  void pendingManualFramesRespectTheSizeLimit() {
+    QImage document(64, 240, QImage::Format_RGBA8888);
+    QRandomGenerator random(123);
+    for (int y = 0; y < document.height(); ++y)
+      for (int x = 0; x < document.width(); ++x)
+        document.setPixelColor(x, y, QColor::fromRgb(random.generate()));
+    const QImage first = document.copy(0, 0, 64, 200);
+    QString error;
+    bool ok = false;
+    stitch::StitchAccumulator accumulator(first, stitch::Axis::Vertical, ok, error);
+    QVERIFY(ok);
+    while (accumulator.extent() < 31990)
+      QVERIFY(accumulator.pushForward(first,
+          std::min(100, 31990 - accumulator.extent()), error));
+    const int kept = accumulator.frameCount();
+    stitch::ManualCapture manual(stitch::Axis::Vertical, std::move(accumulator),
+        stitch::downsampleToGray(first, stitch::Axis::Vertical), kept);
+    const auto out = manual.feed(document.copy(0, 12, 64, 200));
+    QCOMPARE(out.event, stitch::ManualCapture::Event::Full);
+    QCOMPARE(out.keptFrames, kept);
+    QCOMPARE(out.pendingDelta, 0);
+    const QImage image = manual.finish(error);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QCOMPARE(image.height(), 31990);
   }
 
   void probeStopsAtTheSizeLimitWithoutLosingFrames() {
