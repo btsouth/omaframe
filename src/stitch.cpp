@@ -959,6 +959,11 @@ ForwardCandidateSet forwardCandidateSet(const GrayView &prev,
   // Like classifyMotion, leave out the rows that did not move at all: a
   // toolbar, a sticky header or a status bar would otherwise count against
   // the true offset and let a repeated row win.
+  // An identical pair can be a whole period of moving content, not fixed
+  // chrome. Cropping it would shrink the cumulative search and make a
+  // genuinely ambiguous three-frame path look unique.
+  if (prev.pixels == cur.pixels)
+    return forwardCandidateSetCropped(prev, cur, axis);
   const StationaryEdges edges = stationaryScoringEdges(prev, cur, axis);
   if (edges.lead + edges.trail == 0)
     return forwardCandidateSetCropped(prev, cur, axis);

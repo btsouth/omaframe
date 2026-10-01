@@ -358,7 +358,10 @@ QImage Session::capture(QString &error) {
     }
     QImage frame;
     QString grabError;
-    if (!settledFrame(committed, frame, grabError)) {
+    // A probe starts from the held frame, not the last committed one. At
+    // the page end the compositor sends no damage, so settledFrame returns
+    // this reference unchanged to confirm the stationary probe.
+    if (!settledFrame(probe ? held : committed, frame, grabError)) {
       if (stopRequested())
         break;
       if (!grabError.isEmpty() && !m_desktop.stopped()) {
