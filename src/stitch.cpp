@@ -1398,16 +1398,16 @@ ManualCapture::Outcome ManualCapture::recordMotion(const QImage &cropped,
     direction_ = direction;
   }
   const int axisLen = gray.axisLen(axis_);
+  if (accumulator_->wouldExceedBudget(delta)) {
+    // Check even a pending movement before retaining it. finish() commits
+    // that movement, so it must fit just like a full band.
+    return outcome(Event::Full, estimate);
+  }
   if (delta < coalesceThreshold(axisLen)) {
     // Hold small movement back; it is replaced as it grows and committed by
     // the next large step or by finish().
     pending_ = PendingFrame{cropped, delta, direction};
     return outcome(Event::Pending, estimate);
-  }
-  if (accumulator_->wouldExceedBudget(delta)) {
-    // A designed limit, not a failure: the capture so far is intact and the
-    // caller stops here rather than refusing a frame every tick.
-    return outcome(Event::Full, estimate);
   }
   QString error;
   const bool pushed = direction == Direction::Forward
