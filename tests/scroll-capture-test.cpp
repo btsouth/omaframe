@@ -105,6 +105,7 @@ struct FakeDisplay {
   bool losesWheelFocus = false, wheelFocused = false;
   /// A spinner in the toolbar that never holds still.
   bool spinner = false;
+  bool cornerControls = false;
   int spin = 0;
   /// The control the app shows, drawn into the top of the window once it
   /// may appear.
@@ -151,6 +152,8 @@ struct FakeDisplay {
     if (spinner)
       p.fillRect(w.x() + 1100 + (spin++ % 4) * 4, w.y() + 30, 6, 6,
                  QColor("#3a6ea5"));
+    if (cornerControls)
+      p.fillRect(w.right() - 5, w.y() + 20, 6, 6, QColor(1, 2, 3));
     const int top = w.y() + toolbar;
     p.fillRect(w.x(), top, w.width(), sticky, QColor("#123456"));
     p.fillRect(w.x() + 30, top + 16, 140, 16, QColor("#f0c674"));
@@ -167,12 +170,15 @@ struct FakeDisplay {
     p.fillRect(barX + 2, thumbY, bar - 4, thumb, QColor("#a0a4aa"));
     p.fillRect(w.x(), top + sticky + view, w.width(), status, QColor("#dfe1e5"));
     p.fillRect(w.x() + 8, top + sticky + view + 6, 90, 10, QColor("#7a8290"));
+    if (cornerControls)
+      p.fillRect(w.right() - 5, w.bottom() - 12, 6, 6, QColor(3, 2, 1));
     if (coverShown && coverRows > 0)
       p.fillRect(w.x() + 300, w.y(), 400, coverRows, QColor("#ff00ff"));
     return frame;
   }
 
-  /// What a perfect capture of the whole page looks like.
+  /// Expected page content, excluding the scrollbar columns. Full-width
+  /// headers and footers are checked separately against the original frame.
   QImage expected() const {
     const int height = toolbar + sticky + page.height() + status;
     QImage image(window.width() - bar, height, QImage::Format_ARGB32);
@@ -350,6 +356,35 @@ private slots:
     QCOMPARE(differingRows(image, display.expected()), 0);
   }
 
+  void keepsTheFullHeaderAndFooter_data() {
+    QTest::addColumn<int>("coverRows");
+    QTest::newRow("control-outside") << 0;
+    QTest::newRow("control-over-header") << 40;
+  }
+
+  void keepsTheFullHeaderAndFooter() {
+    QFETCH(int, coverRows);
+    FakeDisplay display;
+    display.page = makeDocument(1200, 3000, 11);
+    display.cornerControls = true;
+    display.coverRows = coverRows;
+    const QImage original = display.render().copy(display.window)
+                                .convertToFormat(QImage::Format_RGBA8888);
+    Scrolling::Plan plan = planFor(display);
+    plan.coverTop = double(coverRows) / display.size.height();
+    QString error;
+    const QImage image = capture(display, error, {}, plan);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QCOMPARE(image.width(), original.width());
+    QCOMPARE(image.copy(0, 0, image.width(), display.toolbar),
+             original.copy(0, 0, original.width(), display.toolbar));
+    QCOMPARE(image.copy(0, image.height() - display.status,
+                        image.width(), display.status),
+             original.copy(0, original.height() - display.status,
+                           original.width(), display.status));
+    QCOMPARE(image.pixelColor(image.width() - 3, 23), QColor(1, 2, 3));
+  }
+
   void capturesAWholePageExactly() {
     FakeDisplay display;
     display.page = makeDocument(1200, 5200);
@@ -360,10 +395,8 @@ private slots:
     QVERIFY(end);
     const QImage expected = display.expected();
     QCOMPARE(image.height(), expected.height());
-    // The scroll bar is gone, and nothing of the page with it.
-    QVERIFY2(image.width() <= expected.width() &&
-                 image.width() >= expected.width() - 6,
-             qPrintable(QString::number(image.width())));
+    // Capturing a window must preserve every selected column.
+    QCOMPARE(image.width(), display.window.width());
     QCOMPARE(differingRows(image, expected), 0);
   }
 
@@ -652,29 +685,6 @@ private slots:
     QString error;
     QVERIFY(capture(display, error, {}, plan).isNull());
     QVERIFY(!error.isEmpty());
-  }
-
-  void findsAScrollBar() {
-    // A page scrolled by 80 pixels with a thumb that moves the other way.
-    QImage page = makeDocument(400, 1200, 31).convertToFormat(QImage::Format_RGBA8888);
-    Scrolling::EdgeStrip strip;
-    auto frameAt = [&](int y) {
-      QImage f = page.copy(0, y, 400, 500);
-      QPainter p(&f);
-      p.fillRect(388, 0, 12, 500, QColor("#eeeeee"));
-      p.fillRect(390, y / 2, 8, 60, QColor("#999999"));
-      return f;
-    };
-    strip.observe(frameAt(0), frameAt(80), 80);
-    QCOMPARE(strip.width(), 0); // one step proves nothing
-    strip.observe(frameAt(80), frameAt(160), 80);
-    strip.observe(frameAt(160), frameAt(240), 80);
-    QVERIFY(strip.width() >= 12 && strip.width() <= 16);
-    // A page without one keeps every column.
-    Scrolling::EdgeStrip none;
-    for (int y = 0; y < 300; y += 80)
-      none.observe(page.copy(0, y, 400, 500), page.copy(0, y + 80, 400, 500), 80);
-    QCOMPARE(none.width(), 0);
   }
 };
 

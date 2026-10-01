@@ -27,8 +27,6 @@ bool debugging() {
   return on;
 }
 
-int luma(QRgb p) { return (qRed(p) * 77 + qGreen(p) * 150 + qBlue(p) * 29) >> 8; }
-
 /// Columns at the right edge that are left out when deciding whether the
 /// page is still moving. A scroll bar that fades in and out after every
 /// step is not the page moving, and waiting for it would slow each step.
@@ -59,79 +57,6 @@ bool looksStill(const QImage &a, const QImage &b) {
   return changed <= std::max(4, samples / 1000);
 }
 } // namespace
-
-void EdgeStrip::observe(const QImage &before, const QImage &after, int delta) {
-  const int w = before.width(), h = before.height();
-  if (delta <= 0 || delta >= h - 16 || after.size() != before.size() ||
-      w < 160)
-    return;
-  const int window = std::min(48, w / 8);
-  // How many rows of column `x` do not line up once the page has moved by
-  // `delta`.
-  auto mismatches = [&](int x) {
-    int count = 0;
-    for (int y = 0; y + delta < h; ++y)
-      if (std::abs(luma(before.pixel(x, y + delta)) - luma(after.pixel(x, y))) > 24)
-        ++count;
-    return count;
-  };
-  // Content columns say how much of the frame does not line up anyway: a
-  // sticky header does that for every column, a scroll bar only for its own.
-  std::vector<int> content;
-  for (int i = 0; i < 9; ++i)
-    content.push_back(mismatches(w * (20 + i * 7) / 100));
-  std::nth_element(content.begin(), content.begin() + 4, content.end());
-  const int baseline = content[4];
-  const int noise = std::max(4, (h - delta) / 60);
-  if (m_votes.size() != static_cast<size_t>(window)) {
-    m_votes.assign(window, 0);
-    m_trackVotes.assign(window, 0);
-  }
-  for (int i = 0; i < window; ++i) {
-    const int x = w - window + i;
-    if (mismatches(x) > baseline + noise)
-      ++m_votes[i];
-    // The thumb changes, but its track borders match the outer track
-    // column. Keep those borders with the thumb rather than leaving a
-    // repeated sliver of the scrollbar behind.
-    int different = 0;
-    for (int y = 0; y < h; ++y)
-      if (std::abs(luma(after.pixel(x, y)) - luma(after.pixel(w - 1, y))) > 8)
-        ++different;
-    if (different <= std::max(3, h / 100))
-      ++m_trackVotes[i];
-  }
-  ++m_steps;
-}
-
-int EdgeStrip::width() const {
-  // A scroll bar shows up step after step, so one odd step proves nothing.
-  if (m_steps < 2 || m_votes.empty())
-    return 0;
-  const int window = static_cast<int>(m_votes.size());
-  // Walk in from the right edge. A pixel or two of window border may not
-  // vote; the bar itself must, column after column.
-  int i = window - 1, quiet = 0;
-  while (i >= 0 && m_votes[i] * 2 <= m_steps && quiet < 3) {
-    --i;
-    ++quiet;
-  }
-  int bar = 0;
-  while (i >= 0 && m_votes[i] * 2 > m_steps) {
-    --i;
-    ++bar;
-  }
-  // Scroll bars are 3 to 24 pixels wide; anything wider is page content
-  // moving on its own.
-  if (bar < 3 || bar > 32)
-    return 0;
-  int track = 0;
-  while (i >= 0 && m_trackVotes[i] * 2 > m_steps && track < 4) {
-    --i;
-    ++track;
-  }
-  return std::min(window, bar + quiet + track);
-}
 
 QRect areaPixels(QRectF area, QSize size) {
   // Round edges, not extents, so the crop never drifts a pixel against the
@@ -312,7 +237,6 @@ QImage Session::capture(QString &error) {
   if (m_ready)
     m_ready();
 
-  EdgeStrip strip;
   QImage committed = first, held;
   std::optional<stitch::AutoCapture> automatic;
   std::optional<stitch::ManualCapture> manual;
@@ -421,15 +345,12 @@ QImage Session::capture(QString &error) {
     }
     switch (out.event) {
     case AutoEvent::Appended:
-      strip.observe(committed, frame, out.estimate.motion.delta);
       committed = frame;
       break;
     case AutoEvent::ProbeStarted:
       held = frame;
       break;
     case AutoEvent::Committed:
-      strip.observe(committed, held, out.firstDelta);
-      strip.observe(held, frame, out.secondDelta);
       committed = frame;
       held = {};
       break;
@@ -517,7 +438,6 @@ QImage Session::capture(QString &error) {
               << out.estimate.error << out.estimate.confidence << out.pendingDelta;
     switch (out.event) {
     case ManualEvent::Kept:
-      strip.observe(committed, current, out.estimate.motion.delta);
       committed = current;
       handover.clear();
       report(Progress::Mode::Manual, length(), "Keep scrolling, then Done.");
@@ -583,9 +503,8 @@ QImage Session::capture(QString &error) {
   for (int y = 0; y < body.height(); ++y)
     std::memcpy(image.scanLine(restore + y), body.constScanLine(y),
                 image.bytesPerLine());
-  // A scroll bar repeats its thumb at every seam; leave it out of the page.
-  if (const int bar = strip.width(); bar > 0 && bar < image.width() / 4)
-    image = image.copy(0, 0, image.width() - bar, image.height());
+  // Keep the selected width, including controls in the fixed header and
+  // footer. Removing scrollbar columns from the whole image also cuts them.
   m_reachedLimit = limit;
   // A capture that hit the budget did not reach the end of the page, even
   // when the limit only showed while the image was assembled here.
