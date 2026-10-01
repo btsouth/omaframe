@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <QDebug>
 
 namespace stitch {
 
@@ -1069,6 +1070,12 @@ ForwardCandidateSet forwardCandidateSetCropped(const GrayView &prev,
                   refined.end());
   }
   result.candidates = std::move(refined);
+  if (qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG")) {
+    QStringList candidates;
+    for (const auto &candidate : result.candidates)
+      candidates << QString::number(candidate.delta) + ":" + QString::number(candidate.error);
+    qInfo() << "[DEBUG-scroll] candidates" << axisLen << candidates;
+  }
   return result;
 }
 } // namespace

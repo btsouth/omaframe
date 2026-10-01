@@ -287,7 +287,12 @@ class ScrollCaptureTest : public QObject {
     QList<Scrolling::Progress> progress;
     Scrolling::Session session(
         display.desktop(stopped), plan,
-        [&](const Scrolling::Progress &p) { progress << p; },
+        [&](const Scrolling::Progress &p) {
+          progress << p;
+          if (qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG"))
+            qInfo() << "[DEBUG-scroll] progress" << p.length << "actual"
+                    << display.window.height() + qRound(display.scrollY);
+        },
         [&] { display.coverShown = true; }, fastTiming());
     if (during)
       during(session);
