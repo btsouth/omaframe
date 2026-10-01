@@ -19,6 +19,15 @@ foreach(PROTOCOL ext-foreign-toplevel-list ext-image-capture-source ext-image-co
     COMMAND ${WAYLAND_SCANNER} private-code ${XML} ${CODE} DEPENDS ${XML} VERBATIM)
   list(APPEND PROTOCOL_SOURCES ${HEADER} ${CODE})
 endforeach()
+# Scrolling capture's virtual pointer. Not in wayland-protocols, so it ships
+# with the source.
+set(XML ${CMAKE_CURRENT_SOURCE_DIR}/protocols/wlr-virtual-pointer-unstable-v1.xml)
+set(HEADER ${CMAKE_CURRENT_BINARY_DIR}/wlr-virtual-pointer-unstable-v1-client-protocol.h)
+set(CODE ${CMAKE_CURRENT_BINARY_DIR}/wlr-virtual-pointer-unstable-v1-protocol.c)
+add_custom_command(OUTPUT ${HEADER} ${CODE}
+  COMMAND ${WAYLAND_SCANNER} client-header ${XML} ${HEADER}
+  COMMAND ${WAYLAND_SCANNER} private-code ${XML} ${CODE} DEPENDS ${XML} VERBATIM)
+list(APPEND PROTOCOL_SOURCES ${HEADER} ${CODE})
 add_library(frame-core src/renderer.cpp src/renderer.hpp)
 add_library(theme-core src/omarchy-theme.cpp src/omarchy-theme.hpp)
 add_library(ocr-core src/ocr.cpp src/ocr.hpp)
@@ -28,9 +37,12 @@ target_link_libraries(theme-core PUBLIC Qt6::Gui)
 target_include_directories(theme-core PUBLIC src)
 target_link_libraries(frame-core PUBLIC Qt6::Gui)
 target_include_directories(frame-core PUBLIC src)
-add_library(studio-core src/studio.cpp src/studio.hpp src/marks.cpp src/marks.hpp src/displays.cpp src/displays.hpp src/window-targets.cpp src/window-targets.hpp src/video.cpp src/video-drafts.cpp src/video.hpp src/recording.cpp src/recording.hpp src/webcam.cpp src/webcam.hpp src/shortcuts.cpp src/shortcuts.hpp src/capture.hpp src/capture-session.cpp src/capture-session.hpp src/surface-capture.cpp ${PROTOCOL_SOURCES})
+add_library(stitch-core src/stitch.cpp src/stitch.hpp src/auto-capture.cpp src/auto-capture.hpp)
+target_link_libraries(stitch-core PUBLIC Qt6::Gui)
+target_include_directories(stitch-core PUBLIC src)
+add_library(studio-core src/studio.cpp src/studio.hpp src/marks.cpp src/marks.hpp src/displays.cpp src/displays.hpp src/window-targets.cpp src/window-targets.hpp src/video.cpp src/video-drafts.cpp src/video.hpp src/recording.cpp src/recording.hpp src/webcam.cpp src/webcam.hpp src/shortcuts.cpp src/shortcuts.hpp src/capture.hpp src/capture-session.cpp src/capture-session.hpp src/surface-capture.cpp src/scroll-capture.cpp src/scroll-capture.hpp src/scroll-pointer.cpp src/scroll-pointer.hpp ${PROTOCOL_SOURCES})
 target_include_directories(studio-core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(studio-core PUBLIC frame-core ocr-core Qt6::Quick Qt6::Concurrent Qt6::Network Qt6::Multimedia PkgConfig::WaylandClient)
+target_link_libraries(studio-core PUBLIC frame-core ocr-core stitch-core Qt6::Quick Qt6::Concurrent Qt6::Network Qt6::Multimedia PkgConfig::WaylandClient)
 add_library(navigation-core src/navigation.cpp src/navigation.hpp)
 target_link_libraries(navigation-core PUBLIC Qt6::Core)
 target_include_directories(navigation-core PUBLIC src)
@@ -72,8 +84,12 @@ if(BUILD_TESTING)
   target_link_libraries(video-marks-tests PRIVATE studio-core Qt6::Test)
   add_test(NAME video-marks COMMAND video-marks-tests)
   set_tests_properties(video-marks PROPERTIES TIMEOUT 120 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  qt_add_executable(scroll-capture-tests tests/scroll-capture-test.cpp tests/stitch-checks.cpp)
+  target_link_libraries(scroll-capture-tests PRIVATE studio-core Qt6::Test)
+  add_test(NAME scroll-capture COMMAND scroll-capture-tests)
+  set_tests_properties(scroll-capture PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   # These suites use fixtures or stub tools and need no desktop session.
-  set_tests_properties(webcam navigation recording displays renderer theme video-marks
+  set_tests_properties(webcam navigation recording displays renderer theme video-marks scroll-capture
     PROPERTIES LABELS "headless")
   # Rendered OCR fixtures depend on the desktop's system font choices.
   set_tests_properties(ocr PROPERTIES LABELS "recognition")
