@@ -137,19 +137,6 @@ QRect areaPixels(QRectF area, QSize size);
  *  inside it; a drawn area scrolls at its middle. Never inside the top
  *  `coverTop`, where the control sits. */
 QPointF anchorFor(QRectF area, bool window, double coverTop, QSizeF logical);
-/** Finds a scroll bar along the right edge of a stitched capture: columns
- *  that do not move with the page while everything else does. */
-class EdgeStrip {
-public:
-  /** `after` is `before` scrolled down by `delta` pixels. */
-  void observe(const QImage &before, const QImage &after, int delta);
-  /** Columns to drop from the right edge; 0 when there is no scroll bar. */
-  int width() const;
-
-private:
-  std::vector<int> m_votes, m_trackVotes;
-  int m_steps = 0;
-};
 } // namespace Scrolling
 
 /** A scrolling capture on the real desktop, for QML and the app. */

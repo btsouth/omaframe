@@ -21,10 +21,10 @@ def run(*args):
     return result.stdout.strip()
 
 
-def verify_page(path):
+def verify_page(path, expected_width):
     dimensions = run("magick", "identify", "-format", "%w %h", str(path))
     width, height = map(int, dimensions.split())
-    assert 1800 <= width <= 1900, dimensions
+    assert width == expected_width, f"Capture lost right-edge pixels: {dimensions}, expected width {expected_width}"
     assert height == 4456, f"Missing or repeated page content: {dimensions}"
     raw = subprocess.check_output([
         "magick", str(path), "-crop", f"1x{height}+800+0", "-depth", "8", "RGB:-"
@@ -85,6 +85,9 @@ def main():
         boxed("run", "-d", "--wait", "--", "chromium", "--no-first-run",
               "--disable-background-networking", "--user-data-dir=/home/sbx/scroll-fixture",
               f"--app=file://{repo / 'tests/fixtures/scrolling-page.html'}")
+        clients = json.loads(boxed("hyprctl", "clients", "-j"))
+        browser = next(client for client in clients if client["title"] == "Omaframe scrolling fixture")
+        expected_width = browser["size"][0]
         boxed("run", "-d", "--wait", "--", str(binary), "--scroll")
         boxed("shot", "-o", str(evidence / "selector.png"))
         boxed("click", "400", "400")
@@ -100,7 +103,7 @@ def main():
         assert len(files) == 1, f"Expected one export, found {len(files)}"
         output = evidence / "raw.png"
         shutil.copy2(files[0], output)
-        result = {**verify_page(output), "passed": True,
+        result = {**verify_page(output, expected_width), "passed": True,
                   "evidence": str(evidence), "output": str(output)}
 
         # Interruptions use a focused on-demand panel so the browser keeps
@@ -178,7 +181,7 @@ def main():
         geometry = bounds.replace("x", " ").replace("+", " ").split()
         bw, bh, bx, by = map(int, geometry)
         assert bw > 100 and bh > 10 and bx > 1000 and by > 4200, bounds
-        verify_page(annotated)
+        verify_page(annotated, expected_width)
 
         # Cropping must not shrink the uncropped page to a tiny sliver while
         # the crop tool is active. Undo must restore the exact annotated PNG.

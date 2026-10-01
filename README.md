@@ -28,7 +28,8 @@ replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
 Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
-See [the release notes](docs/release-notes-0.7.0.md).
+Version 0.7.1 keeps the full capture width, including browser window controls.
+See [the release notes](docs/release-notes-0.7.1.md).
 
 ## Take a screenshot
 
@@ -47,8 +48,6 @@ screenshot instead.
 
 ## Capture a scrolling page
 
-[Watch the scrolling capture demo](https://github.com/btsouth/omaframe/releases/download/v0.7.0/omaframe-0.7.0-scrolling-capture.mp4).
-
 Press S in the screenshot selector, or run `omaframe --scroll`. Click a browser
 window or drag an area that scrolls. Omaframe scrolls and stitches the page until
 it reaches the end. Move the pointer to take over and scroll by hand if needed.
@@ -61,7 +60,8 @@ frame, before the panel appeared. Fixed headers and footers are kept once.
 The result uses the same finishes and editor as an ordinary screenshot. Long
 pages fit to width; use the wheel or scrollbar to reach the bottom while editing.
 Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If it
-loses track of the page, Omaframe switches to manual scrolling. Completely
+loses track of the page, Omaframe switches to manual scrolling. Scrollbars remain in the capture so window
+controls are preserved. Completely
 repeating content uses wheel cadence and ranked matches to resolve ambiguous
 seams, so check the result before sharing. Pages with large animations, overlays
 or replaced content may need a smaller capture area or manual scrolling.
