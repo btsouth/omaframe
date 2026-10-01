@@ -490,6 +490,10 @@ QImage Session::capture(QString &error) {
     }
     const QImage current = crop(frame);
     const auto out = manual->feed(current);
+    if (debugging())
+      qInfo() << "[DEBUG-scroll] manual" << int(out.event)
+              << int(out.estimate.motion.kind) << out.estimate.motion.delta
+              << out.estimate.error << out.estimate.confidence << out.pendingDelta;
     switch (out.event) {
     case ManualEvent::Kept:
       strip.observe(committed, current, out.estimate.motion.delta);

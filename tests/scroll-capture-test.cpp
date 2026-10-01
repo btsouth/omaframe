@@ -1,4 +1,5 @@
 #include "scroll-capture.hpp"
+#include "auto-capture.hpp"
 #include "stitch.hpp"
 #include <QElapsedTimer>
 #include <QPainter>
@@ -491,6 +492,43 @@ private slots:
     QVERIFY(limit);
     QVERIFY(image.height() <= stitch::kMaxStitchedEdge + display.toolbar);
     QVERIFY(image.height() > 30000);
+  }
+
+  void probeStopsAtTheSizeLimitWithoutLosingFrames() {
+    stitch::AutoCapture session(stitch::Axis::Vertical);
+    auto frameAt = [](int top) {
+      QImage frame(64, 360, QImage::Format_RGBA8888);
+      for (int y = 0; y < frame.height(); ++y)
+        for (int x = 0; x < frame.width(); ++x) {
+          const quint32 hash = quint32((y + top) % 72) * 2654435761u
+                               ^ quint32(x) * 40503u;
+          frame.setPixelColor(x, y, QColor(int(hash >> 24), int((hash >> 16) & 255),
+                                          int((hash >> 8) & 255)));
+        }
+      return frame;
+    };
+    QCOMPARE(session.feed(frameAt(0)).event, stitch::AutoCapture::Event::Seeded);
+    int top = 0;
+    stitch::AutoCapture::Outcome out;
+    for (int step = 0; step < 500; ++step) {
+      top += 54;
+      out = session.feed(frameAt(top));
+      if (out.event == stitch::AutoCapture::Event::Halted)
+        break;
+      QCOMPARE(out.event, stitch::AutoCapture::Event::ProbeStarted);
+      top += 18;
+      out = session.feed(frameAt(top));
+      if (out.event == stitch::AutoCapture::Event::Halted)
+        break;
+      QCOMPARE(out.event, stitch::AutoCapture::Event::Committed);
+    }
+    QCOMPARE(out.event, stitch::AutoCapture::Event::Halted);
+    QCOMPARE(out.haltReason, stitch::AutoCapture::HaltReason::ReachedLimit);
+    QString error;
+    const QImage image = session.finish(error);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QVERIFY(image.height() > 31000);
+    QVERIFY(image.height() <= stitch::kMaxStitchedEdge);
   }
 
   void aDisplayThatStopsKeepsWhatWasCaptured() {
