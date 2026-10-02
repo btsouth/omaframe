@@ -106,6 +106,8 @@ struct FakeDisplay {
   /// A spinner in the toolbar that never holds still.
   bool spinner = false;
   bool cornerControls = false;
+  bool barButtons = false, movingThumb = true;
+  QColor trackColor{"#eeeeee"}, thumbColor{"#a0a4aa"};
   int spin = 0;
   /// The control the app shows, drawn into the top of the window once it
   /// may appear.
@@ -161,13 +163,21 @@ struct FakeDisplay {
     const int y0 = qRound(scrollY);
     p.drawImage(QPoint(w.x(), top + sticky),
                 page.copy(0, y0, w.width() - bar, view));
-    // The scroll bar and its thumb.
+    // The scroll bar and its thumb, with native-style arrow buttons too.
     const int barX = w.x() + w.width() - bar;
-    p.fillRect(barX, top + sticky, bar, view, QColor("#eeeeee"));
-    const int thumb = std::max(30, view * view / page.height());
-    const int thumbY =
-        top + sticky + int((view - thumb) * (y0 / std::max(1.0, maxScroll())));
-    p.fillRect(barX + 2, thumbY, bar - 4, thumb, QColor("#a0a4aa"));
+    if (bar > 0) {
+      p.fillRect(barX, top + sticky, bar, view, trackColor);
+      const int button = barButtons ? 16 : 0;
+      const int travel = view - 2 * button;
+      const int thumb = std::max(30, travel * travel / page.height());
+      const int thumbY = top + sticky + button +
+          int((travel - thumb) * ((movingThumb ? y0 : 0) / std::max(1.0, maxScroll())));
+      p.fillRect(barX + 2, thumbY, bar - 4, thumb, thumbColor);
+      if (barButtons) {
+        p.fillRect(barX + 4, top + sticky + 4, bar - 8, 6, thumbColor);
+        p.fillRect(barX + 4, top + sticky + view - 10, bar - 8, 6, thumbColor);
+      }
+    }
     p.fillRect(w.x(), top + sticky + view, w.width(), status, QColor("#dfe1e5"));
     p.fillRect(w.x() + 8, top + sticky + view + 6, 90, 10, QColor("#7a8290"));
     if (cornerControls)
@@ -383,6 +393,124 @@ private slots:
              original.copy(0, original.height() - display.status,
                            original.width(), display.status));
     QCOMPARE(image.pixelColor(image.width() - 3, 23), QColor(1, 2, 3));
+  }
+
+  void removesScrollbarFromBodyWithoutCroppingControls_data() {
+    QTest::addColumn<bool>("manual");
+    QTest::addColumn<int>("coverRows");
+    QTest::addColumn<int>("barWidth");
+    QTest::newRow("automatic") << false << 0 << 12;
+    QTest::newRow("covered-header") << false << 40 << 15;
+    QTest::newRow("covered-page") << false << 160 << 12;
+    QTest::newRow("manual") << true << 0 << 12;
+    QTest::newRow("wide-bar") << false << 0 << 24;
+    QTest::newRow("dark-native-arrows") << false << 0 << 15;
+    QTest::newRow("light-native-track") << false << 160 << 15;
+    QTest::newRow("subtle-margin-gradient") << false << 160 << 15;
+    QTest::newRow("sparse-footer-decoration") << false << 160 << 15;
+    QTest::newRow("table-lines-near-margin") << false << 160 << 12;
+  }
+
+  void removesScrollbarFromBodyWithoutCroppingControls() {
+    QFETCH(bool, manual);
+    QFETCH(int, coverRows);
+    QFETCH(int, barWidth);
+    FakeDisplay display;
+    display.bar = barWidth;
+    if (QString::fromLatin1(QTest::currentDataTag()) == "dark-native-arrows") {
+      display.trackColor = QColor("#2c2c2c");
+      display.thumbColor = QColor("#9f9f9f");
+      display.barButtons = true;
+    }
+    if (QString::fromLatin1(QTest::currentDataTag()) == "light-native-track")
+      display.trackColor = QColor("#fafafa");
+    display.page = makeDocument(display.window.width() - display.bar, 4200);
+    if (QString::fromLatin1(QTest::currentDataTag()) == "subtle-margin-gradient")
+      for (int y = 0; y < display.page.height(); ++y)
+        for (int x = display.page.width() - 16; x < display.page.width(); ++x)
+          display.page.setPixelColor(x, y, QColor(250 + x % 2, 250, 248));
+    if (QString::fromLatin1(QTest::currentDataTag()) == "table-lines-near-margin")
+      for (int y = 0; y < display.page.height(); y += 72)
+        for (int x = 32; x < display.page.width() - 32; ++x)
+          display.page.setPixelColor(x, y, QColor("#cdd5df"));
+    const bool decoration = QString::fromLatin1(QTest::currentDataTag()) == "sparse-footer-decoration";
+    if (decoration)
+      for (int y = 3300; y < 3311; ++y)
+        for (int x = display.page.width() - 11; x < display.page.width(); ++x)
+          display.page.setPixelColor(x, y, QColor("#39482e"));
+    display.cornerControls = true;
+    display.coverRows = coverRows;
+    display.canPoint = !manual;
+    display.handStep = manual ? 61 : 0;
+    Scrolling::Plan plan = planFor(display);
+    plan.coverTop = double(coverRows) / display.size.height();
+    const QImage original = display.render().copy(display.window)
+                                .convertToFormat(QImage::Format_RGBA8888);
+    QString error;
+    const QImage image = capture(display, error, {}, plan);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QCOMPARE(image.width(), original.width());
+    QCOMPARE(differingRows(image, display.expected()), 0);
+    QCOMPARE(image.copy(0, 0, image.width(), display.toolbar + display.sticky),
+             original.copy(0, 0, original.width(), display.toolbar + display.sticky));
+    QCOMPARE(image.copy(0, image.height() - display.status, image.width(), display.status),
+             original.copy(0, original.height() - display.status, original.width(), display.status));
+    // Check every pixel, including the columns the old tests skipped. The
+    // page margin continues through the removed track, thumb and buttons.
+    for (int y = display.toolbar + display.sticky;
+         y < image.height() - display.status; ++y)
+      for (int x = image.width() - display.bar; x < image.width(); ++x) {
+        const int pageY = y - display.toolbar - display.sticky;
+        const QRgb expected = decoration && pageY >= 3300 && pageY < 3311
+            ? QColor("#fbfbf8").rgb()
+            : image.pixel(image.width() - display.bar - 1, y);
+        QCOMPARE(image.pixel(x, y), expected);
+      }
+  }
+
+  void leavesUnconfirmedOrTexturedEdgesAlone_data() {
+    QTest::addColumn<bool>("stationary");
+    QTest::addColumn<bool>("lateTexture");
+    QTest::newRow("stationary-edge-control") << true << false;
+    QTest::newRow("textured-page-margin") << false << false;
+    QTest::newRow("texture-after-confirmation") << false << true;
+  }
+
+  void leavesUnconfirmedOrTexturedEdgesAlone() {
+    QFETCH(bool, stationary);
+    QFETCH(bool, lateTexture);
+    FakeDisplay display;
+    display.page = makeDocument(display.window.width() - display.bar, 3000);
+    display.movingThumb = !stationary;
+    if (!stationary) {
+      // No safe background can be inferred beside a photograph or chart.
+      // It must not be smeared across the gutter.
+      for (int y = lateTexture ? 2400 : 0; y < display.page.height(); ++y)
+        for (int x = display.page.width() - 16; x < display.page.width(); ++x)
+          display.page.setPixelColor(x, y, QColor((x * 37) % 255, y % 255, 80));
+    }
+    QString error;
+    const QImage image = capture(display, error);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QCOMPARE(differingRows(image, display.expected()), 0);
+    QCOMPARE(image.pixelColor(image.width() - display.bar,
+                             display.toolbar + display.sticky + 100),
+             display.trackColor);
+  }
+
+  void keepsEveryColumnWhenThereIsNoScrollbar() {
+    FakeDisplay display;
+    display.bar = 0;
+    display.page = makeDocument(display.window.width(), 3000);
+    // Moving content right up to the edge must survive pixel for pixel.
+    for (int y = 0; y < display.page.height(); ++y)
+      for (int x = display.page.width() - 32; x < display.page.width(); ++x)
+        display.page.setPixelColor(x, y, QColor((y * 37 + x) % 255, y % 255, 80));
+    QString error;
+    const QImage image = capture(display, error);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QCOMPARE(image.size(), display.expected().size());
+    QCOMPARE(differingRows(image, display.expected()), 0);
   }
 
   void capturesAWholePageExactly() {
