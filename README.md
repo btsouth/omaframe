@@ -50,9 +50,10 @@ screenshot instead.
 
 ## Capture a scrolling page
 
-Press S in the screenshot selector, or run `omaframe --scroll`. Click a browser
-window or drag an area that scrolls. Omaframe scrolls and stitches the page until
-it reaches the end. Move the pointer to take over and scroll by hand if needed.
+Press S in the screenshot selector, or run `omaframe --scroll`. Click the window
+you want, such as a browser. Omaframe scrolls and stitches the page until it
+reaches the end. Move the pointer to take over and scroll by hand if needed.
+To keep only part of the page, crop it in the editor afterwards.
 
 Choose Done, Enter or Esc to keep what has been captured. Cancel discards it.
 For keyboard controls, point at the progress panel to focus it. The panel sits
@@ -66,7 +67,7 @@ loses track of the page, Omaframe switches to manual scrolling. Scrollbars remai
 controls are preserved. Completely
 repeating content uses wheel cadence and ranked matches to resolve ambiguous
 seams, so check the result before sharing. Pages with large animations, overlays
-or replaced content may need a smaller capture area or manual scrolling.
+or replaced content may need manual scrolling.
 
 ## Mark it up
 

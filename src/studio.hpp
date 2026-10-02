@@ -233,18 +233,17 @@ public:
   Q_INVOKABLE void repeatLastArea();
   Q_INVOKABLE void finishSelection(const QString &monitor, double x1, double y1,
                                    double x2, double y2);
-  /** Leaves the selector for scroll mode: the same click or drag scrolls the
-   *  window or area and stitches what it shows into one tall image. */
+  /** Leaves the selector for scroll mode: clicking a window scrolls it and
+   *  stitches what it shows into one tall image. */
   Q_INVOKABLE void scrollInstead(const QString &monitor = {});
-  /** Opens the selector ready to scroll and stitch `monitor`'s area. */
+  /** Opens the selector ready to scroll and stitch a window on `monitor`. */
   Q_INVOKABLE void captureScroll(int monitor = 0);
-  /** The selector's Scroll mode finished: `x1..y2` are the area as fractions
-   *  of `monitor`, `clickX/clickY` where the user clicked, and `windowTarget`
-   *  true for a clicked window. Starts the scrolling capture. */
+  /** The selector's Scroll mode finished: `x1..y2` are the clicked window as
+   *  fractions of `monitor`, and `clickX/clickY` where the user clicked.
+   *  Starts the scrolling capture. */
   Q_INVOKABLE void finishScrollSelection(const QString &monitor, double x1,
                                          double y1, double x2, double y2,
-                                         double clickX, double clickY,
-                                         bool windowTarget);
+                                         double clickX, double clickY);
   /** The scrolling capture produced `image`; show it in the finish chooser. */
   Q_INVOKABLE void scrollFinished(const QImage &image, bool reachedLimit,
                                   bool reachedEnd);
