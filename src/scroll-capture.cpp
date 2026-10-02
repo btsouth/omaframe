@@ -22,6 +22,214 @@ namespace {
 constexpr double kStepFraction = 0.45;
 constexpr int kMaxNotches = 12;
 
+/// A scrollbar belongs to the viewport, not to the document. Recognize a
+/// narrow track only when its thumb moves more slowly than verified page
+/// motion. Continue a mostly flat page margin into that gutter while
+/// preserving window controls, borders and real page content.
+class Scrollbar {
+  struct Track {
+    int left = 0, right = 0, top = 0, bottom = 0;
+    int thumbTop = 0, thumbLength = 0;
+    QRgb color = 0;
+  };
+  std::optional<Track> track_;
+  int confirmations_ = 0;
+
+  static int distance(QRgb a, QRgb b) {
+    return std::max({std::abs(qRed(a) - qRed(b)),
+                     std::abs(qGreen(a) - qGreen(b)),
+                     std::abs(qBlue(a) - qBlue(b)),
+                     std::abs(qAlpha(a) - qAlpha(b))});
+  }
+
+  static bool margin(const QImage &image, int x, int y) {
+    const QRgb color = image.pixel(x - 1, y);
+    for (int i = 2; i <= 24; ++i)
+      if (distance(image.pixel(x - i, y), color) > 2)
+        return false;
+    return true;
+  }
+
+  static std::optional<Track> find(const QImage &image) {
+    const int w = image.width(), h = image.height();
+    if (w < 160 || h < 96)
+      return {};
+    // A window border can sit outside the track. It is retained verbatim.
+    for (int inset = 0; inset <= 3; ++inset) {
+      const int right = w - inset;
+      // A track has a solid outer rail over most of the viewport. Sorting
+      // avoids assumptions about a light/dark theme or a specific color.
+      std::vector<QRgb> colors;
+      colors.reserve(h);
+      for (int y = 0; y < h; ++y)
+        colors.push_back(image.pixel(right - 1, y));
+      std::sort(colors.begin(), colors.end());
+      QRgb color = 0;
+      int most = 0;
+      for (int i = 0, j; i < h; i = j) {
+        for (j = i + 1; j < h && colors[j] == colors[i]; ++j) {}
+        if (j - i > most) {
+          most = j - i;
+          color = colors[i];
+        }
+      }
+      if (most < h / 2)
+        continue;
+      for (int width = 3; width <= 32; ++width) {
+        const int left = right - width;
+        int start = 0, top = 0, length = 0;
+        for (int y = 0; y <= h; ++y) {
+          const bool rail = y < h &&
+              distance(image.pixel(left, y), color) <= 3 &&
+              distance(image.pixel(right - 1, y), color) <= 3 &&
+              distance(image.pixel(left - 1, y), color) > 1;
+          if (!rail) {
+            if (y - start > length) {
+              top = start;
+              length = y - start;
+            }
+            start = y + 1;
+          }
+        }
+        if (length < h / 2)
+          continue;
+        int thumbTop = 0, thumbLength = 0;
+        start = top;
+        for (int y = top; y <= top + length; ++y) {
+          int ink = 0;
+          if (y < top + length)
+            for (int x = left + 1; x < right - 1; ++x)
+              if (distance(image.pixel(x, y), color) > 8)
+                ++ink;
+          if (ink < 3) {
+            if (y - start > thumbLength) {
+              thumbTop = start;
+              thumbLength = y - start;
+            }
+            start = y + 1;
+          }
+        }
+        if (thumbLength >= 12 && thumbLength < length * 3 / 4)
+          return Track{left, right, top, top + length, thumbTop,
+                       thumbLength, color};
+      }
+    }
+    return {};
+  }
+
+public:
+  void observe(const QImage &before, const QImage &after, int delta) {
+    if (delta <= 0 || before.size() != after.size())
+      return;
+    const auto a = find(before), b = find(after);
+    if (qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG")) {
+      auto describe = [](const std::optional<Track> &t) {
+        return t ? QString("%1..%2 rows %3..%4 thumb %5/%6")
+                       .arg(t->left).arg(t->right).arg(t->top).arg(t->bottom)
+                       .arg(t->thumbTop).arg(t->thumbLength) : QString("none");
+      };
+      qInfo().noquote() << "scrollbar:" << describe(a) << "->" << describe(b);
+    }
+    if (!a || !b || a->left != b->left || a->right != b->right ||
+        a->top != b->top || a->bottom != b->bottom || a->color != b->color ||
+        std::abs(a->thumbLength - b->thumbLength) > 3)
+      return;
+    const int motion = b->thumbTop - a->thumbTop;
+    // A stripe in the page moves up by delta, and a fixed sidebar does not
+    // move. Neither is a thumb moving down within a stationary track.
+    if (motion <= 0 || motion >= delta || motion > delta * 0.85)
+      return;
+    if (track_ && (track_->left != a->left || track_->right != a->right ||
+                   track_->top != a->top || track_->bottom != a->bottom ||
+                   track_->color != a->color)) {
+      confirmations_ = 0;
+      track_.reset();
+    }
+    track_ = a;
+    ++confirmations_;
+  }
+
+private:
+  static std::optional<std::vector<QRgb>> background(
+      const QImage &image, const Track &t, int top, int bottom) {
+    std::vector<QRgb> colors;
+    colors.reserve(bottom - top);
+    int decorated = 0;
+    for (int y = top; y < bottom; ++y) {
+      if (distance(image.pixel(t.left, y), t.color) > 3 ||
+          distance(image.pixel(t.right - 1, y), t.color) > 3)
+        return {};
+      QRgb color = image.pixel(t.left - 1, y);
+      if (!margin(image, t.left, y)) {
+        // A mostly flat margin can contain a small decoration, such as the
+        // Manual footer's pixel pattern. Use the nearby dominant background
+        // for those few rows, never stretch the decoration into the gutter.
+        // Sustained textures or gradients cannot be reconstructed safely.
+        if (++decorated > std::max(3, (bottom - top) / 100))
+          return {};
+        const int count = std::min(96, t.left);
+        std::vector<QRgb> nearby;
+        nearby.reserve(count);
+        for (int x = t.left - count; x < t.left; ++x)
+          nearby.push_back(image.pixel(x, y));
+        std::nth_element(nearby.begin(), nearby.begin() + count / 2, nearby.end());
+        color = nearby[count / 2];
+        if (std::count_if(nearby.begin(), nearby.end(), [&](QRgb p) {
+              return distance(p, color) <= 2;
+            }) < count * 3 / 4)
+          return {};
+      }
+      colors.push_back(color);
+    }
+    return colors;
+  }
+
+  static void fill(QImage &image, const Track &t, int top,
+                   const std::vector<QRgb> &colors) {
+    for (int i = 0; i < int(colors.size()); ++i)
+      for (int x = t.left; x < t.right; ++x)
+        image.setPixel(x, top + i, colors[i]);
+  }
+
+public:
+  void clean(QImage &body, QImage &original, int cover, int viewportHeight) const {
+    if (qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG"))
+      qInfo() << "scrollbar: confirmed movements" << confirmations_;
+    if (!track_ || confirmations_ < 2 || body.height() <= viewportHeight)
+      return;
+    const auto &t = *track_;
+    const int bottom = body.height() - (viewportHeight - t.bottom);
+    // Validate the complete output before changing any pixels. A photo,
+    // chart, gradient or different control at the edge stays untouched.
+    const auto bodyColors = background(body, t, t.top, bottom);
+    if (!bodyColors) {
+      if (qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG"))
+        qInfo() << "scrollbar: kept the body because its background could not be verified";
+      return;
+    }
+    std::optional<Track> initial;
+    std::optional<std::vector<QRgb>> initialColors;
+    if (cover > 0 && t.top == 0) {
+      // The control covers part of the scrolling page. Those rows come
+      // from the original frame, and must be cleaned together with the body.
+      initial = find(original);
+      if (!initial || initial->left != t.left || initial->right != t.right ||
+          initial->color != t.color || initial->bottom - cover != t.bottom ||
+          initial->top > cover) {
+        if (qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG"))
+          qInfo() << "scrollbar: initial track did not match the body";
+        return;
+      }
+      initialColors = background(original, *initial, initial->top, cover);
+      if (!initialColors)
+        return;
+    }
+    fill(body, t, t.top, *bodyColors);
+    if (initial)
+      fill(original, *initial, initial->top, *initialColors);
+  }
+};
+
 bool debugging() {
   static const bool on = qEnvironmentVariableIsSet("OMAFRAME_SCROLL_DEBUG");
   return on;
@@ -238,6 +446,7 @@ QImage Session::capture(QString &error) {
     m_ready();
 
   QImage committed = first, held;
+  Scrollbar scrollbar;
   std::optional<stitch::AutoCapture> automatic;
   std::optional<stitch::ManualCapture> manual;
   bool limit = false, ended = false, userHasPointer = false;
@@ -345,16 +554,20 @@ QImage Session::capture(QString &error) {
     }
     switch (out.event) {
     case AutoEvent::Appended:
+      scrollbar.observe(committed, frame, out.estimate.motion.delta);
       committed = frame;
       break;
     case AutoEvent::ProbeStarted:
       held = frame;
       break;
     case AutoEvent::Committed:
+      scrollbar.observe(committed, held, out.firstDelta);
+      scrollbar.observe(held, frame, out.secondDelta);
       committed = frame;
       held = {};
       break;
     case AutoEvent::ReachedEndAtSeam:
+      scrollbar.observe(committed, held, out.firstDelta);
       ended = true;
       break;
     case AutoEvent::ReachedEnd:
@@ -438,6 +651,7 @@ QImage Session::capture(QString &error) {
               << out.estimate.error << out.estimate.confidence << out.pendingDelta;
     switch (out.event) {
     case ManualEvent::Kept:
+      scrollbar.observe(committed, current, out.estimate.motion.delta);
       committed = current;
       handover.clear();
       report(Progress::Mode::Manual, length(), "Keep scrolling, then Done.");
@@ -474,6 +688,7 @@ QImage Session::capture(QString &error) {
   QImage body = automatic ? automatic->finish(error) : manual->finish(error);
   if (body.isNull())
     return {};
+  scrollbar.clean(body, area, cover, first.height());
   // The stitcher holds the scrolling body to the size budget, but the rows
   // the control covered are restored on top from the first picture and are
   // part of the finished image too. Hold the whole image to the same budget,

@@ -55,7 +55,19 @@ def verify_page(path, expected_width):
     ])
     center_pixels = [tuple(center[i:i + 3]) for i in range(0, len(center), 3)]
     assert all(near(p, (23, 52, 84)) for p in center_pixels), "Progress control leaked into the image"
-    return {"width": width, "height": height, "rows": len(bars)}
+    # Scrollbars are viewport UI. Check the complete gutter, not just the
+    # center column, so repeated thumbs/arrows cannot pass the native smoke.
+    edge = subprocess.check_output([
+        "magick", str(path), "-crop", f"13x{height - 88}+{width - 13}+56",
+        "-depth", "8", "RGB:-"
+    ])
+    for y in range(height - 88):
+        row = edge[y * 39:(y + 1) * 39]
+        background = row[:3]
+        assert all(row[x * 3:(x + 1) * 3] == background for x in range(1, 13)), \
+            f"Scrollbar fragment remains at document row {y + 56}"
+    return {"width": width, "height": height, "rows": len(bars),
+            "scrollbar_free_rows": height - 88}
 
 
 def main():
@@ -80,7 +92,7 @@ def main():
 
     try:
         run("omabox", "up", box, "--size", "1920x1080@60", "--no-shell",
-            "--net", "isolated", "--ro-bind", str(binary.parent), "--ro-bind", str(evidence))
+            "--net", "isolated", "--env", "OMAFRAME_SCROLL_DEBUG=1", "--ro-bind", str(binary.parent), "--ro-bind", str(evidence))
         box_root = Path(boxed("path"))
         boxed("run", "-d", "--wait", "--", "chromium", "--no-first-run",
               "--disable-background-networking", "--user-data-dir=/home/sbx/scroll-fixture",
@@ -103,6 +115,7 @@ def main():
         assert len(files) == 1, f"Expected one export, found {len(files)}"
         output = evidence / "raw.png"
         shutil.copy2(files[0], output)
+        (evidence / "capture.log").write_text(boxed("log", "run"))
         result = {**verify_page(output, expected_width), "passed": True,
                   "evidence": str(evidence), "output": str(output)}
 

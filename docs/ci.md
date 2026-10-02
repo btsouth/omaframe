@@ -17,7 +17,7 @@ Nine CTest suites have the `headless` label:
 | theme | Color parsing, fixture themes and theme-change handling |
 | video-marks | Timed marks, cuts, crop, camera composition, draft restoration and looping GIF export using FFmpeg fixtures |
 | webcam | Bounded FFmpeg camera encoding, pause-aware timestamps, aspect ratio and encoder failures using fixture frames |
-| scroll-capture | Alignment, repeated content, full-width headers and footers, automatic/manual handoff, interruptions and image-size limits |
+| scroll-capture | Alignment, repeated content, full-width headers and footers, scrollbar cleanup and preservation of textured edges, automatic/manual handoff, interruptions and image-size limits |
 | scroll-studio | Control placement, tall-image previews, draft validation, result handoff and shutdown with active preview jobs |
 
 Qt GUI tests in this group use CTest's offscreen setting. No compositor,
@@ -47,8 +47,8 @@ The scrolling browser smoke uses its own omabox, Chromium and ImageMagick:
 python tests/scrolling-e2e.py /absolute/path/to/build/omaframe
 ```
 
-It checks the full selected width and every row in a saved 60-row page, keeps fixed headers and footers
-once, and checks early finish, cancellation, annotations near the bottom,
+It checks the full selected width, every row and the complete scrollbar gutter
+in a saved 60-row page, keeps fixed headers and footers once, and checks early finish, cancellation, annotations near the bottom,
 crop, exact undo and reopening. Screenshots and exports stay in its temporary
 evidence directory. This desktop smoke is separate from hosted CI.
 
