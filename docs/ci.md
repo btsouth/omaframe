@@ -13,7 +13,7 @@ Nine CTest suites have the `headless` label:
 | navigation | Unsaved-edit decisions, repeated commands, save completion, failed-save retry and cancellation |
 | recording | Recorder lifecycle, readiness, pause/resume, failure handling, stop placement and shortcut setup that preserves custom bindings, with stub tools |
 | displays | Display geometry, window targets and powered-off display filtering from fixtures |
-| renderer | Finishes, edge room, annotations and output dimensions |
+| renderer | Finishes, edge room, original scrollbar widths at multiple capture lengths and edge orientations, annotations and output dimensions |
 | theme | Color parsing, fixture themes and theme-change handling |
 | video-marks | Timed marks, cuts, crop, camera composition, draft restoration and looping GIF export using FFmpeg fixtures |
 | webcam | Bounded FFmpeg camera encoding, pause-aware timestamps, aspect ratio and encoder failures using fixture frames |

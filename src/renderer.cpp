@@ -465,17 +465,18 @@ static QRgb median(const QVector<QRgb> &pixels) {
   }
   return qRgb(channel[0], channel[1], channel[2]);
 }
-// Nearly every pixel of the line is within a small distance of `color`.
+// Every inspected pixel must be close to `color`. A short header or footer
+// still matters on a tall scrollshot: ignoring it can extend a scrollbar.
 static bool flat(const QVector<QRgb> &line, QRgb color) {
   if (line.isEmpty())
     return false;
-  int close = 0;
   for (QRgb pixel : line)
-    close += qAlpha(pixel) == 255 &&
-             std::max({std::abs(qRed(pixel) - qRed(color)),
-                       std::abs(qGreen(pixel) - qGreen(color)),
-                       std::abs(qBlue(pixel) - qBlue(color))}) <= 8;
-  return close >= line.size() * 0.98;
+    if (qAlpha(pixel) != 255 ||
+        std::max({std::abs(qRed(pixel) - qRed(color)),
+                  std::abs(qGreen(pixel) - qGreen(color)),
+                  std::abs(qBlue(pixel) - qBlue(color))}) > 8)
+      return false;
+  return true;
 }
 static QRgb edgeColor(const QImage &image, int edge) {
   return median(edgeLine(image, edge, 0));
