@@ -25,7 +25,7 @@ Window {
     Shortcut {sequence: "Escape"; enabled: window.visible; onActivated: studio.cancelSelection()}
     Shortcut {sequence: "Tab"; enabled: window.visible && !window.dragging; onActivated: window.toggleMode()}
     Shortcut {sequence: "S"; enabled: window.visible && !window.dragging; onActivated: window.toggleScroll()}
-    Shortcut {sequence: "F"; enabled: window.visible && !window.dragging; onActivated: window.wholeDisplay()}
+    Shortcut {sequence: "F"; enabled: window.visible && !window.dragging && !studio.scrollSelection; onActivated: window.wholeDisplay()}
     Shortcut {sequence: "D"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
     Shortcut {sequence: "M"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
     property string monitorName: ""
@@ -66,18 +66,16 @@ Window {
         else
             studio.scrollInstead(window.monitorName);
     }
-    // One place decides between a plain capture and a scrolling one, so every
-    // way of choosing an area behaves the same.
-    function finish(monitor, x1, y1, x2, y2, clickX, clickY, windowTarget) {
-        if (studio.scrollSelection)
-            studio.finishScrollSelection(monitor, x1, y1, x2, y2, clickX, clickY, windowTarget);
-        else
-            studio.finishSelection(monitor, x1, y1, x2, y2);
+    // Scrolling captures only take a clicked window. A drawn area or a whole
+    // display gives the stitcher too little to follow, or the wrong thing to
+    // scroll.
+    function finishScroll(target, clickX, clickY) {
+        studio.finishScrollSelection(window.monitorName, target.x, target.y, target.x + target.w, target.y + target.h, clickX, clickY);
     }
     // Each display has its own selector, but only one gets the keyboard.
     // F records or captures the display the pointer is on.
     function wholeDisplay() {
-        window.finish(studio.pointerMonitor.length ? studio.pointerMonitor : window.monitorName, 0, 0, 1, 1, 0.5, 0.5, false);
+        studio.finishSelection(studio.pointerMonitor.length ? studio.pointerMonitor : window.monitorName, 0, 0, 1, 1);
     }
     function cycleCountdown() {
         recorder.countdown = recorder.countdown === 0 ? 3 : recorder.countdown === 3 ? 5 : 0;
@@ -177,13 +175,14 @@ Window {
             window.startY = mouse.y;
             window.endX = mouse.x;
             window.endY = mouse.y;
-            window.dragging = true;
+            // Scroll mode takes only a click on a window, never a drawn area.
+            window.dragging = !studio.scrollSelection;
         }
         onEntered: studio.pointerMonitor = window.monitorName
         onPositionChanged: function (mouse) {
             if (studio.pointerMonitor !== window.monitorName)
                 studio.pointerMonitor = window.monitorName;
-            if (pressed) {
+            if (pressed && window.dragging) {
                 window.endX = Math.max(0, Math.min(width, mouse.x));
                 window.endY = Math.max(0, Math.min(height, mouse.y));
             } else
@@ -198,13 +197,19 @@ Window {
             const target = window.targetAt(mouse.x, mouse.y);
             const cx = Math.max(0, Math.min(1, mouse.x / width));
             const cy = Math.max(0, Math.min(1, mouse.y / height));
+            if (studio.scrollSelection) {
+                if (target && dx * dx + dy * dy < 36)
+                    window.finishScroll(target, cx, cy);
+                window.hoveredTarget = target;
+                return;
+            }
             if (dx * dx + dy * dy < 36) {
                 if (target)
-                    window.finish(window.monitorName, target.x, target.y, target.x + target.w, target.y + target.h, cx, cy, true);
+                    studio.finishSelection(window.monitorName, target.x, target.y, target.x + target.w, target.y + target.h);
                 else
-                    window.finish(window.monitorName, 0, 0, 1, 1, cx, cy, false);
+                    studio.finishSelection(window.monitorName, 0, 0, 1, 1);
             } else
-                window.finish(window.monitorName, window.startX / width, window.startY / height, window.endX / width, window.endY / height, cx, cy, false);
+                studio.finishSelection(window.monitorName, window.startX / width, window.startY / height, window.endX / width, window.endY / height);
             window.dragging = false;
             window.hoveredTarget = target;
         }
@@ -362,19 +367,20 @@ Window {
             Text {
                 visible: bar.showPrompt
                 text: studio.recordingSelection ? "Click a window or drag an area to record"
-                    : studio.scrollSelection ? "Click a window or drag an area to scroll and stitch"
+                    : studio.scrollSelection ? "Click a window to scroll and stitch it"
                     : "Click a window or drag an area"
                 color: theme.text
                 font.family: theme.fontFamily
                 font.pixelSize: 13
             }
-            Rectangle {Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
+            Rectangle {visible: !studio.scrollSelection; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; Layout.leftMargin: 4; Layout.rightMargin: 4; width: 1; color: theme.separator}
             BarToggle {
+                visible: !studio.scrollSelection
                 label: window.width < 760 ? "" : "Whole display"
                 glyph: "display"
                 checkable: false
-                hint: (studio.recordingSelection ? "Record" : studio.scrollSelection ? "Scroll-capture" : "Capture") + " this entire display · F"
-                onActivated: window.finish(window.monitorName, 0, 0, 1, 1, 0.5, 0.5, false)
+                hint: (studio.recordingSelection ? "Record" : "Capture") + " this entire display · F"
+                onActivated: studio.finishSelection(window.monitorName, 0, 0, 1, 1)
             }
             BarToggle {
                 visible: studio.recordingSelection
@@ -450,7 +456,7 @@ Window {
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
             text: studio.recordingSelection ? "Click a window or drag an area to record"
-                : studio.scrollSelection ? "Click a window or drag an area to scroll and stitch"
+                : studio.scrollSelection ? "Click a window to scroll and stitch it"
                 : "Click a window or drag an area"
             color: theme.text
             font.family: theme.fontFamily

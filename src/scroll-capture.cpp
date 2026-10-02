@@ -277,14 +277,12 @@ QRect areaPixels(QRectF area, QSize size) {
   return QRect(left, top, std::max(0, right - left), std::max(0, bottom - top));
 }
 
-QPointF anchorFor(QRectF area, bool window, double coverTop, QSizeF logical) {
+QPointF anchorFor(QRectF area, double coverTop, QSizeF logical) {
   area = area.normalized();
   const double w = std::max(1.0, logical.width()),
                h = std::max(1.0, logical.height());
   const double top = area.top() + coverTop;
   const double height = std::max(0.0, area.bottom() - top);
-  if (!window)
-    return {area.center().x(), top + height / 2};
   // Clear of a scroll bar, but close to the edge: page margins are there,
   // and panels that scroll on their own (sidebars, embedded maps) seldom are.
   const double inset = std::clamp(area.width() * w * 0.04, 28.0, 72.0) / w;

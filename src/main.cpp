@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
   mark("GUI application ready");
   app.setOrganizationName("Omaframe");
   app.setApplicationName("Omaframe");
-  app.setApplicationVersion("0.7.3");
+  app.setApplicationVersion("0.7.4");
   app.setDesktopFileName("io.github.btsouth.omaframe");
   app.setQuitOnLastWindowClosed(false);
   QThreadPool::globalInstance()->setMaxThreadCount(2);
@@ -79,8 +79,8 @@ int main(int argc, char **argv) {
   parser.addOption({"repeat", "Capture the last selected screen area again."});
   parser.addOption({"screen", "Capture the active monitor immediately."});
   parser.addOption({"scroll",
-                    "Select a window or area to capture as one tall "
-                    "scrolling image."});
+                    "Click a window to capture as one tall scrolling "
+                    "image."});
   parser.addPositionalArgument("file", "Image or video to open.", "[file]");
   parser.process(app);
   const bool captureStartup =

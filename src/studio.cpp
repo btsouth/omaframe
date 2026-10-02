@@ -1175,7 +1175,7 @@ void Studio::captureScroll(int monitor) {
 }
 void Studio::finishScrollSelection(const QString &monitor, double x1, double y1,
                                    double x2, double y2, double clickX,
-                                   double clickY, bool windowTarget) {
+                                   double clickY) {
   // The selector intentionally owns m_busy until a selection completes.
   // Its state, not the general busy flag, authorizes this transition.
   if (m_quickState != "selecting")
@@ -1222,8 +1222,7 @@ void Studio::finishScrollSelection(const QString &monitor, double x1, double y1,
   Scrolling::Plan plan;
   plan.area = area;
   plan.coverTop = control.coverTop;
-  plan.anchor =
-      Scrolling::anchorFor(area, windowTarget, plan.coverTop, display.size());
+  plan.anchor = Scrolling::anchorFor(area, plan.coverTop, display.size());
   plan.home =
       QPointF(std::clamp(clickX, 0.0, 1.0), std::clamp(clickY, 0.0, 1.0));
   m_busy = true;

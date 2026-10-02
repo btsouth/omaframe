@@ -273,7 +273,7 @@ Scrolling::Plan planFor(const FakeDisplay &display) {
   plan.area = QRectF(display.window.x() / s.width(), display.window.y() / s.height(),
                      display.window.width() / s.width(),
                      display.window.height() / s.height());
-  plan.anchor = Scrolling::anchorFor(plan.area, true, 0, s);
+  plan.anchor = Scrolling::anchorFor(plan.area, 0, s);
   plan.home = plan.anchor;
   return plan;
 }
@@ -346,13 +346,10 @@ private slots:
 
   void anchorStaysInsideAndBelowTheControl() {
     const QRectF area(0.1, 0.1, 0.5, 0.8);
-    const QPointF window = Scrolling::anchorFor(area, true, 0.05, {1920, 1080});
+    const QPointF window = Scrolling::anchorFor(area, 0.05, {1920, 1080});
     QVERIFY(area.contains(window));
     QVERIFY(window.y() > area.top() + 0.05);
     QVERIFY(window.x() > area.center().x());
-    const QPointF drawn = Scrolling::anchorFor(area, false, 0.1, {1920, 1080});
-    QCOMPARE(drawn.x(), area.center().x());
-    QVERIFY(drawn.y() > area.top() + 0.1);
   }
 
   void restoresWheelFocusAfterControlUpdates() {

@@ -1,4 +1,4 @@
-/** @fileoverview Scrolling capture: scrolls a window or area and stitches what
+/** @fileoverview Scrolling capture: scrolls a window and stitches what
  *  it shows into one tall image.
  *
  *  The loop runs on its own thread. It scrolls the page with a virtual
@@ -74,7 +74,7 @@ struct Timing {
 
 /** What to capture and where the pointer goes, as fractions of the display. */
 struct Plan {
-  /** The window or area to capture. */
+  /** The window to capture. */
   QRectF area;
   /** Where the wheel scrolls the page. */
   QPointF anchor;
@@ -131,12 +131,11 @@ private:
 
 /** The pixels of `area` (a fraction of a display) in a frame of `size`. */
 QRect areaPixels(QRectF area, QSize size);
-/** Where to scroll a capture of `area`, a fraction of a display that is
- *  `logical` pixels in size. A window scrolls near its right edge, below
- *  its toolbar, where the wheel reaches the page itself rather than a panel
- *  inside it; a drawn area scrolls at its middle. Never inside the top
- *  `coverTop`, where the control sits. */
-QPointF anchorFor(QRectF area, bool window, double coverTop, QSizeF logical);
+/** Where to scroll a capture of the window at `area`, a fraction of a display
+ *  that is `logical` pixels in size: near its right edge, below its toolbar,
+ *  where the wheel reaches the page itself rather than a panel inside it.
+ *  Never inside the top `coverTop`, where the control sits. */
+QPointF anchorFor(QRectF area, double coverTop, QSizeF logical);
 } // namespace Scrolling
 
 /** A scrolling capture on the real desktop, for QML and the app. */

@@ -1010,7 +1010,7 @@ private slots:
     QVERIFY(studio.busy());
     QVERIFY(studio.scrollSelection());
     const auto monitor = selections.first().first().toStringList().first();
-    studio.finishScrollSelection(monitor, 0.1, 0.1, 0.8, 0.8, 0.5, 0.5, false);
+    studio.finishScrollSelection(monitor, 0.1, 0.1, 0.8, 0.8, 0.5, 0.5);
     QCOMPARE(studio.quickState(), QString("scrolling"));
     QVERIFY(studio.scrollCapture()->active());
     studio.scrollCapture()->cancel();

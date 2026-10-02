@@ -443,7 +443,7 @@ ApplicationWindow {
             }
             MenuAction {
                 text: "Scrolling capture"
-                detail: "Click a window or drag an area; it scrolls and stitches one tall image"
+                detail: "Click a window; it scrolls and stitches one tall image"
                 glyph: "image"
                 enabled: !root.working
                 onClicked: { captureMenu.close(); root.requestNavigation("scroll"); }
