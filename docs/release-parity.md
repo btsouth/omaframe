@@ -1,13 +1,13 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.7.1**. This tracks shipped behavior and possible future
+Current release: **0.7.2**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.7.1 | Future work |
+| Workflow | Omaframe 0.7.2 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
 | Capture and finish | Window, area or display; automatic scrolling capture with manual takeover; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |

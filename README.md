@@ -28,8 +28,9 @@ replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
 Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
-Version 0.7.1 keeps the full capture width, including browser window controls.
-See [the release notes](docs/release-notes-0.7.1.md).
+Version 0.7.2 keeps scrollshot frames clean without widening scrollbar tracks.
+The full capture width, including browser window controls, is preserved.
+See [the release notes](docs/release-notes-0.7.2.md).
 
 ## Take a screenshot
 

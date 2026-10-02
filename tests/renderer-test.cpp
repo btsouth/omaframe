@@ -134,6 +134,46 @@ private slots:
     p.end();
     QCOMPARE(Frame::edgeRoom(source).left(), 16);
   }
+  void tallScrollbarKeepsItsOriginalWidth_data() {
+    QTest::addColumn<int>("height");
+    QTest::newRow("window") << 1000;
+    QTest::newRow("scrollshot") << 6000;
+    QTest::newRow("long-scrollshot") << 16000;
+  }
+  void tallScrollbarKeepsItsOriginalWidth() {
+    QFETCH(int, height);
+    constexpr int width = 800, gutter = 15;
+    const QColor track("#2c2c2c");
+    QImage source(width, height, QImage::Format_ARGB32_Premultiplied);
+    source.fill(QColor("#0c0b0c"));
+    QPainter p(&source);
+    p.fillRect(width - gutter, 50, gutter, height - 74, track);
+    p.fillRect(width - gutter + 3, 90, gutter - 6, 100, Qt::gray);
+    // Chrome occupies less than two percent of a tall scrollshot. It must
+    // still prevent the scrollbar track being extended through those rows.
+    QLinearGradient chrome(0, 0, width, 0);
+    chrome.setColorAt(0, QColor("#203830"));
+    chrome.setColorAt(1, QColor("#364056"));
+    p.fillRect(0, 0, width, 50, chrome);
+    p.fillRect(0, height - 24, width, 24, chrome);
+    p.fillRect(width - 9, 20, 6, 6, Qt::white);
+    p.end();
+    QCOMPARE(Frame::edgeRoom(source), QMargins());
+    for (int angle : {90, 180, 270})
+      QCOMPARE(Frame::edgeRoom(source.transformed(QTransform().rotate(angle))),
+               QMargins());
+    for (int style = 0; style < 8; ++style) {
+      const Frame::Options options{style, 0.05, 0};
+      const QImage framed = Frame::compose(source, options);
+      QCOMPARE(framed.size(), Frame::outputSize(source.size(), options));
+      int grayPixels = 0;
+      for (int x = 0; x < framed.width(); ++x)
+        grayPixels += framed.pixelColor(x, framed.height() / 2) == track;
+      // The outline can cover the last pixel; framing cannot add track.
+      QVERIFY(grayPixels >= gutter - 2 && grayPixels <= gutter);
+    }
+    QCOMPARE(Frame::compose(source, {8, 0.05, 0}), source);
+  }
   void paddingFitsSmallAndLargeCaptures() {
     const auto options = Frame::Options{};
     QCOMPARE(Frame::outputSize({200, 100}, options), QSize(232, 132));
