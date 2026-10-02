@@ -171,13 +171,12 @@ Window {
                 return;
             }
             area.forceActiveFocus();
-            if (studio.scrollSelection)
-                return;
             window.startX = mouse.x;
             window.startY = mouse.y;
             window.endX = mouse.x;
             window.endY = mouse.y;
-            window.dragging = true;
+            // Scroll mode takes only a click on a window, never a drawn area.
+            window.dragging = !studio.scrollSelection;
         }
         onEntered: studio.pointerMonitor = window.monitorName
         onPositionChanged: function (mouse) {
@@ -199,7 +198,7 @@ Window {
             const cx = Math.max(0, Math.min(1, mouse.x / width));
             const cy = Math.max(0, Math.min(1, mouse.y / height));
             if (studio.scrollSelection) {
-                if (target)
+                if (target && dx * dx + dy * dy < 36)
                     window.finishScroll(target, cx, cy);
                 window.hoveredTarget = target;
                 return;
