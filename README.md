@@ -28,10 +28,9 @@ replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
 Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
-Version 0.7.3 removes repeated scrollbar thumbs and buttons from scrollshots
-without cropping window controls.
-The full capture width, including browser window controls, is preserved.
-See [the release notes](docs/release-notes-0.7.3.md).
+Version 0.7.4 makes scrolling capture window only. Click the window you want
+and crop afterwards if you need less of it.
+See [the release notes](docs/release-notes-0.7.4.md).
 
 ## Take a screenshot
 
