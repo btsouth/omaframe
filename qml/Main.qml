@@ -1270,7 +1270,7 @@ ApplicationWindow {
                                     selected: root.tool === modelData.key
                                     quiet: !selected
                                     hint: modelData.label + " · " + modelData.shortcut
-                                    onClicked: root.tool = modelData.key
+                                    onClicked: root.tool = root.tool === modelData.key ? "select" : modelData.key
                                     contentItem: RowLayout {
                                         spacing: 8
                                         Glyph { name: toolButton.glyph; ink: toolButton.ink; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }

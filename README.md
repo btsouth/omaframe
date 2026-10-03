@@ -40,8 +40,9 @@ See [the release notes](docs/release-notes-0.7.4.md).
 ## Take a screenshot
 
 Press Print Screen. Click a window, drag an area, or press F for the whole
-display. Pick a finish with 1 to 9 and it is copied and saved. Paste it
-anywhere.
+display. If the capture bar is in the way, hold Super and drag it, or drag
+the grip at its left edge. Pick a finish with 1 to 9 and it is copied and saved.
+Paste it anywhere.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
@@ -80,6 +81,7 @@ the image, then add arrows, boxes, highlights, blur or redaction, or crop.
 Use the mouse wheel to zoom in around the pointer for precise cropping and marks.
 Drag with the middle mouse button to pan, or use the scrollbars. Click **Fit**
 to reset the view. Zoom changes only the editor view, not the saved image.
+Click an active tool again to return to **Select**.
 Drag marks to move them, or hold Shift to move straight. Side handles resize
 width or height; text wraps without changing its font size. Drag text corners
 to scale the font. Arrow keys move a selected mark one pixel, or ten with Shift.
