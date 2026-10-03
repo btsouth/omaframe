@@ -7,6 +7,7 @@
 
 void MarkDocument::reset(const QImage &base) {
   m_transform.reset();
+  m_copied.reset();
   m_base = base;
   m_edits.clear();
   m_undoStates.clear();
@@ -17,6 +18,7 @@ void MarkDocument::reset(const QImage &base) {
 void MarkDocument::restore(const QImage &base, QVector<Frame::Edit> edits,
                            int selected) {
   m_transform.reset();
+  m_copied.reset();
   m_base = base;
   m_edits = std::move(edits);
   m_undoStates.clear();
@@ -879,26 +881,91 @@ void MarkDocument::deleteSelected() {
   m_selected = -1;
   commit();
 }
-void MarkDocument::duplicateSelected() {
-  if (locked() || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.size() >= MaxEdits || m_edits[m_selected].type == "crop")
-    return;
-  Frame::Edit copy = m_edits[m_selected];
-  const QRectF bounds = Frame::annotationBounds(copy, m_base);
+static void translate(Frame::Edit &edit, QPointF by) {
+  edit.from += by;
+  edit.to += by;
+  for (QPointF &point : edit.points)
+    point += by;
+}
+void MarkDocument::appendOffset(Frame::Edit edit) {
+  const QRectF bounds = Frame::annotationBounds(edit, m_base);
   const double stepX = 12. / std::max(1, m_base.width());
   const double stepY = 12. / std::max(1, m_base.height());
   const double dx = bounds.right() + stepX <= 1. ? stepX
                       : bounds.left() - stepX >= 0. ? -stepX : 0.;
   const double dy = bounds.bottom() + stepY <= 1. ? stepY
                       : bounds.top() - stepY >= 0. ? -stepY : 0.;
-  copy.from += QPointF(dx, dy);
-  copy.to += QPointF(dx, dy);
-  for (QPointF &point : copy.points)
-    point += QPointF(dx, dy);
+  translate(edit, {dx, dy});
   saveHistory();
-  m_edits.append(copy);
+  m_edits.append(edit);
   m_selected = m_edits.size() - 1;
+}
+void MarkDocument::duplicateSelected() {
+  if (locked() || m_selected < 0 || m_selected >= m_edits.size() ||
+      m_edits.size() >= MaxEdits || m_edits[m_selected].type == "crop")
+    return;
+  appendOffset(m_edits[m_selected]);
   emit message("Annotation duplicated. Drag it to place it.");
+  commit();
+}
+bool MarkDocument::copySelected() {
+  if (m_selected < 0 || m_selected >= m_edits.size() ||
+      m_edits[m_selected].type == "crop")
+    return false;
+  m_copied = m_edits[m_selected];
+  // Pastes step toward the side with more room, so a row of them does not
+  // fold back onto the copy at an edge.
+  const QRectF bounds = Frame::annotationBounds(*m_copied, m_base);
+  m_pasteStep = {(bounds.center().x() <= 0.5 ? 12. : -12.) / std::max(1, m_base.width()),
+                 (bounds.center().y() <= 0.5 ? 12. : -12.) / std::max(1, m_base.height())};
+  m_pastes = 0;
+  emit message("Annotation copied. Press Ctrl+V to paste it.");
+  emit changed();
+  return true;
+}
+void MarkDocument::cutSelected() {
+  if (locked() || !copySelected())
+    return;
+  deleteSelected();
+  emit message("Annotation cut. Press Ctrl+V to paste it.");
+}
+void MarkDocument::paste() {
+  if (locked() || !m_copied)
+    return;
+  if (m_edits.size() >= MaxEdits) {
+    emit message("This image has reached the 100-edit limit.");
+    return;
+  }
+  Frame::Edit edit = *m_copied;
+  // Each paste is a step further from the copy, stopping at the image's edge.
+  const QRectF bounds = Frame::annotationBounds(edit, m_base);
+  const QPointF wanted = m_pasteStep * (m_pastes + 1);
+  const QPointF shift(std::clamp(wanted.x(), std::min(0., -bounds.left()),
+                                 std::max(0., 1. - bounds.right())),
+                      std::clamp(wanted.y(), std::min(0., -bounds.top()),
+                                 std::max(0., 1. - bounds.bottom())));
+  translate(edit, shift);
+  if (m_duration > 0) {
+    const double end = edit.end < 0 ? m_duration : edit.end;
+    if (edit.type == "blur" || edit.type == "redact") {
+      // A cover keeps its times so it never starts after what it hides,
+      // widened to the playhead so the paste can be seen and placed.
+      edit.start = std::min(edit.start, std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1)));
+      edit.end = std::max(end, std::min(m_duration, m_playhead + 0.1));
+    } else {
+      // Anything else shows for as long as the copy did, from the playhead,
+      // and one that ran to the end still does.
+      const double length = end - edit.start;
+      edit.start = std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1));
+      edit.end = end >= m_duration ? m_duration
+                                   : std::clamp(edit.start + length, edit.start + 0.1, m_duration);
+    }
+  }
+  ++m_pastes;
+  saveHistory();
+  m_edits.append(edit);
+  m_selected = m_edits.size() - 1;
+  emit message("Annotation pasted. Drag it to place it.");
   commit();
 }
 void MarkDocument::moveSelectedLayer(int direction) {

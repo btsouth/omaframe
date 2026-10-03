@@ -10,7 +10,7 @@ Date: 2026-09-25. Build: 0.2.0 preview. Local, unpublished checkout.
 
 Default launch and `--capture` start region selection with the studio hidden. Each connected display is frozen before any selector opens. Each selector uses its own output name and normalized local coordinates, preserving native pixel resolution. A region stays within one display.
 
-The chooser has eight finishes plus Raw, with the actual capture in every card. Click or 1–9 accepts, saves, copies, and exits. Enter accepts the remembered finish. E opens the editor, Escape returns with edits intact, R retakes, and Escape from the chooser/selector cancels. `--studio` retains the full media editor. Files open directly into that editor.
+The chooser has eight finishes plus Raw, with the actual capture in every card. A click selects a finish; double-click, 1–9 or Enter uses it, copying and saving when automatic saving is on. E opens the editor on the selected finish, Escape returns with edits intact, R retakes, and Escape from the chooser/selector cancels. `--studio` retains the full media editor. Files open directly into that editor.
 
 A per-user, per-Wayland-session local socket prevents duplicate capture sessions. Save/copy failures retain the capture and show the error. Successful acceptance leaves the clipboard available after the app exits.
 

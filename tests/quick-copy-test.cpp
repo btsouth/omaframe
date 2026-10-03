@@ -274,6 +274,124 @@ private slots:
       QVERIFY(studio.hasImage());
     }
   }
+  void editorClipboardKeysKeepTheScreenshotOpen_data() {
+    QTest::addColumn<bool>("autoSave");
+    QTest::addColumn<bool>("ctrlS");
+    QTest::addColumn<bool>("failFirst");
+    QTest::newRow("copy-only") << false << false << false;
+    QTest::newRow("save-and-copy") << true << false << false;
+    QTest::newRow("ctrl-s-saves-anyway") << false << true << false;
+    QTest::newRow("copy-fails-then-retries") << false << false << true;
+  }
+  void editorClipboardKeysKeepTheScreenshotOpen() {
+    QFETCH(bool, autoSave);
+    QFETCH(bool, ctrlS);
+    QFETCH(bool, failFirst);
+    QQmlEngine engine;
+    auto *store = new ImageStore;
+    engine.addImageProvider("frames", store);
+    auto *videoStore = new ImageStore;
+    engine.addImageProvider("videomarks", videoStore);
+    Studio studio(store, false);
+    studio.setAutoSaveScreenshots(autoSave);
+    Video video;
+    video.setImageStore(videoStore);
+    Recorder recorder;
+    ShortcutSetup shortcuts;
+    Navigation navigation;
+    OmarchyTheme theme(nullptr, temp.filePath("theme"), temp.filePath("theme-config"), false);
+    engine.rootContext()->setContextProperty("studio", &studio);
+    engine.rootContext()->setContextProperty("video", &video);
+    engine.rootContext()->setContextProperty("recorder", &recorder);
+    engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    engine.rootContext()->setContextProperty("navigation", &navigation);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    engine.rootContext()->setContextProperty("captureAtStartup", true);
+    prepare(studio);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
+    QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
+    QVERIFY2(window, qPrintable(component.errorString()));
+    studio.openEditor();
+    QVERIFY(window->property("editing").toBool());
+    window->show();
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowExposed(window.get()));
+    QTRY_VERIFY(window->isActive());
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    const auto item = [&](const QString &name) {
+      QQuickItem *found = nullptr;
+      std::function<void(QQuickItem *)> find = [&](QQuickItem *child) {
+        if (child->objectName() == name) found = child;
+        for (auto *next : child->childItems()) find(next);
+      };
+      find(window->contentItem());
+      return found;
+    };
+    // With automatic saving off, the main button copies and a second one saves.
+    QVERIFY(item("editorFinishButton") && item("editorSaveButton"));
+    QCOMPARE(item("editorFinishButton")->property("text").toString(),
+             autoSave ? QString("Copy and save") : QString("Copy"));
+    QCOMPARE(item("editorSaveButton")->isVisible(), !autoSave);
+    studio.marks()->edit("arrow", .1, .1, .4, .3);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("type").toString(), QString("arrow"));
+
+    // Ctrl+C and Ctrl+V copy the mark. The screenshot stays open and nothing
+    // reaches the clipboard or the save folder.
+    QTest::keyClick(window.get(), Qt::Key_C, Qt::ControlModifier);
+    QVERIFY(studio.marks()->canPaste());
+    QTest::keyClick(window.get(), Qt::Key_V, Qt::ControlModifier);
+    QTest::keyClick(window.get(), Qt::Key_V, Qt::ControlModifier);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    const auto &edits = studio.marks()->edits();
+    QCOMPARE(edits.size(), 3);
+    for (const auto &edit : edits) {
+      QCOMPARE(edit.type, QString("arrow"));
+      QCOMPARE(edit.to - edit.from, edits[0].to - edits[0].from); // Same size.
+    }
+    QVERIFY(edits[1].from != edits[0].from && edits[2].from != edits[1].from);
+    QCOMPARE(studio.marks()->selectedAnnotation().value("index").toInt(), 2);
+    QTest::keyClick(window.get(), Qt::Key_X, Qt::ControlModifier);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    QCOMPARE(studio.marks()->edits().size(), 2);
+    QVERIFY(studio.marks()->canPaste());
+    // With nothing selected, Ctrl+C explains how to finish instead.
+    studio.marks()->clearSelection();
+    QTest::keyClick(window.get(), Qt::Key_C, Qt::ControlModifier);
+    QVERIFY(window->property("currentStatus").toString().startsWith("Select a mark"));
+    QTest::qWait(100);
+    QCOMPARE(dismissed.count(), 0);
+    QCOMPARE(studio.quickState(), QString("editing"));
+    QVERIFY(!QFileInfo::exists(clipboard()));
+    QVERIFY(!QDir(temp.filePath("output")).exists());
+
+    if (failFirst) {
+      // A failed copy keeps the editor and edits open, and Copy retries.
+      qputenv("COPY_TEST_FAIL", "1");
+      QTest::keyClick(window.get(), Qt::Key_Return, Qt::ControlModifier);
+      QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("copy-failed"), 15000);
+      QVERIFY(studio.status().contains("Press Copy to retry"));
+      QCOMPARE(dismissed.count(), 0);
+      QVERIFY(window->property("editing").toBool());
+      QCOMPARE(studio.marks()->edits().size(), 2);
+      qunsetenv("COPY_TEST_FAIL");
+      QFile::remove(clipboard());
+    }
+    // Ctrl+Enter finishes the way the setting says; Ctrl+S always saves.
+    if (ctrlS) QTest::keyClick(window.get(), Qt::Key_S, Qt::ControlModifier);
+    else QTest::keyClick(window.get(), Qt::Key_Return, Qt::ControlModifier);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    const bool saved = autoSave || ctrlS;
+    QCOMPARE(studio.quickState(), saved ? QString("done") : QString("copied"));
+    QVERIFY(QFileInfo::exists(clipboard()));
+    QCOMPARE(QDir(temp.filePath("output")).exists(), saved);
+    QCOMPARE(studio.savedPath().isEmpty(), !saved);
+    QCOMPARE(QImage(clipboard()).size(),
+             Frame::compose(Frame::applyEdits(captureImage(), studio.marks()->edits()),
+                            {studio.style(), studio.padding(), studio.aspect()}).size());
+  }
   void copiedTextUsesCurrentPixels() {
     QFETCH(QString, action);
     qputenv("COPY_TEST_TEXT", "1");
@@ -348,7 +466,8 @@ private slots:
     QTest::addColumn<QString>("action");
     QTest::addColumn<bool>("autoSave");
     for (const QString action : {"escape", "empty", "capture-error", "close", "background",
-                                 "retry", "number", "card-click", "focused-card-enter", "enter",
+                                 "retry", "number", "card-click", "card-double-click",
+                                 "focused-card-enter", "enter", "card-edit",
                                  "save-button", "clipboard-button", "ctrl-c", "focus-ctrl-c",
                                  "modified-c"})
       for (bool autoSave : {false, true})
@@ -403,14 +522,46 @@ private slots:
     int expectedStyle = studio.style();
     if (action == "close")
       chooser->close();
-    else if (action == "background")
+    else if (action == "background") {
+      // Clicking outside the panel no longer cancels; Esc still does.
       QTest::mouseClick(chooser.get(), Qt::LeftButton, Qt::NoModifier, QPoint(2, 2));
-    else if (action == "number") {
+      QTest::qWait(100);
+      QCOMPARE(dismissed.count(), 0);
+      QCOMPARE(studio.quickState(), QString("choosing"));
+      QTest::keyClick(chooser.get(), Qt::Key_Escape);
+    } else if (action == "number") {
       expectedStyle = 1;
       QTest::keyClick(chooser.get(), Qt::Key_2);
-    } else if (action == "card-click") {
-      expectedStyle = 3;
+    } else if (action == "card-click" || action == "card-edit") {
+      // A single click only selects. Nothing is copied, saved or closed until
+      // the selection is used.
+      const int before = studio.style();
       click(item("finish3"));
+      QTest::qWait(400); // Longer than a double-click interval.
+      QCOMPARE(dismissed.count(), 0);
+      QCOMPARE(studio.quickState(), QString("choosing"));
+      QCOMPARE(studio.style(), before);
+      QCOMPARE(chooser->property("selected").toInt(), 3);
+      QVERIFY(!QFileInfo::exists(clipboard()));
+      expectedStyle = 3;
+      if (action == "card-edit") {
+        QSignalSpy editor(&studio, &Studio::editorRequested);
+        QTest::keyClick(chooser.get(), Qt::Key_E);
+        QCOMPARE(editor.count(), 1);
+        QCOMPARE(studio.quickState(), QString("editing"));
+        QCOMPARE(studio.style(), expectedStyle);
+        QCOMPARE(dismissed.count(), 0);
+        QVERIFY(!QFileInfo::exists(clipboard()));
+        return;
+      }
+      QTest::keyClick(chooser.get(), Qt::Key_Return);
+    } else if (action == "card-double-click") {
+      expectedStyle = 3;
+      QQuickItem *card = item("finish3");
+      QVERIFY(card);
+      const QPoint center = card->mapToScene(QPointF(card->width() / 2,
+                                                     card->height() / 2)).toPoint();
+      QTest::mouseDClick(chooser.get(), Qt::LeftButton, Qt::NoModifier, center);
     } else if (action == "focused-card-enter") {
       expectedStyle = 3;
       QVERIFY(item("finish3"));
@@ -431,8 +582,10 @@ private slots:
       QTest::keyClick(chooser.get(), Qt::Key_Escape);
     } else if (action == "ctrl-c" || action == "focus-ctrl-c" || action == "retry") {
       if (action == "focus-ctrl-c") {
+        // Keyboard focus selects the card, so Ctrl+C copies that finish.
         QVERIFY(item("finish3"));
         item("finish3")->forceActiveFocus();
+        expectedStyle = 3;
       }
       if (action == "retry")
         qputenv("COPY_TEST_FAIL", "1");
@@ -453,6 +606,7 @@ private slots:
     }
     QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
     const bool defaultAction = action == "number" || action == "card-click" ||
+                               action == "card-double-click" ||
                                action == "focused-card-enter" || action == "enter";
     const bool saved = action == "save-button" || (autoSave && defaultAction);
     const bool copied = defaultAction || saved || action == "retry" || action == "ctrl-c" ||

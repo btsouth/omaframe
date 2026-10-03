@@ -222,6 +222,55 @@ private slots:
     QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "toggleSound"));
     QVERIFY(!scene.video.editState().value("muted").toBool());
   }
+  void markClipboardKeysJoinTheUndoStack() {
+    PaneScene scene(temp);
+    QTRY_VERIFY2(scene.component.isReady(),
+                 qPrintable(scene.component.errorString()));
+    QVERIFY2(scene.create(), qPrintable(scene.component.errorString()));
+    scene.window.show();
+    scene.window.requestActivate();
+    scene.pane->forceActiveFocus();
+    QVERIFY(QTest::qWaitForWindowExposed(&scene.window));
+    QTRY_VERIFY(scene.window.activeFocusItem());
+    QSignalSpy loaded(&scene.video, &Video::loaded);
+    scene.video.open(QUrl::fromLocalFile(plain));
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+    auto *player = scene.pane->findChild<QObject *>("videoPlayer");
+    QVERIFY(player);
+    QTRY_VERIFY_WITH_TIMEOUT(player->property("mediaStatus").toInt() ==
+                                     QMediaPlayer::LoadedMedia ||
+                                 player->property("mediaStatus").toInt() ==
+                                     QMediaPlayer::BufferedMedia,
+                             12000);
+    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "seek",
+                                      Q_ARG(QVariant, 1.5)));
+    QTRY_COMPARE(scene.pane->property("head").toDouble(), 1.5);
+    scene.video.marks()->edit("arrow", 0.2, 0.2, 0.4, 0.4);
+    QTRY_VERIFY(scene.pane->property("markSelected").toBool());
+    const auto undoSteps = [&] {
+      return scene.pane->property("undoStack").toList().size();
+    };
+    const int before = undoSteps();
+    QTest::keyClick(&scene.window, Qt::Key_C, Qt::ControlModifier);
+    QVERIFY(scene.video.marks()->canPaste());
+    QCOMPARE(undoSteps(), before); // Copying changes nothing.
+    QTest::keyClick(&scene.window, Qt::Key_V, Qt::ControlModifier);
+    QCOMPARE(scene.video.marks()->edits().size(), 2);
+    // The paste starts where the video is paused.
+    QCOMPARE(scene.video.marks()->edits()[1].start, scene.video.marks()->playhead());
+    QTest::keyClick(&scene.window, Qt::Key_D, Qt::ControlModifier);
+    QCOMPARE(scene.video.marks()->edits().size(), 3);
+    QTest::keyClick(&scene.window, Qt::Key_X, Qt::ControlModifier);
+    QCOMPARE(scene.video.marks()->edits().size(), 2);
+    QCOMPARE(undoSteps(), before + 3);
+    // One Ctrl+Z each, newest first.
+    QTest::keyClick(&scene.window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(scene.video.marks()->edits().size(), 3);
+    QTest::keyClick(&scene.window, Qt::Key_Z, Qt::ControlModifier);
+    QTest::keyClick(&scene.window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(scene.video.marks()->edits().size(), 1);
+    QCOMPARE(undoSteps(), before);
+  }
   void timingDrag_data() {
     QTest::addColumn<bool>("start");
     QTest::addColumn<QString>("finish");

@@ -103,6 +103,31 @@ ApplicationWindow {
         else
             studio.accept();
     }
+    // A screenshot from the editor follows "Save screenshots automatically",
+    // like Enter in the finish chooser. Ctrl+S and "Copy and save" still save.
+    readonly property bool copyOnlyFinish: studio.quickMode && !root.videoMode && !studio.autoSaveScreenshots && !studio.recoveryAction.length
+    function finishCurrent() {
+        if (!root.copyOnlyFinish) {
+            root.acceptCurrent();
+            return;
+        }
+        if (markCanvas.typing)
+            markCanvas.commitText();
+        root.contentItem.forceActiveFocus();
+        studio.copyQuick();
+    }
+    // In the editor Ctrl+C, Ctrl+X and Ctrl+V work on marks, never on the
+    // screenshot, so they cannot close it.
+    function copyMark(cut) {
+        if (studio.marks.selectedAnnotation.type === undefined) {
+            root.operationStatus = "Select a mark to copy it. To finish the screenshot, press Ctrl+Enter or Ctrl+S.";
+            return;
+        }
+        if (cut) studio.marks.cutSelected();
+        else studio.marks.copySelected();
+        // The same note twice is not a status change, so show it here.
+        root.operationStatus = studio.status;
+    }
     // Escape peels one layer at a time: typing, a drag, the selection, the
     // tool, then Edit itself.
     function escapeEditor() {
@@ -127,7 +152,7 @@ ApplicationWindow {
         { key: "step", label: "Steps", shortcut: "N" }, { key: "text", label: "Text", shortcut: "T" }
     ]
     property string toolDescription: ({
-            select: "Drag a mark to move it; hold Shift to move straight. Drag side handles to resize width or height. Double-click a label to edit its words.",
+            select: "Drag a mark to move it; hold Shift to move straight. Drag side handles to resize width or height. Double-click a label to edit its words. Ctrl+C and Ctrl+V copy and paste a mark.",
             crop: "Drag over the area to keep. Crop again to trim it further, or press Ctrl+Z to undo a crop. Marks outside are kept.",
             arrow: "Drag from the tail to the tip.",
             line: "Drag to draw a line.",
@@ -230,14 +255,31 @@ ApplicationWindow {
         onActivated: openDialog.open()
     }
     Shortcut {
-        sequences: ["Ctrl+S", "Ctrl+Shift+C"]
+        sequence: "Ctrl+S"
         enabled: root.shortcutsAllowed && (root.videoMode || studio.hasImage)
         onActivated: root.acceptCurrent()
     }
     Shortcut {
+        sequences: ["Ctrl+Return", "Ctrl+Enter"]
+        enabled: root.shortcutsAllowed && !root.videoMode && studio.hasImage && !root.working
+        onActivated: root.finishCurrent()
+    }
+    Shortcut {
+        // Outside the editor the full studio has no marks to copy, so Ctrl+C
+        // copies and saves there as before. Quick captures never get here.
         sequence: "Ctrl+C"
         enabled: root.shortcutsAllowed && !root.videoMode && studio.hasImage && !root.working
-        onActivated: root.acceptCurrent()
+        onActivated: root.editing ? root.copyMark(false) : root.acceptCurrent()
+    }
+    Shortcut {
+        sequence: "Ctrl+X"
+        enabled: root.shortcutsAllowed && root.editing && !root.videoMode && !root.working
+        onActivated: root.copyMark(true)
+    }
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: root.shortcutsAllowed && root.editing && !root.videoMode && !root.working && studio.marks.canPaste
+        onActivated: { root.tool = "select"; studio.marks.paste(); }
     }
     Shortcut {
         sequences: ["Return", "Enter"]
@@ -573,7 +615,7 @@ ApplicationWindow {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: "Choosing a finish copies and closes. Turn this off to skip saving a screenshot file. Ctrl+C in the finish chooser copies without saving once."
+                        text: "Using a finish, or Copy in the editor, copies the screenshot and saves a file. Turn this off to only copy. Copy and save always keeps a file, and Ctrl+C in the finish chooser copies without saving once."
                         color: theme.muted
                         font.family: theme.fontFamily
                         font.pixelSize: 11
@@ -848,8 +890,8 @@ ApplicationWindow {
                         Repeater {
                             model: [
                                 "Choose Screenshot, then click a window or drag an area. Whole display captures everything on that screen.",
-                                "Pick a finish, or choose Edit to crop, hide details and add labels.",
-                                "Click a finish, press its number or press Enter to copy it. With automatic saving on, the file is also saved. Ctrl+C or Clipboard copies without saving, and Esc cancels.",
+                                "Click a finish to select it. Press E to crop, hide details and add labels first.",
+                                "Double-click a finish, press its number or press Enter to copy it. With automatic saving on, the file is also saved. Ctrl+C or Clipboard copies without saving, and Esc cancels.",
                                 "Copy and save always keeps a file in " + root.home(studio.outputDirectory) + ". Paste into a chat, document or folder. Recordings are saved in " + root.home(video.outputDirectory) + "."
                             ]
                             RowLayout {
@@ -1407,7 +1449,7 @@ ApplicationWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 4
-                                StudioButton { text: "Duplicate"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Ctrl+D"; enabled: !studio.busy; onClicked: studio.marks.duplicateSelected() }
+                                StudioButton { text: "Duplicate"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Ctrl+D. Ctrl+C and Ctrl+V copy and paste it"; enabled: !studio.busy; onClicked: studio.marks.duplicateSelected() }
                                 StudioButton { glyph: "trash"; text: "Delete"; quiet: true; Layout.fillWidth: true; implicitHeight: 32; hint: "Delete"; enabled: !studio.busy; onClicked: studio.marks.deleteSelected() }
                             }
                             RowLayout {
@@ -1751,17 +1793,31 @@ ApplicationWindow {
                     }
                 }
                 StudioButton {
+                    objectName: "editorSaveButton"
+                    visible: root.copyOnlyFinish
+                    text: "Copy and save"
+                    glyph: "copy"
+                    quiet: true
+                    implicitHeight: 44
+                    hint: "Copy to the clipboard and save a PNG in " + root.home(studio.outputDirectory) + " · Ctrl+S"
+                    enabled: !root.working && !studio.rendering
+                    onClicked: root.acceptCurrent()
+                }
+                StudioButton {
+                    objectName: "editorFinishButton"
                     readonly property string label: root.working ? "Working…"
                         : root.videoMode ? (root.recordingReview ? (root.videoUnchanged || root.videoSavedCurrent ? "Copy and close" : "Save and copy") : root.videoSavedCurrent || root.videoUnchanged ? "Copy video" : "Export video")
-                        : studio.recoveryAction.length ? studio.recoveryAction : "Copy and save"
+                        : studio.recoveryAction.length ? studio.recoveryAction : root.copyOnlyFinish ? "Copy" : "Copy and save"
                     text: label
-                    hint: root.videoMode ? (root.recordingReview && (root.videoUnchanged || root.videoSavedCurrent) ? "The video is saved in " + root.home(video.outputDirectory) + ". Copy it to the clipboard and close · Ctrl+S" : root.recordingReview ? "Save a new MP4 with your changes, copy it and close · Ctrl+S" : root.videoSavedCurrent || root.videoUnchanged ? "Copy the video file to paste into a chat or folder · Ctrl+S" : "Save a new MP4 with your changes · Ctrl+S") : "Copy to the clipboard and save a PNG · Ctrl+C"
+                    hint: root.videoMode ? (root.recordingReview && (root.videoUnchanged || root.videoSavedCurrent) ? "The video is saved in " + root.home(video.outputDirectory) + ". Copy it to the clipboard and close · Ctrl+S" : root.recordingReview ? "Save a new MP4 with your changes, copy it and close · Ctrl+S" : root.videoSavedCurrent || root.videoUnchanged ? "Copy the video file to paste into a chat or folder · Ctrl+S" : "Save a new MP4 with your changes · Ctrl+S")
+                        : root.copyOnlyFinish ? "Copy to the clipboard without saving · Ctrl+Enter"
+                        : "Copy to the clipboard and save a PNG · Ctrl+Enter or Ctrl+S"
                     glyph: root.videoMode && !root.recordingReview && !root.videoSavedCurrent && !root.videoUnchanged ? "record" : "copy"
                     primary: true
                     implicitHeight: 44
                     implicitWidth: Math.max(170, implicitContentWidth + 26)
                     enabled: !root.working && (root.videoMode ? root.videoLoaded : !studio.rendering)
-                    onClicked: root.acceptCurrent()
+                    onClicked: root.finishCurrent()
                 }
             }
         }

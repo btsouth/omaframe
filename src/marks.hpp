@@ -21,6 +21,8 @@ class MarkDocument final : public QObject {
   Q_PROPERTY(QVariantMap labelStyle READ labelStyle NOTIFY changed)
   Q_PROPERTY(QVariantMap toolDefaults READ toolDefaults NOTIFY changed)
   Q_PROPERTY(bool textEditing READ textEditing NOTIFY changed)
+  /** A copied mark is waiting for Ctrl+V. */
+  Q_PROPERTY(bool canPaste READ canPaste NOTIFY changed)
   /** Every mark, for drawing them over a video: index, type, x1, y1, x2, y2,
    *  start, end, text, color and size. */
   Q_PROPERTY(QVariantList annotations READ annotations NOTIFY changed)
@@ -65,6 +67,7 @@ public:
   Q_INVOKABLE void resetToolStyle(const QString &type);
   Q_INVOKABLE QString stylePreview(const QString &type, const QVariantMap &style) const;
   bool textEditing() const { return m_hiddenEdit >= 0; }
+  bool canPaste() const { return m_copied.has_value(); }
   QVariantList annotations() const;
   double duration() const { return m_duration; }
   void setDuration(double seconds);
@@ -102,6 +105,12 @@ public:
   Q_INVOKABLE void resizeSelected(int handle, double x, double y);
   Q_INVOKABLE void deleteSelected();
   Q_INVOKABLE void duplicateSelected();
+  /** Copy, cut and paste marks within this image. Nothing touches the
+   *  system clipboard. Each paste lands a step further from the last, and
+   *  on a video it starts at the playhead. */
+  Q_INVOKABLE bool copySelected();
+  Q_INVOKABLE void cutSelected();
+  Q_INVOKABLE void paste();
   Q_INVOKABLE void moveSelectedLayer(int direction);
   Q_INVOKABLE void updateSelectedText(const QString &text);
   Q_INVOKABLE void setSelectedColor(const QString &color);
@@ -128,6 +137,9 @@ private:
   bool locked() const { return m_locked && m_locked(); }
   void saveHistory();
   void commit(bool modified = true);
+  /** Adds `edit` a small step away from where it is, keeping it on the
+   *  image, and selects it. */
+  void appendOffset(Frame::Edit edit);
   QPointF sourcePoint(double x, double y) const;
   /** Gives a new mark its times on a video. */
   void timeNewMark(Frame::Edit &edit) const;
@@ -145,6 +157,11 @@ private:
   };
   QVector<EditState> m_undoStates, m_redoStates;
   std::optional<EditState> m_transform;
+  /** The mark as copied, the way each paste steps from it, and how many
+   *  pastes there have been. */
+  std::optional<Frame::Edit> m_copied;
+  QPointF m_pasteStep;
+  int m_pastes = 0;
   bool m_previewing = false;
   int m_selected = -1;
   int m_hiddenEdit = -1;

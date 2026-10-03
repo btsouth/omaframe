@@ -1382,8 +1382,8 @@ void Studio::copyQuick() {
   // its file and any private backup that is still owed.
   if (!m_quickMode || m_busy || m_pendingFinish >= 0 || m_original.isNull() ||
       !recoveryAction().isEmpty() ||
-      (m_quickState != "choosing" && m_quickState != "copy-failed" &&
-       m_quickState != "failed"))
+      (m_quickState != "choosing" && m_quickState != "editing" &&
+       m_quickState != "copy-failed" && m_quickState != "failed"))
     return;
   cancelTextCopy();
   m_busy = true;
@@ -1410,7 +1410,8 @@ void Studio::copyQuick() {
     m_quickState = error.isEmpty() ? "copied" : "copy-failed";
     m_status = error.isEmpty()
                    ? "Copied to the clipboard without saving."
-                   : "Clipboard copy failed: " + error + " Press Ctrl+C to retry.";
+                   : "Clipboard copy failed: " + error +
+                         (m_editing ? " Press Copy to retry." : " Press Ctrl+C to retry.");
     emit changed();
     if (error.isEmpty())
       emit dismissRequested();
