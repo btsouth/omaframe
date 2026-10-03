@@ -915,6 +915,7 @@ void Recorder::stop() {
     // Nothing was captured yet. Cancel and go back to what the user was doing.
     ++m_generation;
     m_countdownTick.stop();
+    m_webcam.suspend();
     m_state = "idle";
     emit hideRequested();
     emit changed();

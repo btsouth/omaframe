@@ -578,9 +578,20 @@ while True:
  void cancellationDuringCountdownDoesNotLaunch() {
    Recorder r;r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
    QSignalSpy dismissed(&r,&Recorder::dismissRequested);
-   r.selectDisplay(0);r.setCountdown(3);r.start();r.stop();
+   r.selectDisplay(0);r.setCountdown(3);r.start();
+   // A preview frame survives hiding its sink unless cancellation suspends
+   // the webcam. This fixture needs no physical camera.
+   QVideoSink preview;
+   r.camera()->setPreviewSink(&preview);
+   QImage frame(64,64,QImage::Format_RGB32);frame.fill(Qt::red);
+   preview.setVideoFrame(QVideoFrame(frame));
+   QVERIFY(preview.videoFrame().isValid());
+   r.stop();
    QCOMPARE(r.state(),QString("idle"));QVERIFY(r.savedPath().isEmpty());QVERIFY(!r.active());
    QCOMPARE(dismissed.count(),1);
+   QVERIFY(!preview.videoFrame().isValid());
+   r.reset(); // Returning to Studio must not reactivate or retain the preview.
+   QVERIFY(!preview.videoFrame().isValid());
    r.setCountdown(0);
  }
  void selectorChoicesMadeBeforeLoadingAreApplied() {
