@@ -1,5 +1,9 @@
 #include "studio.hpp"
 #include "omarchy-theme.hpp"
+#include "navigation.hpp"
+#include "recording.hpp"
+#include "shortcuts.hpp"
+#include "video.hpp"
 #include <QColorSpace>
 #include <QDirIterator>
 #include <QFile>
@@ -14,6 +18,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QThread>
 #include <cstdio>
 #include <functional>
 
@@ -43,7 +48,8 @@ QImage captureImage() {
 // Run this test executable as wl-copy. No shell, desktop or real clipboard.
 int clipboardStub(int argc, char **argv) {
   if (argc != 3 || QByteArray(argv[1]) != "--type" ||
-      QByteArray(argv[2]) != "image/png")
+      (QByteArray(argv[2]) != "image/png" &&
+       QByteArray(argv[2]) != "text/plain;charset=utf-8"))
     return 2;
   QFile input;
   if (!input.open(stdin, QIODevice::ReadOnly))
@@ -98,6 +104,7 @@ private slots:
     QFile::remove(clipboard() + ".calls");
     qunsetenv("COPY_TEST_FAIL");
     qunsetenv("COPY_TEST_SECRET");
+    qunsetenv("COPY_TEST_TEXT");
   }
   void automaticSavingDefaultsOnAndPersists() {
     // An existing config with no new key keeps its current behavior.
@@ -117,6 +124,175 @@ private slots:
     QCOMPARE(reopened.style(), 4);
     reopened.setAutoSaveScreenshots(true);
     QVERIFY(studio.autoSaveScreenshots());
+  }
+  void failedDraftSaveKeepsImageAndEdits() {
+    const QString first = temp.filePath("first.png");
+    const QString second = temp.filePath("second.png");
+    QVERIFY(captureImage().save(first));
+    QImage replacement(80, 60, QImage::Format_RGB32);
+    replacement.fill(Qt::white);
+    QVERIFY(replacement.save(second));
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.open(QUrl::fromLocalFile(first));
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy() && !studio.rendering(), 5000);
+    studio.marks()->edit("redact", .1, .1, .4, .4);
+    const auto edits = studio.marks()->edits();
+    const QString folder = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/drafts";
+    QVERIFY(QDir(folder).removeRecursively());
+    QVERIFY(QDir().mkpath(QFileInfo(folder).absolutePath()));
+    QFile blocker(folder);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    QVERIFY(!studio.saveDraftNow());
+    QVERIFY(studio.draftDirty());
+    studio.closeImage();
+    QVERIFY(studio.hasImage());
+    QCOMPARE(studio.marks()->edits(), edits);
+    QVERIFY(studio.status().contains("Could not save"));
+    studio.open(QUrl::fromLocalFile(second));
+    QVERIFY(!studio.busy());
+    QCOMPARE(studio.sourceSize(), QSize(160, 100));
+    QCOMPARE(studio.marks()->edits(), edits);
+    studio.resumeDraft(QString(32, 'a'));
+    QCOMPARE(studio.marks()->edits(), edits);
+    // Fixing the destination lets the same edits be saved and navigation resume.
+    QVERIFY(QFile::remove(folder));
+    QVERIFY(studio.saveDraftNow());
+    QVERIFY(!studio.draftDirty());
+    QCOMPARE(studio.drafts().size(), 1);
+    studio.closeImage();
+    QVERIFY(!studio.hasImage());
+  }
+  void failedDraftCanBeExplicitlyDiscarded() {
+    const QString input = temp.filePath("discard.png");
+    QVERIFY(captureImage().save(input));
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.open(QUrl::fromLocalFile(input));
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy() && !studio.rendering(), 5000);
+    studio.marks()->edit("redact", .1, .1, .4, .4);
+    const QString folder = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/drafts";
+    QVERIFY(QDir(folder).removeRecursively());
+    QVERIFY(QDir().mkpath(QFileInfo(folder).absolutePath()));
+    QFile blocker(folder);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    QVERIFY(!studio.saveDraftNow());
+    studio.discardUnsavedDraft();
+    QVERIFY(!studio.draftDirty());
+    studio.closeImage();
+    QVERIFY(!studio.hasImage());
+    QVERIFY(studio.drafts().isEmpty());
+  }
+  void copiedTextUsesCurrentPixels_data() {
+    QTest::addColumn<QString>("action");
+    QTest::newRow("redact") << QString("redact");
+    QTest::newRow("crop") << QString("crop");
+    QTest::newRow("redact-pending-copy") << QString("pending");
+  }
+  void failedDraftNavigation_data() {
+    QTest::addColumn<QString>("action");
+    QTest::newRow("retry") << QString("retry");
+    QTest::newRow("discard") << QString("discard");
+    QTest::newRow("cancel") << QString("cancel");
+  }
+  void failedDraftNavigation() {
+    QFETCH(QString, action);
+    QQmlEngine engine;
+    auto *store = new ImageStore;
+    engine.addImageProvider("frames", store);
+    auto *videoStore = new ImageStore;
+    engine.addImageProvider("videomarks", videoStore);
+    Studio studio(store, false);
+    Video video;
+    video.setImageStore(videoStore);
+    Recorder recorder;
+    ShortcutSetup shortcuts;
+    Navigation navigation;
+    OmarchyTheme theme(nullptr, temp.filePath("theme"), temp.filePath("theme-config"), false);
+    engine.rootContext()->setContextProperty("studio", &studio);
+    engine.rootContext()->setContextProperty("video", &video);
+    engine.rootContext()->setContextProperty("recorder", &recorder);
+    engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    engine.rootContext()->setContextProperty("navigation", &navigation);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    engine.rootContext()->setContextProperty("captureAtStartup", false);
+    const QString input = temp.filePath("navigation.png");
+    QVERIFY(captureImage().save(input));
+    studio.open(QUrl::fromLocalFile(input));
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy() && !studio.rendering(), 5000);
+    studio.marks()->edit("redact", .1, .1, .4, .4);
+    const QString folder = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/drafts";
+    QVERIFY(QDir(folder).removeRecursively());
+    QVERIFY(QDir().mkpath(QFileInfo(folder).absolutePath()));
+    QFile blocker(folder);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
+    QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QSignalSpy proceed(&navigation, &Navigation::proceed);
+    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestNavigation",
+        Q_ARG(QVariant, "quit"), Q_ARG(QVariant, QUrl())));
+    QVERIFY(navigation.pending());
+    QVERIFY(proceed.isEmpty());
+    QVERIFY(studio.hasImage() && studio.draftDirty());
+    if (action == "retry") {
+      navigation.save();
+      QVERIFY(navigation.pending());
+      QVERIFY(!navigation.saving());
+      QVERIFY(proceed.isEmpty());
+      QVERIFY(QFile::remove(folder));
+      navigation.save();
+      QCOMPARE(proceed.count(), 1);
+      QVERIFY(!studio.draftDirty());
+      QCOMPARE(studio.drafts().size(), 1);
+    } else if (action == "discard") {
+      // Exercise the dialog's real button handler, including the explicit discard.
+      QQuickItem *button = nullptr;
+      std::function<void(QQuickItem *)> visit = [&](QQuickItem *item) {
+        if (item->property("text").toString() == "Discard edits") button = item;
+        for (auto *child : item->childItems()) visit(child);
+      };
+      visit(window->contentItem());
+      QVERIFY(button);
+      QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+      QCOMPARE(proceed.count(), 1);
+      QVERIFY(!studio.draftDirty());
+      QVERIFY(studio.drafts().isEmpty());
+    } else {
+      navigation.cancel();
+      QVERIFY(proceed.isEmpty());
+      QVERIFY(studio.draftDirty());
+      QVERIFY(studio.hasImage());
+    }
+  }
+  void copiedTextUsesCurrentPixels() {
+    QFETCH(QString, action);
+    qputenv("COPY_TEST_TEXT", "1");
+    QImage image(160, 100, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    const QString input = temp.filePath("text.png");
+    QVERIFY(image.save(input));
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.open(QUrl::fromLocalFile(input));
+    QTRY_VERIFY_WITH_TIMEOUT(studio.secretCount() == 1, 5000);
+    if (action == "pending") studio.copyText();
+    if (action == "crop")
+      QVERIFY(studio.marks()->cropCurrentView(0, .45, 1, 1));
+    else
+      studio.hideSecrets();
+    if (action != "pending") studio.copyText();
+    QTRY_COMPARE_WITH_TIMEOUT(studio.textNote(), QString("Copied the text."), 5000);
+    const QByteArray copied = contents(clipboard());
+    QVERIFY(copied.contains("Public status"));
+    QVERIFY(!copied.contains("ghp_"));
   }
   void chooserActions_data() {
     QTest::addColumn<QString>("action");
@@ -677,7 +853,17 @@ int main(int argc, char **argv) {
     QFile input;
     if (!input.open(stdin, QIODevice::ReadOnly))
       return 2;
-    input.readAll();
+    const QImage image = QImage::fromData(input.readAll());
+    if (qEnvironmentVariableIsSet("COPY_TEST_TEXT")) {
+      if (image.isNull()) return 3;
+      QThread::msleep(200); // Edits can change while the OCR request is running.
+      if (image.height() > 110 && qGray(image.pixel(40, 40)) > 80)
+        std::fputs("5\t1\t1\t1\t1\t1\t20\t20\t200\t40\t99\t"
+                   "ghp_R8x2KqLm4Vn7Pz9Wt3Ys6Bd1Fh5Jc0Ae2Gk\n", stdout);
+      std::fprintf(stdout, "5\t1\t1\t1\t2\t1\t20\t%d\t200\t40\t99\tPublic status\n",
+                   image.height() > 110 ? 120 : 10);
+      return 0;
+    }
     if (qEnvironmentVariableIsSet("COPY_TEST_SECRET"))
       std::fputs("5\t1\t1\t1\t1\t1\t10\t10\t100\t20\t99\t"
                  "ghp_R8x2KqLm4Vn7Pz9Wt3Ys6Bd1Fh5Jc0Ae2Gk\n", stdout);
