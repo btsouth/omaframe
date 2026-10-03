@@ -16,8 +16,14 @@ QStringList styleNames() {
 }
 
 static QRect pixelRect(QSize size, QPointF from, QPointF to) {
-  QRectF r(QPointF(from.x() * size.width(), from.y() * size.height()),
-           QPointF(to.x() * size.width(), to.y() * size.height()));
+  // Normalized integer edges can land a few ulps either side of a pixel
+  // after serialization. Do not enlarge those crops by another pixel.
+  const auto pixel = [](double value) {
+    const double rounded = std::round(value);
+    return std::abs(value - rounded) < 1e-7 ? rounded : value;
+  };
+  QRectF r(QPointF(pixel(from.x() * size.width()), pixel(from.y() * size.height())),
+           QPointF(pixel(to.x() * size.width()), pixel(to.y() * size.height())));
   return r.normalized().toAlignedRect().intersected(QRect(QPoint(), size));
 }
 
@@ -131,20 +137,20 @@ QRectF annotationBounds(const Edit &edit, const QImage &source) {
           pixels.height() / source.height()};
 }
 
+QRect cropPixels(QSize size, const QVector<Edit> &edits) {
+  const QRect full(QPoint(), size);
+  QRect region = full;
+  for (const Edit &edit : edits)
+    if (edit.type == "crop")
+      region = pixelRect(size, edit.from, edit.to);
+  return region.width() >= 2 && region.height() >= 2 ? region : full;
+}
+
 QImage cropImage(const QImage &image, const QVector<Edit> &edits) {
   if (image.isNull())
     return image;
-  QRect region(QPoint(), image.size());
-  bool cropped = false;
-  for (const Edit &edit : edits)
-    if (edit.type == "crop") {
-      region = pixelRect(image.size(), edit.from, edit.to);
-      cropped = true;
-    }
-  if (!cropped)
-    return image;
-  return region.width() >= 2 && region.height() >= 2 ? image.copy(region)
-                                                       : image;
+  const QRect region = cropPixels(image.size(), edits);
+  return region == image.rect() ? image : image.copy(region);
 }
 
 QImage applyEdits(const QImage &source, const QVector<Edit> &edits,

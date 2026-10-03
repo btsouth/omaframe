@@ -170,6 +170,7 @@ ApplicationWindow {
         function onEditorRequested() { root.editing = true; root.videoMode = false; root.tool = "select"; }
         function onSourceChanged() {
             canvasArea.resetZoom();
+            preview.displayedCropBounds = Qt.rect(-1, -1, 0, 0);
             markCanvas.cancelText();
             root.editing = false;
             root.videoMode = false;
@@ -1123,7 +1124,7 @@ ApplicationWindow {
                         // Flickable, whose disabled input filtering also blocks
                         // handlers attached to it while annotation drags own input.
                         WheelHandler {
-                            enabled: root.editing && !studio.busy && !markCanvas.dragging
+                            enabled: root.editing && !markCanvas.locked && !markCanvas.dragging
                             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                             target: null
                             onWheel: event => {
@@ -1144,7 +1145,7 @@ ApplicationWindow {
                             z: 1
                             anchors.rightMargin: 12
                             anchors.bottomMargin: 12
-                            enabled: root.editing && !studio.busy && !markCanvas.dragging
+                            enabled: root.editing && !markCanvas.locked && !markCanvas.dragging
                             readonly property bool selectPan: root.tool === "select" && canvasArea.zoom > 1
                             function canPan(x, y) {
                                 const point = mapToItem(markCanvas, x, y);
@@ -1212,6 +1213,23 @@ ApplicationWindow {
                                     cache: false
                                     asynchronous: true
                                     retainWhileLoading: true
+                                    property rect requestedCropBounds
+                                    property rect displayedCropBounds: Qt.rect(-1, -1, 0, 0)
+                                    property bool requestedEditing: false
+                                    property bool displayedEditing: false
+                                    onSourceChanged: {
+                                        requestedCropBounds = studio.previewCropBounds;
+                                        requestedEditing = root.editing;
+                                    }
+                                    onStatusChanged: if (status === Image.Ready) {
+                                        displayedCropBounds = requestedCropBounds;
+                                        displayedEditing = requestedEditing;
+                                    }
+                                    readonly property bool geometryReady: displayedEditing === root.editing
+                                        && displayedCropBounds.x === studio.marks.cropBounds.x
+                                        && displayedCropBounds.y === studio.marks.cropBounds.y
+                                        && displayedCropBounds.width === studio.marks.cropBounds.width
+                                        && displayedCropBounds.height === studio.marks.cropBounds.height
                                 }
                                 MarkCanvas {
                                     id: markCanvas
@@ -1222,7 +1240,7 @@ ApplicationWindow {
                                     doc: studio.marks
                                     tool: root.tool
                                     cropCurrentView: true
-                                    locked: studio.busy
+                                    locked: studio.busy || !preview.geometryReady
                                     workingSize: studio.workingSize
                                     sourceSize: studio.sourceSize
                                     onToolRequested: key => {

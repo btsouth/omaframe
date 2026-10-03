@@ -50,7 +50,7 @@ public:
   bool canUndo() const { return !m_undoStates.isEmpty(); }
   bool canRedo() const { return !m_redoStates.isEmpty(); }
   bool hasCrop() const;
-  QRectF cropBounds() const { return Frame::cropBounds(m_edits); }
+  QRectF cropBounds() const;
   QVariantMap selectedAnnotation() const;
   /** The font size a new label starts at, in source pixels. */
   int newTextPixels() const;

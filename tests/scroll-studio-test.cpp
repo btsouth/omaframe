@@ -47,8 +47,7 @@ private slots:
     const QRectF second = marks.cropBounds();
     const QImage secondRendered = Frame::applyEdits(image, marks.edits());
     const QSize secondSize = secondRendered.size();
-    QVERIFY(qAbs(secondSize.width() - 400) <= 1);
-    QVERIFY(qAbs(secondSize.height() - 320) <= 1);
+    QCOMPARE(secondSize, QSize(400, 320));
     marks.undo();
     QCOMPARE(marks.cropBounds(), first);
     QCOMPARE(Frame::applyEdits(image, marks.edits()), firstRendered);
@@ -60,6 +59,47 @@ private slots:
     QVERIFY(!marks.hasCrop());
     QCOMPARE(marks.edits().first(), annotation);
     QCOMPARE(Frame::applyEdits(image, marks.edits()), original);
+  }
+
+  void recursiveCropsUseDisplayedPixels() {
+    QImage image(1000, 100, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < image.height(); ++y)
+      for (int x = 0; x < image.width(); ++x)
+        image.setPixelColor(x, y, QColor(x % 256, x / 256, y));
+    MarkDocument marks;
+    marks.restore(image, {{"crop", {.1009, 0}, {.1041, 1}}}, -1);
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), image.copy(100, 0, 5, 100));
+    QCOMPARE(marks.cropBounds(), QRectF(.1, 0, .005, 1));
+    // Outward rounding retains all five displayed columns, so no undo entry.
+    QVERIFY(!marks.cropCurrentView(.1, 0, .9, 1));
+    QVERIFY(!marks.canUndo());
+    QVERIFY(marks.cropCurrentView(.2, 0, .8, 1));
+    const QImage cropped = image.copy(101, 0, 3, 100);
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), cropped);
+    MarkDocument restored;
+    restored.restore(image, marks.edits(), marks.selected());
+    QCOMPARE(Frame::applyEdits(image, restored.edits()), cropped);
+    QCOMPARE(restored.cropBounds(), marks.cropBounds());
+    marks.undo();
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), image.copy(100, 0, 5, 100));
+    marks.redo();
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), cropped);
+  }
+
+  void previewReportsOnlyCompletedCropGeometry() {
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.scrollFinished(pageImage(1000, 800), false, true);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 20000);
+    QCOMPARE(studio.previewCropBounds(), studio.marks()->cropBounds());
+    const QRectF previous = studio.previewCropBounds();
+    QVERIFY(studio.marks()->cropCurrentView(.1, .1, .9, .9));
+    QVERIFY(studio.rendering());
+    QCOMPARE(studio.previewCropBounds(), previous);
+    QVERIFY(studio.previewCropBounds() != studio.marks()->cropBounds());
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 20000);
+    QCOMPARE(studio.previewCropBounds(), studio.marks()->cropBounds());
+    QCOMPARE(store.requestImage("source", nullptr, {}).size(), QSize(800, 640));
   }
 
   void tinyCropsAndEmptyClicks() {

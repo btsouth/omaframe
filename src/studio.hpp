@@ -111,6 +111,7 @@ class Studio final : public QObject {
   /** False until the first-run welcome has been seen or dismissed. */
   Q_PROPERTY(bool welcomed READ welcomed WRITE setWelcomed NOTIFY changed)
   Q_PROPERTY(QSize workingSize READ workingSize NOTIFY changed)
+  Q_PROPERTY(QRectF previewCropBounds READ previewCropBounds NOTIFY changed)
   Q_PROPERTY(QString originalsFolder READ originalsFolder CONSTANT)
   /** The display the pointer is on while selecting, for F. */
   Q_PROPERTY(QString pointerMonitor READ pointerMonitor WRITE setPointerMonitor NOTIFY changed)
@@ -165,6 +166,7 @@ public:
   bool welcomed() const;
   /** The cropped image the editor shows, and the whole capture, in pixels. */
   QSize workingSize() const { return m_workingSize; }
+  QRectF previewCropBounds() const { return m_previewCropBounds; }
   QSize sourceSize() const { return m_original.size(); }
   bool canReadText() const { return m_reading || m_textRead; }
   int secretCount() const { return uncoveredSecrets().size(); }
@@ -307,6 +309,7 @@ private:
   QSize m_lastAreaPixels;
   QString m_lastAreaMonitor;
   QSize m_workingSize;
+  QRectF m_previewCropBounds;
   QMargins m_edgeRoom;
   MarkDocument m_marks;
   QVariantList m_drafts;

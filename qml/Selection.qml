@@ -6,6 +6,8 @@ import QtQuick.Layouts
 Window {
     id: window
     visible: false
+    onWidthChanged: if (bar && bar.positioned) bar.clampPosition()
+    onHeightChanged: if (bar && bar.positioned) bar.clampPosition()
     palette.window: theme.alpha(theme.background, 1)
     palette.windowText: theme.text
     palette.base: theme.well
@@ -356,7 +358,12 @@ Window {
         // The selector owns an overlay surface, so move its bar here rather
         // than asking the compositor to move a regular application window.
         BarDrag { acceptedModifiers: Qt.MetaModifier }
-        onWidthChanged: if (positioned) x = Math.max(8, Math.min(window.width - width - 8, x))
+        function clampPosition() {
+            x = Math.max(8, Math.min(window.width - width - 8, x));
+            y = Math.max(8, Math.min(window.height - height - 8, y));
+        }
+        onWidthChanged: if (positioned) clampPosition()
+        onHeightChanged: if (positioned) clampPosition()
         // Clicks on the bar never start a selection underneath it.
         MouseArea {anchors.fill: parent}
         RowLayout {

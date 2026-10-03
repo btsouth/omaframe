@@ -376,12 +376,18 @@ bool MarkDocument::cropCurrentView(double x1, double y1, double x2, double y2) {
       !std::isfinite(x2) || !std::isfinite(y2))
     return false;
   const QPointF a = sourcePoint(x1, y1), b = sourcePoint(x2, y2);
-  const QRectF next = QRectF(a, b).normalized();
-  // Match the renderer's minimum crop size; zero-width clicks must not
-  // change the document or add an undo step.
-  if (next.width() * m_base.width() < 2 || next.height() * m_base.height() < 2 ||
-      next == cropBounds())
+  if (a.x() == b.x() || a.y() == b.y())
     return false;
+  const QRect current = Frame::cropPixels(m_base.size(), m_edits);
+  const QRect pixels = Frame::cropPixels(m_base.size(), {{"crop", a, b}});
+  // Invalid sub-two-pixel crops render the full source; reject that fallback
+  // and pixel-equivalent crops without creating an undo step.
+  if (!current.contains(pixels) || pixels == current)
+    return false;
+  const QRectF next(double(pixels.x()) / m_base.width(),
+                    double(pixels.y()) / m_base.height(),
+                    double(pixels.width()) / m_base.width(),
+                    double(pixels.height()) / m_base.height());
   if (m_edits.size() >= MaxEdits && !hasCrop()) {
     emit message("This image has reached the 100-edit limit.");
     return false;
@@ -457,6 +463,17 @@ void MarkDocument::saveHistory() {
     m_undoStates.removeFirst();
   m_undoStates.append({m_edits, m_selected});
   m_redoStates.clear();
+}
+QRectF MarkDocument::cropBounds() const {
+  // Video keeps normalized frame geometry; screenshots must map gestures
+  // against the exact pixels shown after the renderer rounds crop edges.
+  if (m_duration > 0 || m_base.isNull())
+    return Frame::cropBounds(m_edits);
+  const QRect pixels = Frame::cropPixels(m_base.size(), m_edits);
+  return {double(pixels.x()) / m_base.width(),
+          double(pixels.y()) / m_base.height(),
+          double(pixels.width()) / m_base.width(),
+          double(pixels.height()) / m_base.height()};
 }
 QPointF MarkDocument::sourcePoint(double x, double y) const {
   const QRectF crop = cropBounds();
