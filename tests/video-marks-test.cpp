@@ -563,11 +563,37 @@ private slots:
     video.paste();
     QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 7.5);
     QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 8.);
-    video.edit("blur", 0.6, 0.6, 0.8, 0.8);
-    QVERIFY(video.copySelected());
+    // A paste cut short by the end of the clip does not change the copy.
+    video.setPlayhead(2);
     video.paste();
-    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 0.);
-    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 8.);
+    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 2.);
+    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 4.);
+    // A cover keeps its times, widened to the playhead so the paste shows.
+    video.edit("blur", 0.6, 0.6, 0.8, 0.8);
+    video.setSelectedTimes(1, 2);
+    QVERIFY(video.copySelected());
+    video.setPlayhead(1.5);
+    video.paste();
+    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 1.);
+    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 2.);
+    video.setPlayhead(5);
+    video.paste();
+    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 1.);
+    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 5.1);
+
+    // Near an edge, pastes step away from it instead of folding back onto
+    // the copy.
+    MarkDocument edge;
+    edge.reset(frame);
+    edge.edit("box", 0.9, 0.9, 0.99, 0.99);
+    QVERIFY(edge.copySelected());
+    for (int i = 0; i < 3; ++i)
+      edge.paste();
+    QCOMPARE(edge.edits().size(), 4);
+    for (int i = 1; i < 4; ++i) {
+      QVERIFY(edge.edits()[i].from.x() < edge.edits()[i - 1].from.x());
+      QVERIFY(edge.edits()[i].from.y() < edge.edits()[i - 1].from.y());
+    }
   }
 
   void rewordingALabelChangesTheMarks() {

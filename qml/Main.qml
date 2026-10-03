@@ -125,6 +125,8 @@ ApplicationWindow {
         }
         if (cut) studio.marks.cutSelected();
         else studio.marks.copySelected();
+        // The same note twice is not a status change, so show it here.
+        root.operationStatus = studio.status;
     }
     // Escape peels one layer at a time: typing, a drag, the selection, the
     // tool, then Edit itself.

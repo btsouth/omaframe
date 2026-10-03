@@ -58,10 +58,10 @@ to stop keeping screenshot files. This does not disable editable drafts that
 are autosaved while you edit.
 
 Paste it anywhere. Crops, marks and redactions you made in the editor are kept
-either way. If copying fails, the panel stays open; Ctrl+C retries a clipboard-only
-copy, and a saved screenshot offers a retry for its unfinished step. The
-close button still cancels, and Esc while choosing an area still cancels the
-capture. Clicking outside the panel does nothing.
+either way. If copying fails, the panel stays open; Ctrl+C (Copy in the editor)
+retries a clipboard-only copy, and a saved screenshot offers a retry for its
+unfinished step. The close button still cancels, and Esc while choosing an
+area still cancels the capture. Clicking outside the panel does nothing.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
@@ -178,7 +178,7 @@ keeps your edits open.
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Marking up | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste the selected mark. Never copies or closes the screenshot |
-| Marking up | Ctrl+Enter | Copy the screenshot, saving a file when automatic saving is on |
+| Marking up | Ctrl+Enter | Finish: after a capture, copy and save a file only when automatic saving is on; in the studio, copy and save |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
 | Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
 | Reviewing a video | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo trim, cuts and marks |

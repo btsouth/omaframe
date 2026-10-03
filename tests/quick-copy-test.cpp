@@ -277,13 +277,16 @@ private slots:
   void editorClipboardKeysKeepTheScreenshotOpen_data() {
     QTest::addColumn<bool>("autoSave");
     QTest::addColumn<bool>("ctrlS");
-    QTest::newRow("copy-only") << false << false;
-    QTest::newRow("save-and-copy") << true << false;
-    QTest::newRow("ctrl-s-saves-anyway") << false << true;
+    QTest::addColumn<bool>("failFirst");
+    QTest::newRow("copy-only") << false << false << false;
+    QTest::newRow("save-and-copy") << true << false << false;
+    QTest::newRow("ctrl-s-saves-anyway") << false << true << false;
+    QTest::newRow("copy-fails-then-retries") << false << false << true;
   }
   void editorClipboardKeysKeepTheScreenshotOpen() {
     QFETCH(bool, autoSave);
     QFETCH(bool, ctrlS);
+    QFETCH(bool, failFirst);
     QQmlEngine engine;
     auto *store = new ImageStore;
     engine.addImageProvider("frames", store);
@@ -317,6 +320,20 @@ private slots:
     QTRY_VERIFY(window->isActive());
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
     QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    const auto item = [&](const QString &name) {
+      QQuickItem *found = nullptr;
+      std::function<void(QQuickItem *)> find = [&](QQuickItem *child) {
+        if (child->objectName() == name) found = child;
+        for (auto *next : child->childItems()) find(next);
+      };
+      find(window->contentItem());
+      return found;
+    };
+    // With automatic saving off, the main button copies and a second one saves.
+    QVERIFY(item("editorFinishButton") && item("editorSaveButton"));
+    QCOMPARE(item("editorFinishButton")->property("text").toString(),
+             autoSave ? QString("Copy and save") : QString("Copy"));
+    QCOMPARE(item("editorSaveButton")->isVisible(), !autoSave);
     studio.marks()->edit("arrow", .1, .1, .4, .3);
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
     QCOMPARE(studio.marks()->selectedAnnotation().value("type").toString(), QString("arrow"));
@@ -343,12 +360,25 @@ private slots:
     // With nothing selected, Ctrl+C explains how to finish instead.
     studio.marks()->clearSelection();
     QTest::keyClick(window.get(), Qt::Key_C, Qt::ControlModifier);
+    QVERIFY(window->property("currentStatus").toString().startsWith("Select a mark"));
     QTest::qWait(100);
     QCOMPARE(dismissed.count(), 0);
     QCOMPARE(studio.quickState(), QString("editing"));
     QVERIFY(!QFileInfo::exists(clipboard()));
     QVERIFY(!QDir(temp.filePath("output")).exists());
 
+    if (failFirst) {
+      // A failed copy keeps the editor and edits open, and Copy retries.
+      qputenv("COPY_TEST_FAIL", "1");
+      QTest::keyClick(window.get(), Qt::Key_Return, Qt::ControlModifier);
+      QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("copy-failed"), 15000);
+      QVERIFY(studio.status().contains("Press Copy to retry"));
+      QCOMPARE(dismissed.count(), 0);
+      QVERIFY(window->property("editing").toBool());
+      QCOMPARE(studio.marks()->edits().size(), 2);
+      qunsetenv("COPY_TEST_FAIL");
+      QFile::remove(clipboard());
+    }
     // Ctrl+Enter finishes the way the setting says; Ctrl+S always saves.
     if (ctrlS) QTest::keyClick(window.get(), Qt::Key_S, Qt::ControlModifier);
     else QTest::keyClick(window.get(), Qt::Key_Return, Qt::ControlModifier);

@@ -37,7 +37,7 @@ Window {
     property int selected: studio.style
     function select(index) { if (canChoose) selected = index }
     function useSelected() { if (studio.style !== selected) studio.style = selected }
-    function choose(index) { if (canChoose) studio.chooseFinish(index) }
+    function choose(index) { if (canChoose) {selected = index; studio.chooseFinish(index)} }
     // While a saved screenshot waits for a retry, the finish is fixed.
     function finish() { if (ready) studio.chooseFinish(canChoose ? selected : studio.style) }
     function save() { if (canChoose) {useSelected(); studio.saveQuick()} }

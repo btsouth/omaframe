@@ -881,7 +881,13 @@ void MarkDocument::deleteSelected() {
   m_selected = -1;
   commit();
 }
-Frame::Edit MarkDocument::appendOffset(Frame::Edit edit) {
+static void translate(Frame::Edit &edit, QPointF by) {
+  edit.from += by;
+  edit.to += by;
+  for (QPointF &point : edit.points)
+    point += by;
+}
+void MarkDocument::appendOffset(Frame::Edit edit) {
   const QRectF bounds = Frame::annotationBounds(edit, m_base);
   const double stepX = 12. / std::max(1, m_base.width());
   const double stepY = 12. / std::max(1, m_base.height());
@@ -889,14 +895,10 @@ Frame::Edit MarkDocument::appendOffset(Frame::Edit edit) {
                       : bounds.left() - stepX >= 0. ? -stepX : 0.;
   const double dy = bounds.bottom() + stepY <= 1. ? stepY
                       : bounds.top() - stepY >= 0. ? -stepY : 0.;
-  edit.from += QPointF(dx, dy);
-  edit.to += QPointF(dx, dy);
-  for (QPointF &point : edit.points)
-    point += QPointF(dx, dy);
+  translate(edit, {dx, dy});
   saveHistory();
   m_edits.append(edit);
   m_selected = m_edits.size() - 1;
-  return edit;
 }
 void MarkDocument::duplicateSelected() {
   if (locked() || m_selected < 0 || m_selected >= m_edits.size() ||
@@ -911,6 +913,12 @@ bool MarkDocument::copySelected() {
       m_edits[m_selected].type == "crop")
     return false;
   m_copied = m_edits[m_selected];
+  // Pastes step toward the side with more room, so a row of them does not
+  // fold back onto the copy at an edge.
+  const QRectF bounds = Frame::annotationBounds(*m_copied, m_base);
+  m_pasteStep = {(bounds.center().x() <= 0.5 ? 12. : -12.) / std::max(1, m_base.width()),
+                 (bounds.center().y() <= 0.5 ? 12. : -12.) / std::max(1, m_base.height())};
+  m_pastes = 0;
   emit message("Annotation copied. Press Ctrl+V to paste it.");
   emit changed();
   return true;
@@ -929,17 +937,34 @@ void MarkDocument::paste() {
     return;
   }
   Frame::Edit edit = *m_copied;
-  // On a video, a paste shows for as long as the copy did, from the playhead,
-  // and one that ran to the end still does. Blur and redact keep their times
-  // so a pasted cover never starts after what it hides, as in timeNewMark().
-  if (m_duration > 0 && edit.type != "blur" && edit.type != "redact") {
+  // Each paste is a step further from the copy, stopping at the image's edge.
+  const QRectF bounds = Frame::annotationBounds(edit, m_base);
+  const QPointF wanted = m_pasteStep * (m_pastes + 1);
+  const QPointF shift(std::clamp(wanted.x(), std::min(0., -bounds.left()),
+                                 std::max(0., 1. - bounds.right())),
+                      std::clamp(wanted.y(), std::min(0., -bounds.top()),
+                                 std::max(0., 1. - bounds.bottom())));
+  translate(edit, shift);
+  if (m_duration > 0) {
     const double end = edit.end < 0 ? m_duration : edit.end;
-    const double length = end - edit.start;
-    edit.start = std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1));
-    edit.end = end >= m_duration ? m_duration
-                                 : std::clamp(edit.start + length, edit.start + 0.1, m_duration);
+    if (edit.type == "blur" || edit.type == "redact") {
+      // A cover keeps its times so it never starts after what it hides,
+      // widened to the playhead so the paste can be seen and placed.
+      edit.start = std::min(edit.start, std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1)));
+      edit.end = std::max(end, std::min(m_duration, m_playhead + 0.1));
+    } else {
+      // Anything else shows for as long as the copy did, from the playhead,
+      // and one that ran to the end still does.
+      const double length = end - edit.start;
+      edit.start = std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1));
+      edit.end = end >= m_duration ? m_duration
+                                   : std::clamp(edit.start + length, edit.start + 0.1, m_duration);
+    }
   }
-  m_copied = appendOffset(edit);
+  ++m_pastes;
+  saveHistory();
+  m_edits.append(edit);
+  m_selected = m_edits.size() - 1;
   emit message("Annotation pasted. Drag it to place it.");
   commit();
 }

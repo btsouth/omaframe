@@ -138,8 +138,8 @@ private:
   void saveHistory();
   void commit(bool modified = true);
   /** Adds `edit` a small step away from where it is, keeping it on the
-   *  image, and selects it. Returns the added mark. */
-  Frame::Edit appendOffset(Frame::Edit edit);
+   *  image, and selects it. */
+  void appendOffset(Frame::Edit edit);
   QPointF sourcePoint(double x, double y) const;
   /** Gives a new mark its times on a video. */
   void timeNewMark(Frame::Edit &edit) const;
@@ -157,7 +157,11 @@ private:
   };
   QVector<EditState> m_undoStates, m_redoStates;
   std::optional<EditState> m_transform;
+  /** The mark as copied, the way each paste steps from it, and how many
+   *  pastes there have been. */
   std::optional<Frame::Edit> m_copied;
+  QPointF m_pasteStep;
+  int m_pastes = 0;
   bool m_previewing = false;
   int m_selected = -1;
   int m_hiddenEdit = -1;
