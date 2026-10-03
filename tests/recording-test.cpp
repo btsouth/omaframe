@@ -9,6 +9,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QVideoFrame>
 #include <cstring>
 
 class RecordingTest:public QObject {
