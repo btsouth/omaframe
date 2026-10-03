@@ -6,6 +6,7 @@
 #include "video.hpp"
 #include <QColorSpace>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
 #include <QQmlComponent>
@@ -105,6 +106,7 @@ private slots:
     qunsetenv("COPY_TEST_FAIL");
     qunsetenv("COPY_TEST_SECRET");
     qunsetenv("COPY_TEST_TEXT");
+    qunsetenv("COPY_TEST_FIRST_READ_FAIL");
   }
   void automaticSavingDefaultsOnAndPersists() {
     // An existing config with no new key keeps its current behavior.
@@ -293,6 +295,54 @@ private slots:
     const QByteArray copied = contents(clipboard());
     QVERIFY(copied.contains("Public status"));
     QVERIFY(!copied.contains("ghp_"));
+  }
+  void detectorFailureCannotPublishStaleText() {
+    qputenv("COPY_TEST_TEXT", "1");
+    const QString marker = temp.filePath("detector-started");
+    QFile::remove(marker);
+    QFile::remove(marker + ".release");
+    qputenv("COPY_TEST_FIRST_READ_FAIL", QFile::encodeName(marker));
+    QImage image(160, 100, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    const QString input = temp.filePath("failed-detector.png");
+    QVERIFY(image.save(input));
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.open(QUrl::fromLocalFile(input));
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(marker), 5000);
+    QVERIFY(studio.canReadText());
+    studio.copyText();
+    QFile release(marker + ".release");
+    QVERIFY(release.open(QIODevice::WriteOnly));
+    release.close();
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.canReadText(), 5000);
+    // Copy OCR is still pending after original-image detection fails.
+    studio.marks()->edit("redact", .05, .05, .75, .4);
+    QTRY_COMPARE_WITH_TIMEOUT(studio.textNote(), QString("Copied the text."), 5000);
+    QVERIFY(contents(clipboard()).contains("Public status"));
+    QVERIFY(!contents(clipboard()).contains("ghp_"));
+  }
+  void newerPngCopyCancelsPendingText_data() {
+    QTest::addColumn<bool>("save");
+    QTest::newRow("clipboard-only") << false;
+    QTest::newRow("save-and-copy") << true;
+  }
+  void newerPngCopyCancelsPendingText() {
+    QFETCH(bool, save);
+    qputenv("COPY_TEST_TEXT", "1");
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    QVERIFY(studio.canReadText());
+    studio.copyText();
+    QCOMPARE(studio.textNote(), QString("Reading text…"));
+    if (save) studio.accept();
+    else studio.copyQuick();
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy(), 5000);
+    QVERIFY(!QImage::fromData(contents(clipboard())).isNull());
+    QTest::qWait(500); // Let an uncancelled delayed text worker finish.
+    QVERIFY(!QImage::fromData(contents(clipboard())).isNull());
   }
   void chooserActions_data() {
     QTest::addColumn<QString>("action");
@@ -856,7 +906,19 @@ int main(int argc, char **argv) {
     const QImage image = QImage::fromData(input.readAll());
     if (qEnvironmentVariableIsSet("COPY_TEST_TEXT")) {
       if (image.isNull()) return 3;
-      QThread::msleep(200); // Edits can change while the OCR request is running.
+      const QString marker = qEnvironmentVariable("COPY_TEST_FIRST_READ_FAIL");
+      if (!marker.isEmpty()) {
+        QFile first(marker);
+        if (first.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+          first.close();
+          QElapsedTimer waiting;
+          waiting.start();
+          while (!QFileInfo::exists(marker + ".release") && waiting.elapsed() < 5000)
+            QThread::msleep(10);
+          return 1;
+        }
+      }
+      QThread::msleep(marker.isEmpty() ? 200 : 1500);
       if (image.height() > 110 && qGray(image.pixel(40, 40)) > 80)
         std::fputs("5\t1\t1\t1\t1\t1\t20\t20\t200\t40\t99\t"
                    "ghp_R8x2KqLm4Vn7Pz9Wt3Ys6Bd1Fh5Jc0Ae2Gk\n", stdout);

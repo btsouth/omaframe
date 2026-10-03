@@ -63,6 +63,7 @@ ApplicationWindow {
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
     function requestNavigation(command, file) {
         if (studio.busy || video.busy || navigation.saving) return;
+        studio.cancelTextCopy();
         if (markCanvas.typing) markCanvas.commitText();
         captureMenu.close();
         settingsPopup.close();

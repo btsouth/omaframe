@@ -790,6 +790,7 @@ private slots:
     QVERIFY(croppedText.contains("Build finished in 4 seconds"));
     QVERIFY(!croppedText.contains("TOKEN"));
     studio.marks()->undo();
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 8000);
     studio.saveDraftNow();
     // What was read never reaches the disk.
     const QDir drafts(QStandardPaths::writableLocation(

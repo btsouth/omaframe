@@ -834,6 +834,7 @@ static QString exportStatus(const ExportResult &r) {
 void Studio::accept() {
   if (m_busy || m_rendering || m_original.isNull())
     return;
+  cancelTextCopy();
   saveDraftNow();
   const QSize output = Frame::outputSize(m_workingSize, m_options, m_edgeRoom);
   if (qint64(output.width()) * output.height() > 80000000) {
@@ -922,6 +923,7 @@ void Studio::accept() {
 void Studio::retryOutput() {
   if (m_busy || m_savedPath.isEmpty() || (!m_copyPending && !m_backupPending))
     return;
+  cancelTextCopy();
   m_busy = true;
   if (m_quickMode)
     m_quickState = "saving";
@@ -1383,6 +1385,7 @@ void Studio::copyQuick() {
       (m_quickState != "choosing" && m_quickState != "copy-failed" &&
        m_quickState != "failed"))
     return;
+  cancelTextCopy();
   m_busy = true;
   m_quickState = "copying";
   m_draftTimer.stop();
@@ -1461,6 +1464,7 @@ void Studio::copyQuick() {
 void Studio::dismissQuick() {
   if (m_busy || m_pendingFinish >= 0)
     return;
+  cancelTextCopy();
   m_quickState = "cancelled";
   emit changed();
   emit dismissRequested();
@@ -1474,10 +1478,7 @@ void Studio::stopReading() {
   if (m_readCancel)
     m_readCancel->store(true);
   m_readCancel.reset();
-  if (m_copyTextCancel)
-    m_copyTextCancel->store(true);
-  m_copyTextCancel.reset();
-  ++m_copyTextGeneration;
+  cancelTextCopy();
   ++m_readGeneration;
   m_reading = m_textRead = m_copyTextPending = false;
   m_secrets.clear();
@@ -1568,12 +1569,14 @@ void Studio::hideSecrets() {
   emit changed();
 }
 void Studio::copyText() {
-  if (!canReadText())
+  const bool pending = m_copyTextPending;
+  cancelTextCopy();
+  // An edit must invalidate and reissue a pending copy even if the original
+  // image's secret detector failed while that copy was still reading.
+  if ((!canReadText() && !pending) || m_original.isNull())
     return;
-  if (m_copyTextCancel)
-    m_copyTextCancel->store(true);
   m_copyTextCancel = std::make_shared<std::atomic_bool>(false);
-  const int generation = ++m_copyTextGeneration;
+  const int generation = m_copyTextGeneration;
   m_copyTextPending = true;
   auto *watcher = new QFutureWatcher<std::optional<QString>>(this);
   connect(watcher, &QFutureWatcher<std::optional<QString>>::finished, this,
@@ -1603,6 +1606,16 @@ void Studio::copyText() {
         return words ? std::optional<QString>{Ocr::text(*words)} : std::nullopt;
       }));
   emit changed();
+}
+void Studio::cancelTextCopy() {
+  const bool pending = m_copyTextPending;
+  if (m_copyTextCancel)
+    m_copyTextCancel->store(true);
+  m_copyTextCancel.reset();
+  ++m_copyTextGeneration;
+  m_copyTextPending = false;
+  if (pending)
+    emit changed();
 }
 void Studio::writeText(const QString &recognized) {
   const QString text = recognized.trimmed();

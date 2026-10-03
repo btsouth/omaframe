@@ -286,6 +286,7 @@ public:
   Q_INVOKABLE void hideSecrets();
   /** Copies the text in the image, once it has been read. */
   Q_INVOKABLE void copyText();
+  Q_INVOKABLE void cancelTextCopy();
 signals:
   void changed();
   void hideStudio();
