@@ -1592,7 +1592,9 @@ void Studio::copyText() {
           });
   // Secret detection reads the original. Copying reads the current crop and
   // rendered marks, including redactions and blurs.
-  watcher->setFuture(QtConcurrent::run(
+  // Rendering text uses GUI font resources, so join this worker before the
+  // studio and GUI application are destroyed, just like preview rendering.
+  watcher->setFuture(QtConcurrent::run(&m_previewPool,
       [image = m_original, edits = m_marks.edits(), cancel = m_copyTextCancel] {
         if (cancel->load())
           return std::optional<QString>{};

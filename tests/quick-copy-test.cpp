@@ -256,7 +256,7 @@ private slots:
       // Exercise the dialog's real button handler, including the explicit discard.
       QQuickItem *button = nullptr;
       std::function<void(QQuickItem *)> visit = [&](QQuickItem *item) {
-        if (item->property("text").toString() == "Discard edits") button = item;
+        if (item->objectName() == "discardUnsavedEdits") button = item;
         for (auto *child : item->childItems()) visit(child);
       };
       visit(window->contentItem());

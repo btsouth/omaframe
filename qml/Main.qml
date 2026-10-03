@@ -383,7 +383,7 @@ ApplicationWindow {
                 spacing: 8
                 Item { Layout.fillWidth: true }
                 StudioButton { id: leaveCancel; text: "Cancel"; quiet: true; onClicked: navigation.cancel() }
-                StudioButton { text: "Discard edits"; danger: true; onClicked: {
+                StudioButton { objectName: "discardUnsavedEdits"; text: "Discard edits"; danger: true; onClicked: {
                     if (!root.videoLoaded) studio.discardUnsavedDraft();
                     navigation.discard();
                 } }
