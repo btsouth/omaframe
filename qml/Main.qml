@@ -549,12 +549,28 @@ ApplicationWindow {
                             }
                         }
                     }
+                    RecordToggle {
+                        objectName: "autoSaveScreenshotsToggle"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        text: "Save screenshots automatically"
+                        checked: studio.autoSaveScreenshots
+                        onToggled: studio.autoSaveScreenshots = checked
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Choosing a finish copies and closes. Turn this off to skip saving a screenshot file. Ctrl+C in the finish chooser copies without saving once."
+                        color: theme.muted
+                        font.family: theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
                     Rectangle { Layout.fillWidth: true; height: 1; color: theme.separator }
                     SectionLabel { text: "AFTER A CAPTURE IS COPIED" }
                     RecordToggle {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
-                        text: "Show a notification with the save folder"
+                        text: "Show a notification after a capture is copied"
                         checked: notificationSetting.enabled
                         onToggled: notificationSetting.enabled = checked
                     }
@@ -569,7 +585,7 @@ ApplicationWindow {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: "These copies can include anything you redacted. They stay in " + root.home(studio.originalsFolder) + " until you delete them. " + studio.originalsSummary
+                        text: "Kept only for captures you save. They can include anything you redacted and stay in " + root.home(studio.originalsFolder) + " until you delete them. Editable drafts are autosaved while you edit, even when automatic saving is off. " + studio.originalsSummary
                         color: theme.muted
                         font.family: theme.fontFamily
                         font.pixelSize: 11
@@ -818,8 +834,9 @@ ApplicationWindow {
                         Repeater {
                             model: [
                                 "Choose Screenshot, then click a window or drag an area. Whole display captures everything on that screen.",
-                                "Click a finish to copy and save, or choose Edit to crop, hide details and add labels.",
-                                "Paste into a chat, document or folder. Find your files in " + root.home(studio.outputDirectory) + " and " + root.home(video.outputDirectory) + "."
+                                "Pick a finish, or choose Edit to crop, hide details and add labels.",
+                                "Click a finish, press its number or press Enter to copy it. With automatic saving on, the file is also saved. Ctrl+C or Clipboard copies without saving, and Esc cancels.",
+                                "Copy and save always keeps a file in " + root.home(studio.outputDirectory) + ". Paste into a chat, document or folder. Recordings are saved in " + root.home(video.outputDirectory) + "."
                             ]
                             RowLayout {
                                 required property string modelData
