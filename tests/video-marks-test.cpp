@@ -513,6 +513,63 @@ private slots:
     QCOMPARE(still.selectedAnnotation().value("start").toDouble(), 0.);
   }
 
+  void copiedMarksPasteNearbyWithTheirTimes() {
+    MarkDocument marks;
+    QImage frame(320, 240, QImage::Format_ARGB32_Premultiplied);
+    frame.fill(Qt::transparent);
+    marks.reset(frame);
+    QVERIFY(!marks.copySelected()); // Nothing selected.
+    marks.paste();
+    QVERIFY(marks.edits().isEmpty());
+    marks.edit("arrow", 0.2, 0.2, 0.5, 0.4);
+    QVERIFY(marks.copySelected());
+    QVERIFY(marks.canPaste());
+    marks.paste();
+    marks.paste();
+    QCOMPARE(marks.edits().size(), 3);
+    // Same shape, each a step further from the last, and the last is selected.
+    for (const auto &edit : marks.edits())
+      QCOMPARE(edit.to - edit.from, marks.edits()[0].to - marks.edits()[0].from);
+    QVERIFY(marks.edits()[1].from.x() > marks.edits()[0].from.x());
+    QVERIFY(marks.edits()[2].from.x() > marks.edits()[1].from.x());
+    QCOMPARE(marks.selectedAnnotation().value("index").toInt(), 2);
+    marks.undo();
+    QCOMPARE(marks.edits().size(), 2);
+    // Cut is one undo step and keeps the copy.
+    marks.select(0);
+    marks.cutSelected();
+    QCOMPARE(marks.edits().size(), 1);
+    QVERIFY(marks.canPaste());
+    marks.undo();
+    QCOMPARE(marks.edits().size(), 2);
+    // A new image starts with nothing to paste.
+    marks.reset(frame);
+    QVERIFY(!marks.canPaste());
+
+    // On a video, a pasted mark starts at the playhead and keeps its length,
+    // but a blur keeps its times so it still covers what it hid.
+    MarkDocument video;
+    video.reset(frame);
+    video.setDuration(8);
+    video.setPlayhead(1);
+    video.edit("arrow", 0.2, 0.2, 0.5, 0.4);
+    video.setSelectedTimes(1, 3);
+    QVERIFY(video.copySelected());
+    video.setPlayhead(5);
+    video.paste();
+    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 5.);
+    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 7.);
+    video.setPlayhead(7.5);
+    video.paste();
+    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 7.5);
+    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 8.);
+    video.edit("blur", 0.6, 0.6, 0.8, 0.8);
+    QVERIFY(video.copySelected());
+    video.paste();
+    QCOMPARE(video.selectedAnnotation().value("start").toDouble(), 0.);
+    QCOMPARE(video.selectedAnnotation().value("end").toDouble(), 8.);
+  }
+
   void rewordingALabelChangesTheMarks() {
     // The review compares the marks to what was exported. New words on a
     // label that did not move are still a change.

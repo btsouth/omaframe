@@ -7,6 +7,7 @@
 
 void MarkDocument::reset(const QImage &base) {
   m_transform.reset();
+  m_copied.reset();
   m_base = base;
   m_edits.clear();
   m_undoStates.clear();
@@ -17,6 +18,7 @@ void MarkDocument::reset(const QImage &base) {
 void MarkDocument::restore(const QImage &base, QVector<Frame::Edit> edits,
                            int selected) {
   m_transform.reset();
+  m_copied.reset();
   m_base = base;
   m_edits = std::move(edits);
   m_undoStates.clear();
@@ -879,26 +881,66 @@ void MarkDocument::deleteSelected() {
   m_selected = -1;
   commit();
 }
-void MarkDocument::duplicateSelected() {
-  if (locked() || m_selected < 0 || m_selected >= m_edits.size() ||
-      m_edits.size() >= MaxEdits || m_edits[m_selected].type == "crop")
-    return;
-  Frame::Edit copy = m_edits[m_selected];
-  const QRectF bounds = Frame::annotationBounds(copy, m_base);
+Frame::Edit MarkDocument::appendOffset(Frame::Edit edit) {
+  const QRectF bounds = Frame::annotationBounds(edit, m_base);
   const double stepX = 12. / std::max(1, m_base.width());
   const double stepY = 12. / std::max(1, m_base.height());
   const double dx = bounds.right() + stepX <= 1. ? stepX
                       : bounds.left() - stepX >= 0. ? -stepX : 0.;
   const double dy = bounds.bottom() + stepY <= 1. ? stepY
                       : bounds.top() - stepY >= 0. ? -stepY : 0.;
-  copy.from += QPointF(dx, dy);
-  copy.to += QPointF(dx, dy);
-  for (QPointF &point : copy.points)
+  edit.from += QPointF(dx, dy);
+  edit.to += QPointF(dx, dy);
+  for (QPointF &point : edit.points)
     point += QPointF(dx, dy);
   saveHistory();
-  m_edits.append(copy);
+  m_edits.append(edit);
   m_selected = m_edits.size() - 1;
+  return edit;
+}
+void MarkDocument::duplicateSelected() {
+  if (locked() || m_selected < 0 || m_selected >= m_edits.size() ||
+      m_edits.size() >= MaxEdits || m_edits[m_selected].type == "crop")
+    return;
+  appendOffset(m_edits[m_selected]);
   emit message("Annotation duplicated. Drag it to place it.");
+  commit();
+}
+bool MarkDocument::copySelected() {
+  if (m_selected < 0 || m_selected >= m_edits.size() ||
+      m_edits[m_selected].type == "crop")
+    return false;
+  m_copied = m_edits[m_selected];
+  emit message("Annotation copied. Press Ctrl+V to paste it.");
+  emit changed();
+  return true;
+}
+void MarkDocument::cutSelected() {
+  if (locked() || !copySelected())
+    return;
+  deleteSelected();
+  emit message("Annotation cut. Press Ctrl+V to paste it.");
+}
+void MarkDocument::paste() {
+  if (locked() || !m_copied)
+    return;
+  if (m_edits.size() >= MaxEdits) {
+    emit message("This image has reached the 100-edit limit.");
+    return;
+  }
+  Frame::Edit edit = *m_copied;
+  // On a video, a paste shows for as long as the copy did, from the playhead,
+  // and one that ran to the end still does. Blur and redact keep their times
+  // so a pasted cover never starts after what it hides, as in timeNewMark().
+  if (m_duration > 0 && edit.type != "blur" && edit.type != "redact") {
+    const double end = edit.end < 0 ? m_duration : edit.end;
+    const double length = end - edit.start;
+    edit.start = std::clamp(m_playhead, 0., std::max(0., m_duration - 0.1));
+    edit.end = end >= m_duration ? m_duration
+                                 : std::clamp(edit.start + length, edit.start + 0.1, m_duration);
+  }
+  m_copied = appendOffset(edit);
+  emit message("Annotation pasted. Drag it to place it.");
   commit();
 }
 void MarkDocument::moveSelectedLayer(int direction) {

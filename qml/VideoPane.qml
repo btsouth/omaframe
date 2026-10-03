@@ -469,6 +469,11 @@ Item {
     Shortcut { sequence: "T"; enabled: pane.keys; onActivated: pane.useTool("text") }
     Shortcut { sequence: "N"; enabled: pane.keys; onActivated: pane.useTool("step") }
     Shortcut { sequence: "V"; enabled: pane.keys; onActivated: pane.tool = "select" }
+    // Marks only: copies stay inside Omaframe, and a paste starts at the playhead.
+    Shortcut { sequence: "Ctrl+C"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.copySelected() }
+    Shortcut { sequence: "Ctrl+X"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.cutSelected() }
+    Shortcut { sequence: "Ctrl+D"; enabled: pane.keys && pane.markSelected; onActivated: video.marks.duplicateSelected() }
+    Shortcut { sequence: "Ctrl+V"; enabled: pane.keys && video.marks.canPaste; onActivated: { pane.pause(); pane.tool = "select"; video.marks.paste(); } }
     // Arrow keys move a selected mark, like the screenshot editor, and
     // otherwise step through time.
     Shortcut { sequence: "Left"; enabled: pane.keys; onActivated: pane.markSelected ? video.marks.nudgeSelected(-1, 0) : pane.nudge(-0.1) }

@@ -43,11 +43,14 @@ display. If the capture bar is in the way, hold Super and drag it, or drag
 the grip at its left edge. Press H to hide or restore the bar; each new capture
 shows it again. On the finish chooser:
 
-- Click it, press its number, or press Enter to copy it. When **Save
-  screenshots automatically** is on, the file is also saved and the chooser
-  closes; when it is off, only the clipboard gets the capture.
+- Click a finish to select it. A single click never copies, saves or closes,
+  so a stray click right after a capture is harmless.
+- Double-click a finish, press its number, or press Enter to copy the selected
+  one. When **Save screenshots automatically** is on, the file is also saved;
+  when it is off, only the clipboard gets the capture.
+- Press **E** to mark up the selected finish first.
 - Press **Ctrl+C** or **Clipboard** to copy the selected finish once without
-  saving. Press **Esc** to cancel.
+  saving. Press **Esc** or × to cancel.
 - Press **Copy and save** to save the file even when automatic saving is off.
 
 **Save screenshots automatically** is on by default. Turn it off in Settings
@@ -58,7 +61,7 @@ Paste it anywhere. Crops, marks and redactions you made in the editor are kept
 either way. If copying fails, the panel stays open; Ctrl+C retries a clipboard-only
 copy, and a saved screenshot offers a retry for its unfinished step. The
 close button still cancels, and Esc while choosing an area still cancels the
-capture.
+capture. Clicking outside the panel does nothing.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
@@ -164,19 +167,23 @@ keeps your edits open.
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
 | Choosing an area | H | Hide or restore the capture bar |
 | Choosing an area to record | D / M | Computer sound / microphone |
-| Picking a finish | 1 to 9, Enter | Copy, saving a file when automatic saving is on |
+| Picking a finish | Click / double-click | Select a finish / copy it, saving a file when automatic saving is on |
+| Picking a finish | 1 to 9, Enter | Copy that finish / the selected one, saving a file when automatic saving is on |
 | Picking a finish | Ctrl+C | Copy the selected finish without saving |
 | Picking a finish | Esc | Cancel |
-| Picking a finish | E / R | Mark it up / retake |
+| Picking a finish | E / R | Mark up the selected finish / retake |
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
 | Marking up | Shift+H | Hide possible secrets |
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
+| Marking up | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste the selected mark. Never copies or closes the screenshot |
+| Marking up | Ctrl+Enter | Copy the screenshot, saving a file when automatic saving is on |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
 | Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
 | Reviewing a video | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo trim, cuts and marks |
-| In the window | Ctrl+S (also Ctrl+C for screenshots) | Copy and save |
+| Reviewing a video | Ctrl+C / Ctrl+X / Ctrl+V, Ctrl+D | Copy / cut / paste the selected mark at the playhead, duplicate it |
+| In the window | Ctrl+S | Copy and save, even when automatic saving is off |
 
 ## Good to know
 
