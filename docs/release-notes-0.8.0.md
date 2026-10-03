@@ -1,4 +1,4 @@
-# Next Omaframe release
+# Omaframe 0.8.0
 
 Screenshot editing is easier to navigate:
 
@@ -20,3 +20,14 @@ when the display size changes, and narrow displays hide extra key hints so the c
 Repeated crops now follow the exact source pixels shown in the editor.
 Drawing waits for a changed crop preview to appear, preventing misplaced
 marks on large captures while the preview refreshes.
+
+Install or update with the attached `omaframe-x86_64.pkg.tar.zst` package,
+then reopen Omaframe. Existing captures, settings and drafts are preserved.
+On Omarchy or Arch with Hyprland:
+
+```sh
+curl -fsSL https://pkgs.btso.dev/install.sh | bash -s -- omaframe
+```
+
+It adds the [signed package repository](https://github.com/btsouth/pkgs),
+so Omaframe updates with `omarchy update` or `sudo pacman -Syu`.

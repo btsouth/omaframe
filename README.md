@@ -32,10 +32,9 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
-Version 0.7.4 makes scrolling capture window only. Click the window you want
-and crop afterwards if you need less of it.
-See [the release notes](docs/release-notes-0.7.4.md).
+Version 0.8.0 adds mouse-wheel zoom, drag panning, repeated screenshot crops,
+active-tool toggles and a capture bar you can move or hide with H.
+See [the release notes](docs/release-notes-0.8.0.md).
 
 ## Take a screenshot
 
