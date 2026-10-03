@@ -27,6 +27,61 @@ QImage pageImage(int width, int height) {
 class ScrollStudioTest : public QObject {
   Q_OBJECT
 private slots:
+  void repeatedCropsKeepMarksAndUndoEachStep() {
+    const QImage image = pageImage(1000, 800);
+    MarkDocument marks;
+    marks.reset(image);
+    marks.edit("box", .4, .4, .6, .6);
+    const auto annotation = marks.edits().first();
+    const QImage original = Frame::applyEdits(image, marks.edits());
+    QVERIFY(marks.cropCurrentView(.1, .1, .9, .9));
+    const QRectF first = marks.cropBounds();
+    const QImage firstRendered = Frame::applyEdits(image, marks.edits());
+    QCOMPARE(Frame::applyEdits(image, marks.edits()).size(), QSize(800, 640));
+    // A reversed drag selects the middle half of the already cropped view.
+    QVERIFY(marks.cropCurrentView(.75, .75, .25, .25));
+    QVERIFY(qAbs(marks.cropBounds().x() - .3) < 1e-9);
+    QVERIFY(qAbs(marks.cropBounds().width() - .4) < 1e-9);
+    QCOMPARE(marks.edits().size(), 2); // One annotation and one effective crop.
+    QCOMPARE(marks.edits().first(), annotation);
+    const QRectF second = marks.cropBounds();
+    const QImage secondRendered = Frame::applyEdits(image, marks.edits());
+    const QSize secondSize = secondRendered.size();
+    QVERIFY(qAbs(secondSize.width() - 400) <= 1);
+    QVERIFY(qAbs(secondSize.height() - 320) <= 1);
+    marks.undo();
+    QCOMPARE(marks.cropBounds(), first);
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), firstRendered);
+    marks.redo();
+    QCOMPARE(marks.cropBounds(), second);
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), secondRendered);
+    marks.undo();
+    marks.undo();
+    QVERIFY(!marks.hasCrop());
+    QCOMPARE(marks.edits().first(), annotation);
+    QCOMPARE(Frame::applyEdits(image, marks.edits()), original);
+  }
+
+  void tinyCropsAndEmptyClicks() {
+    MarkDocument marks;
+    const QImage image = pageImage(1000, 800);
+    marks.reset(image);
+    QVERIFY(!marks.cropCurrentView(.5, .5, .5, .6));
+    QVERIFY(!marks.cropCurrentView(0, 0, 1, 1));
+    QVERIFY(!marks.canUndo());
+    QVERIFY(marks.cropCurrentView(.4, .4, .6, .6));
+    // Small source-relative crops stay possible after zooming/repeated crops.
+    QVERIFY(marks.cropCurrentView(.5, .5, .52, .525));
+    const QSize size = Frame::applyEdits(image, marks.edits()).size();
+    QVERIFY(size.width() >= 4 && size.width() <= 5);
+    QVERIFY(size.height() >= 4 && size.height() <= 5);
+    const auto bounds = marks.cropBounds();
+    QVERIFY(!marks.cropCurrentView(.5, .5, .5, .6));
+    QCOMPARE(marks.cropBounds(), bounds);
+    marks.undo();
+    QVERIFY(qAbs(marks.cropBounds().width() - .2) < 1e-9);
+  }
+
   void exitsWhileTallPreviewsAreStillRendering() {
     // Run a whole GUI application lifetime: assertions in this process alone
     // cannot catch workers touching GUI resources after QGuiApplication dies.

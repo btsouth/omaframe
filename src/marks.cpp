@@ -371,6 +371,30 @@ void MarkDocument::edit(const QString &type, double x1, double y1,
                    : "Edit applied. Undo is always available.");
   commit();
 }
+bool MarkDocument::cropCurrentView(double x1, double y1, double x2, double y2) {
+  if (locked() || m_base.isNull() || !std::isfinite(x1) || !std::isfinite(y1) ||
+      !std::isfinite(x2) || !std::isfinite(y2))
+    return false;
+  const QPointF a = sourcePoint(x1, y1), b = sourcePoint(x2, y2);
+  const QRectF next = QRectF(a, b).normalized();
+  // Match the renderer's minimum crop size; zero-width clicks must not
+  // change the document or add an undo step.
+  if (next.width() * m_base.width() < 2 || next.height() * m_base.height() < 2 ||
+      next == cropBounds())
+    return false;
+  if (m_edits.size() >= MaxEdits && !hasCrop()) {
+    emit message("This image has reached the 100-edit limit.");
+    return false;
+  }
+  saveHistory();
+  m_edits.removeIf([](const Frame::Edit &edit) { return edit.type == "crop"; });
+  m_edits.append({"crop", next.topLeft(), next.bottomRight()});
+  m_selected = -1;
+  emit message("Crop applied. Undo restores the previous crop.");
+  commit();
+  return true;
+}
+
 void MarkDocument::redactAreas(const QVector<QRectF> &areas) {
   if (locked() || areas.isEmpty())
     return;

@@ -73,6 +73,8 @@ public:
 
   Q_INVOKABLE void edit(const QString &type, double x1, double y1, double x2,
                         double y2, const QString &text = {});
+  /** Crop the currently visible image, preserving earlier crops in undo history. */
+  Q_INVOKABLE bool cropCurrentView(double x1, double y1, double x2, double y2);
   Q_INVOKABLE void addStroke(const QVariantList &points);
   /** Redacts each area, given as fractions of the whole image, in one step
    *  that a single undo takes back. */

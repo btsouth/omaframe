@@ -82,11 +82,13 @@ Use the mouse wheel to zoom in around the pointer for precise cropping and marks
 With **Select** active, drag empty space to pan the zoomed image. Dragging a mark
 still moves it. You can also pan with the middle mouse button or scrollbars. Click **Fit**
 to reset the view. Zoom changes only the editor view, not the saved image.
-Click an active tool again to return to **Select**.
+Click an active tool again to return to **Select**. With **Crop**, drag over the
+area to keep; the crop applies and returns to Select. Choose Crop again to trim
+the cropped image further. **Ctrl+Z** restores each previous crop in turn.
 Drag marks to move them, or hold Shift to move straight. Side handles resize
 width or height; text wraps without changing its font size. Drag text corners
 to scale the font. Arrow keys move a selected mark one pixel, or ten with Shift.
-Crop frames and pen strokes have resize handles too. Use the contextual
+Pen strokes have resize handles too. Use the contextual
 **Style** button to change a tool's appearance. Labels offer text and background colors, opacity,
 size and alignment. Arrows offer open or filled heads, color, thickness and a
 contrast outline; lines and pen strokes offer the same color, thickness and

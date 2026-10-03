@@ -125,7 +125,7 @@ ApplicationWindow {
     ]
     property string toolDescription: ({
             select: "Drag a mark to move it; hold Shift to move straight. Drag side handles to resize width or height. Double-click a label to edit its words.",
-            crop: "Drag to crop, then move the frame or adjust its handles. Marks outside are kept. Press V when done.",
+            crop: "Drag over the area to keep. Crop again to trim it further, or press Ctrl+Z to undo a crop. Marks outside are kept.",
             arrow: "Drag from the tail to the tip.",
             line: "Drag to draw a line.",
             box: "Drag to draw an outline box.",
@@ -1115,9 +1115,7 @@ ApplicationWindow {
                             zoom = nextZoom;
                             scrollTo(nextX, nextY);
                         }
-                        readonly property bool tallCanvas: root.editing && root.tool === "crop"
-                            ? studio.sourceSize.height > studio.sourceSize.width * 2
-                            : studio.tallImage
+                        readonly property bool tallCanvas: studio.tallImage
                         anchors.fill: parent
                         anchors.margins: root.editing ? 16 : 26
                         clip: true
@@ -1209,7 +1207,7 @@ ApplicationWindow {
                                 Image {
                                     id: preview
                                     anchors.fill: parent
-                                    source: studio.hasImage && studio.revision > 0 ? "image://frames/" + (root.editing ? (root.tool === "crop" ? "uncropped" : "source") : "preview") + "?" + studio.revision : ""
+                                    source: studio.hasImage && studio.revision > 0 ? "image://frames/" + (root.editing ? "source" : "preview") + "?" + studio.revision : ""
                                     fillMode: Image.PreserveAspectFit
                                     cache: false
                                     asynchronous: true
@@ -1223,10 +1221,14 @@ ApplicationWindow {
                                     visible: root.editing
                                     doc: studio.marks
                                     tool: root.tool
+                                    cropCurrentView: true
                                     locked: studio.busy
                                     workingSize: studio.workingSize
                                     sourceSize: studio.sourceSize
-                                    onToolRequested: key => root.tool = key
+                                    onToolRequested: key => {
+                                        if (root.tool === "crop" && key === "select") canvasArea.resetZoom();
+                                        root.tool = key;
+                                    }
                                 }
                             }
                         }
@@ -1299,15 +1301,6 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                        }
-                        StudioButton {
-                            visible: root.tool === "crop" && studio.marks.hasCrop
-                            Layout.leftMargin: 14
-                            Layout.rightMargin: 14
-                            Layout.fillWidth: true
-                            text: "Reset crop"
-                            quiet: true
-                            onClicked: studio.marks.clearCrop()
                         }
                         StudioButton {
                             visible: studio.secretCount > 0

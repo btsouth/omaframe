@@ -6,6 +6,9 @@ Item {
     id: editSurface
     property var doc
     property string tool: "select"
+    // Screenshot crops keep a new area of the current view. Video crops
+    // continue to edit their existing frame on the original video.
+    property bool cropCurrentView: false
     // No new marks while the owner is saving or loading.
     property bool locked: false
     // The image being marked, after any crop, and before it, in pixels.
@@ -87,7 +90,7 @@ Item {
         readonly property bool moved: Math.hypot(endX - startX, endY - startY) > 3
         property var initialMark: ({})
         readonly property var transformMark: editSurface.tool === "crop"
-            ? editSurface.doc.hasCrop ? ({ type: "crop", boundX: editSurface.doc.cropBounds.x, boundY: editSurface.doc.cropBounds.y,
+            ? !editSurface.cropCurrentView && editSurface.doc.hasCrop ? ({ type: "crop", boundX: editSurface.doc.cropBounds.x, boundY: editSurface.doc.cropBounds.y,
                  boundW: editSurface.doc.cropBounds.width, boundH: editSurface.doc.cropBounds.height }) : ({})
             : editSurface.doc.selectedAnnotation
         readonly property bool selectionShown: !textEditor.active && editSurface.showing(transformMark)
@@ -177,7 +180,7 @@ Item {
             if (editSurface.tool === "crop") {
                 initialMark = transformMark;
                 const crop = editSurface.doc.cropBounds;
-                interaction = editSurface.doc.hasCrop && nx > crop.x && nx < crop.x+crop.width && ny > crop.y && ny < crop.y+crop.height ? "cropMove" : "draw";
+                interaction = !editSurface.cropCurrentView && editSurface.doc.hasCrop && nx > crop.x && nx < crop.x+crop.width && ny > crop.y && ny < crop.y+crop.height ? "cropMove" : "draw";
                 guide.requestPaint();
                 return;
             }
@@ -212,7 +215,7 @@ Item {
             if (hoverHandle >= 0) hoverMark = ({});
             else if (editSurface.tool === "crop") {
                 const crop = editSurface.doc.cropBounds;
-                hoverMark = editSurface.doc.hasCrop && x/width > crop.x && x/width < crop.x+crop.width && y/height > crop.y && y/height < crop.y+crop.height ? ({type: "crop"}) : ({});
+                hoverMark = !editSurface.cropCurrentView && editSurface.doc.hasCrop && x/width > crop.x && x/width < crop.x+crop.width && y/height > crop.y && y/height < crop.y+crop.height ? ({type: "crop"}) : ({});
             } else hoverMark = editSurface.doc.hitAt(x / width, y / height, editSurface.tool !== "select");
         }
         onPositionChanged: function (mouse) {
@@ -249,8 +252,12 @@ Item {
                 strokePoints = [];
             } else if (interaction === "newText")
                 textEditor.create(startX / width, startY / height);
-            else if (interaction === "draw")
-                editSurface.doc.edit(editSurface.tool, startX / width, startY / height, endX / width, endY / height);
+            else if (interaction === "draw") {
+                if (editSurface.tool === "crop" && editSurface.cropCurrentView) {
+                    if (editSurface.doc.cropCurrentView(startX / width, startY / height, endX / width, endY / height))
+                        editSurface.toolRequested("select");
+                } else editSurface.doc.edit(editSurface.tool, startX / width, startY / height, endX / width, endY / height);
+            }
             else if (pressedEmpty && !moved)
                 editSurface.emptyClicked(pressedWithSelection);
             pressedEmpty = false;
