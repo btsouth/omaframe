@@ -16,8 +16,13 @@ On Omarchy or Arch with Hyprland, one command installs the latest release and
 everything it needs:
 
 ```sh
-curl -fLo /tmp/omaframe.pkg.tar.zst https://github.com/btsouth/omaframe/releases/latest/download/omaframe-x86_64.pkg.tar.zst && sudo pacman -U /tmp/omaframe.pkg.tar.zst
+curl -fsSL https://pkgs.btso.dev/install.sh | bash -s -- omaframe
 ```
+
+It adds my [signed package repository](https://github.com/btsouth/pkgs), so
+Omaframe then updates with the rest of your system (`omarchy update` or
+`sudo pacman -Syu`). If you installed an earlier release by hand, run the same
+command to start getting updates.
 
 If pacman says it cannot satisfy a dependency, your package lists are older
 than GPU Screen Recorder 6.1.0. Run `omarchy-update` (or `sudo pacman -Syu` on

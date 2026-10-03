@@ -53,6 +53,11 @@ Download the published assets back and verify their checksums. Describe
 validation performed and known limitations without treating untested
 hardware combinations as release blockers.
 
+The [package repository](https://github.com/btsouth/pkgs) picks up a
+published release within the hour and serves the versioned package to users
+through pacman. Run `gh workflow run publish.yml -R btsouth/pkgs` to publish
+it straight away.
+
 Publishing still requires the owner's instruction. CI does not tag, install
 on the owner's machine or publish releases.
 
