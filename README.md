@@ -32,9 +32,9 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.8.2 fixes text-copy privacy, failed screenshot draft saves and
-video edit recovery. Automatic screenshot saving stays on by default.
-See [the release notes](docs/release-notes-0.8.2.md).
+Version 0.9.0 makes a click in the finish chooser select a finish instead of
+copying it, and lets Ctrl+C and Ctrl+V copy and paste marks in the editor.
+See [the release notes](docs/release-notes-0.9.0.md).
 
 ## Take a screenshot
 
