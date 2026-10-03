@@ -149,7 +149,10 @@ ApplicationWindow {
         else { close.accepted = false; root.requestNavigation("quit"); }
     }
     Binding { target: studio; property: "editing"; value: root.editing && !root.videoMode && root.visible }
-    onEditingChanged: if (!editing && markCanvas.typing) markCanvas.commitText()
+    onEditingChanged: {
+        canvasArea.resetZoom();
+        if (!editing && markCanvas.typing) markCanvas.commitText();
+    }
     onToolChanged: {
         if (markCanvas.typing) markCanvas.commitText();
         if (tool !== "select") studio.marks.clearSelection();
@@ -166,6 +169,7 @@ ApplicationWindow {
         }
         function onEditorRequested() { root.editing = true; root.videoMode = false; root.tool = "select"; }
         function onSourceChanged() {
+            canvasArea.resetZoom();
             markCanvas.cancelText();
             root.editing = false;
             root.videoMode = false;
@@ -1023,6 +1027,14 @@ ApplicationWindow {
                     Item { Layout.fillWidth: true }
                     StudioButton {
                         visible: root.editing
+                        text: canvasArea.zoom === 1 ? "Fit" : Math.round(canvasArea.zoom * 100) + "% · Fit"
+                        quiet: true
+                        implicitHeight: 34
+                        hint: "Reset zoom · Wheel to zoom, middle-drag to pan, Shift+wheel to scroll"
+                        onClicked: canvasArea.resetZoom()
+                    }
+                    StudioButton {
+                        visible: root.editing
                         glyph: "undo"
                         text: root.narrow ? "" : "Undo"
                         quiet: true
@@ -1084,6 +1096,25 @@ ApplicationWindow {
                     }
                     Item {
                         id: canvasArea
+                        property real zoom: 1
+                        function resetZoom() {
+                            zoom = 1;
+                            canvasScroll.contentX = 0;
+                            canvasScroll.contentY = 0;
+                        }
+                        function scrollTo(x, y) {
+                            canvasScroll.contentX = Math.max(0, Math.min(canvasScroll.contentWidth - canvasScroll.width, x));
+                            canvasScroll.contentY = Math.max(0, Math.min(canvasScroll.contentHeight - canvasScroll.height, y));
+                        }
+                        function zoomAt(delta, x, y) {
+                            const oldZoom = zoom;
+                            const nextZoom = Math.max(1, Math.min(8, zoom * Math.pow(1.2, delta / 120)));
+                            const ratio = nextZoom / oldZoom;
+                            const nextX = (canvasScroll.contentX + x) * ratio - x;
+                            const nextY = (canvasScroll.contentY + y) * ratio - y;
+                            zoom = nextZoom;
+                            scrollTo(nextX, nextY);
+                        }
                         readonly property bool tallCanvas: root.editing && root.tool === "crop"
                             ? studio.sourceSize.height > studio.sourceSize.width * 2
                             : studio.tallImage
@@ -1094,22 +1125,47 @@ ApplicationWindow {
                         // Flickable, whose disabled input filtering also blocks
                         // handlers attached to it while annotation drags own input.
                         WheelHandler {
-                            enabled: root.editing && canvasArea.tallCanvas
+                            enabled: root.editing && !studio.busy && !markCanvas.dragging
                             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                             target: null
                             onWheel: event => {
-                                const delta = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
-                                canvasScroll.contentY = Math.max(0, Math.min(
-                                    canvasScroll.contentHeight - canvasScroll.height,
-                                    canvasScroll.contentY - delta));
+                                if (event.modifiers & Qt.ShiftModifier) {
+                                    const dx = event.pixelDelta.x || event.angleDelta.x / 120 * 80;
+                                    const dy = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
+                                    canvasArea.scrollTo(canvasScroll.contentX - dx, canvasScroll.contentY - dy);
+                                } else {
+                                    const delta = event.angleDelta.y || event.pixelDelta.y * 2;
+                                    canvasArea.zoomAt(delta, event.x, event.y);
+                                }
                                 event.accepted = true;
                             }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            z: 1
+                            anchors.rightMargin: 12
+                            anchors.bottomMargin: 12
+                            enabled: root.editing && !studio.busy && !markCanvas.dragging
+                            acceptedButtons: Qt.MiddleButton
+                            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
+                            property real startX
+                            property real startY
+                            property real scrollX
+                            property real scrollY
+                            onPressed: mouse => {
+                                startX = mouse.x; startY = mouse.y;
+                                scrollX = canvasScroll.contentX; scrollY = canvasScroll.contentY;
+                            }
+                            onPositionChanged: mouse => {
+                                if (pressed) canvasArea.scrollTo(scrollX + startX - mouse.x, scrollY + startY - mouse.y);
+                            }
+                            onWheel: wheel => wheel.accepted = false
                         }
                         Flickable {
                             id: canvasScroll
                             anchors.fill: parent
                             clip: true
-                            contentWidth: width
+                            contentWidth: imageView.width
                             // A tall page is shown fit to width and scrolled, so a
                             // 20000 px capture stays readable and its annotations
                             // keep their place. Anything shorter fits as before.
@@ -1119,14 +1175,17 @@ ApplicationWindow {
                             // the wheel or the bar instead.
                             interactive: !root.editing
                             ScrollBar.vertical: ScrollBar {
-                                policy: canvasArea.tallCanvas ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                                policy: root.editing ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                            }
+                            ScrollBar.horizontal: ScrollBar {
+                                policy: root.editing ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                             }
                             Item {
                                 id: imageView
-                                width: canvasScroll.width
+                                width: canvasScroll.width * canvasArea.zoom
                                 height: canvasArea.tallCanvas && preview.implicitWidth > 0
-                                    ? Math.max(canvasScroll.height, canvasScroll.width * preview.implicitHeight / preview.implicitWidth)
-                                    : canvasScroll.height
+                                    ? Math.max(canvasScroll.height, canvasScroll.width * preview.implicitHeight / preview.implicitWidth) * canvasArea.zoom
+                                    : canvasScroll.height * canvasArea.zoom
                                 Image {
                                     id: preview
                                     anchors.fill: parent

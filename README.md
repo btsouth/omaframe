@@ -65,7 +65,7 @@ outside the capture when there is room; otherwise its rows come from the first
 frame, before the panel appeared. Fixed headers and footers are kept once.
 
 The result uses the same finishes and editor as an ordinary screenshot. Long
-pages fit to width; use the wheel or scrollbar to reach the bottom while editing.
+pages fit to width; use Shift+wheel or the scrollbar to reach the bottom while editing.
 Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If it
 loses track of the page, Omaframe switches to manual scrolling. Scrollbars remain in the capture so window
 controls are preserved. Completely
@@ -77,6 +77,9 @@ or replaced content may need manual scrolling.
 
 Press E before you pick a finish. Press T and click to type a label right on
 the image, then add arrows, boxes, highlights, blur or redaction, or crop.
+Use the mouse wheel to zoom in around the pointer for precise cropping and marks.
+Drag with the middle mouse button to pan, or use the scrollbars. Click **Fit**
+to reset the view. Zoom changes only the editor view, not the saved image.
 Drag marks to move them, or hold Shift to move straight. Side handles resize
 width or height; text wraps without changing its font size. Drag text corners
 to scale the font. Arrow keys move a selected mark one pixel, or ten with Shift.
