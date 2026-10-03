@@ -41,7 +41,8 @@ See [the release notes](docs/release-notes-0.7.4.md).
 
 Press Print Screen. Click a window, drag an area, or press F for the whole
 display. If the capture bar is in the way, hold Super and drag it, or drag
-the grip at its left edge. Pick a finish with 1 to 9 and it is copied and saved.
+the grip at its left edge. Press H to hide or restore the bar; each new capture
+shows it again. Pick a finish with 1 to 9 and it is copied and saved.
 Paste it anywhere.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
@@ -145,6 +146,7 @@ keeps your edits open.
 | Anywhere | Alt+Print Screen | Start a recording, or stop it |
 | Anywhere | Alt+Shift+Print Screen | Pause or resume recording, after enabling capture shortcuts in Settings |
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
+| Choosing an area | H | Hide or restore the capture bar |
 | Choosing an area to record | D / M | Computer sound / microphone |
 | Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
 | Picking a finish | E / R | Mark it up / retake |

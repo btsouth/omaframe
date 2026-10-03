@@ -13,8 +13,9 @@ Screenshot editing is easier to navigate:
   reapplies it. Marks outside the crop stay available when you undo.
 
 If the capture bar covers something you need, hold Super and drag it, or
-drag the grip at its left edge. It stays reachable when the display size
-changes, and narrow displays hide extra key hints so the controls fit.
+drag the grip at its left edge. Press H or click its H button to hide it, then
+press H to bring it back. New captures show the bar again. It stays reachable
+when the display size changes, and narrow displays hide extra key hints so the controls fit.
 
 Repeated crops now follow the exact source pixels shown in the editor.
 Drawing waits for a changed crop preview to appear, preventing misplaced

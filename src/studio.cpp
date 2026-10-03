@@ -957,6 +957,7 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
   m_busy = true;
   m_quickMode = true;
   m_quickState = "capturing";
+  m_captureBarHidden = false;
   m_pendingFinish = -1;
   m_status = repeat ? "Capturing the last area…" : "Capturing…";
   m_frozen.clear();
