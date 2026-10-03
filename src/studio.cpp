@@ -1343,7 +1343,10 @@ Studio::Notice Studio::finishNotice() const {
   return {};
 }
 void Studio::copyQuick() {
+  // A saved screenshot still owed its private backup keeps "Retry backup";
+  // a successful copy would clear it and lose the only way to recover.
   if (!m_quickMode || m_busy || m_pendingFinish >= 0 || m_original.isNull() ||
+      (!m_savedPath.isEmpty() && m_backupPending) ||
       (m_quickState != "choosing" && m_quickState != "copy-failed" &&
        m_quickState != "failed"))
     return;

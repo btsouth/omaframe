@@ -401,6 +401,38 @@ private slots:
     QVERIFY(QFileInfo::exists(studio.savedPath()));
     QCOMPARE(contents(clipboard()), contents(studio.savedPath()));
   }
+  void copyDoesNotDropAPendingRetry() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.setKeepOriginals(true);
+    // A file where the originals folder belongs makes the private backup fail
+    // after the finished PNG is saved, leaving "Retry backup" to recover.
+    const QString originals =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/originals";
+    QVERIFY(QDir().mkpath(QFileInfo(originals).absolutePath()));
+    QFile blocker(originals);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    studio.chooseFinish(0); // May queue behind the first render, so wait on the state.
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("failed"), 15000);
+    QVERIFY(!studio.busy());
+    QCOMPARE(studio.recoveryAction(), QString("Retry backup"));
+    const QString saved = studio.savedPath();
+    QVERIFY(QFileInfo::exists(saved));
+    const QByteArray callsBefore = contents(clipboard() + ".calls");
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    QVERIFY(QMetaObject::invokeMethod(&studio, "copyQuick"));
+    QTest::qWait(350);
+    QVERIFY(!studio.busy());
+    QCOMPARE(dismissed.count(), 0);
+    QCOMPARE(studio.quickState(), QString("failed"));
+    QCOMPARE(studio.recoveryAction(), QString("Retry backup"));
+    QCOMPARE(studio.savedPath(), saved);
+    QCOMPARE(contents(clipboard() + ".calls"), callsBefore);
+    QVERIFY(blocker.remove());
+    studio.setKeepOriginals(false);
+  }
   void missingClipboardToolStaysOpen() {
     ImageStore store;
     Studio studio(&store, false);
