@@ -106,8 +106,8 @@ For 0.5.0, all nine suites passed in an isolated desktop for crop, recovery
 and camera changes. Focused GIF export and navigation tests then passed,
 including output dimensions, looping, edits, cancellation and the duration
 limit. Light and dark small-window checks used fixture recordings. GIF file
-copying was checked through the isolated clipboard. Current CI builds on
-Arch and runs seven headless suites, OCR pattern tests and install checks.
+copying was checked through the isolated clipboard. At 0.5.0, CI built on
+Arch and ran seven headless suites, OCR pattern tests and install checks.
 These checks do not establish physical camera acquisition or GPU behavior.
 
 All eight test suites passed in an isolated desktop for 0.4.0. Light and dark

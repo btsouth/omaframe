@@ -155,7 +155,8 @@ keeps your edits open.
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
 | Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
-| In the window | Ctrl+C or Ctrl+S | Copy and save |
+| Reviewing a video | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo trim, cuts and marks |
+| In the window | Ctrl+S (also Ctrl+C for screenshots) | Copy and save |
 
 ## Good to know
 
@@ -257,7 +258,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs seven headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs nine headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 
