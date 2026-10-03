@@ -818,8 +818,9 @@ ApplicationWindow {
                         Repeater {
                             model: [
                                 "Choose Screenshot, then click a window or drag an area. Whole display captures everything on that screen.",
-                                "Click a finish to copy and save, or choose Edit to crop, hide details and add labels.",
-                                "Paste into a chat, document or folder. Find your files in " + root.home(studio.outputDirectory) + " and " + root.home(video.outputDirectory) + "."
+                                "Pick a finish, or choose Edit to crop, hide details and add labels.",
+                                "Press Clipboard or Esc to copy it. Press Copy and save to also keep a file in " + root.home(studio.outputDirectory) + ".",
+                                "Paste into a chat, document or folder. Recordings are saved in " + root.home(video.outputDirectory) + "."
                             ]
                             RowLayout {
                                 required property string modelData

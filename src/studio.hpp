@@ -160,6 +160,12 @@ public:
   QString quickState() const { return m_quickState; }
   QString captureMonitor() const { return m_captureMonitor; }
   QString savedPath() const { return m_savedPath; }
+  /** What the desktop notification says when a quick capture finishes.
+   *  Empty summary: nothing was copied, so stay quiet. */
+  struct Notice {
+    QString summary, body, image;
+  };
+  Notice finishNotice() const;
   QString recoveryAction() const;
   QString originalsSummary() const { return m_originalsSummary; }
   int originalsCount() const { return m_originalsCount; }
@@ -265,6 +271,8 @@ public:
   Q_INVOKABLE void chooseFinish(int style);
   Q_INVOKABLE void openEditor();
   Q_INVOKABLE void showFinishes();
+  /** Copy the capture with its edits and chosen finish, without saving it. */
+  Q_INVOKABLE void copyQuick();
   Q_INVOKABLE void dismissQuick();
   /** Redacts every possible secret that is not covered yet. */
   Q_INVOKABLE void hideSecrets();
@@ -325,6 +333,7 @@ private:
   QString m_draftId;
   bool m_draftDirty = false;
   Frame::Options m_options;
+  QString m_copyPreview;
   QString m_name, m_status, m_directory, m_savedPath, m_backupPath,
       m_originalsSummary;
   int m_revision = 0, m_generation = 0;

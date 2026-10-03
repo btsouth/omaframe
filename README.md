@@ -41,8 +41,15 @@ See [the release notes](docs/release-notes-0.8.0.md).
 Press Print Screen. Click a window, drag an area, or press F for the whole
 display. If the capture bar is in the way, hold Super and drag it, or drag
 the grip at its left edge. Press H to hide or restore the bar; each new capture
-shows it again. Pick a finish with 1 to 9 and it is copied and saved.
-Paste it anywhere.
+shows it again. Pick a finish with 1 to 9 or a click, then:
+
+- Press Esc or **Clipboard** to copy it. Nothing is saved.
+- Press Enter or **Copy and save** to copy it and save it to the folder.
+
+Paste it anywhere. Crops, marks and redactions you made in the editor are kept
+either way. If copying fails, the panel stays open; press Esc to try again. The
+close button still cancels, and Esc while choosing an area still cancels the
+capture.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
@@ -147,7 +154,9 @@ keeps your edits open.
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
 | Choosing an area | H | Hide or restore the capture bar |
 | Choosing an area to record | D / M | Computer sound / microphone |
-| Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
+| Picking a finish | 1 to 9 | Pick that finish |
+| Picking a finish | Esc | Copy without saving |
+| Picking a finish | Enter | Copy and save |
 | Picking a finish | E / R | Mark it up / retake |
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |

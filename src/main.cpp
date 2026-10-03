@@ -663,17 +663,18 @@ int main(int argc, char **argv) {
       adjustWindow(window, studio.quickMode());
   });
   QObject::connect(&studio, &Studio::dismissRequested, &app, [&] {
-    const bool saved = studio.quickState() == "done" && !studio.savedPath().isEmpty();
-    const QString path = studio.savedPath();
+    // Read it before returning to the studio clears the quick state.
+    const Studio::Notice notice = studio.finishNotice();
+    const auto notifyScreenshot = [&] {
+      if (!notice.summary.isEmpty())
+        notify(notice.summary, notice.body, notice.image);
+    };
     hideCaptureSurfaces();
     const bool returning = !recorder.active() && studio.takeReturnToStudio();
     if (!pendingReview.isEmpty() && !recorder.active()) {
       const QUrl review = pendingReview;
       pendingReview.clear();
-      if (saved)
-        notify("Screenshot copied",
-               "Saved in " + QFileInfo(path).absolutePath().replace(QDir::homePath(), "~"),
-               path);
+      notifyScreenshot();
       requestReview(review, returning);
       return;
     }
@@ -683,10 +684,7 @@ int main(int argc, char **argv) {
       showStudioWindow();
       return;
     }
-    if (saved)
-      notify("Screenshot copied",
-             "Saved in " + QFileInfo(path).absolutePath().replace(QDir::homePath(), "~"),
-             path);
+    notifyScreenshot();
     endQuickTask();
   });
   QObject::connect(
