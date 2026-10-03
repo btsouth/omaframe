@@ -347,7 +347,7 @@ Window {
         clip: true
         // Narrow or high-scale displays drop the key hints, then the prompt,
         // so the mode switch always fits on screen.
-        readonly property bool showHints: window.width >= (studio.recordingSelection ? 1500 : 1000)
+        readonly property bool showHints: window.width >= (studio.recordingSelection ? 1500 : 1100)
         readonly property bool showPrompt: window.width >= (studio.recordingSelection ? 1240 : 720)
         height: 48
         radius: theme.radius
