@@ -79,7 +79,8 @@ or replaced content may need manual scrolling.
 Press E before you pick a finish. Press T and click to type a label right on
 the image, then add arrows, boxes, highlights, blur or redaction, or crop.
 Use the mouse wheel to zoom in around the pointer for precise cropping and marks.
-Drag with the middle mouse button to pan, or use the scrollbars. Click **Fit**
+With **Select** active, drag empty space to pan the zoomed image. Dragging a mark
+still moves it. You can also pan with the middle mouse button or scrollbars. Click **Fit**
 to reset the view. Zoom changes only the editor view, not the saved image.
 Click an active tool again to return to **Select**.
 Drag marks to move them, or hold Shift to move straight. Side handles resize

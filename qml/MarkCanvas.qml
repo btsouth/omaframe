@@ -20,6 +20,20 @@ Item {
     readonly property bool typing: textEditor.active
     readonly property bool dragging: drawArea.pressed
     readonly property bool hovered: drawArea.containsMouse
+    readonly property int cursorShape: drawArea.cursorShape
+    // The viewport can pan on empty space without taking a mark's drag or
+    // resize handle. Coordinates are local to this canvas.
+    function canPanAt(x, y) {
+        if (typing) return false;
+        if (x < 0 || y < 0 || x > width || y > height) return true;
+        return drawArea.handleAt(x, y) < 0 && doc.hitAt(x / width, y / height, false).index === undefined;
+    }
+    function updateHoverAt(x, y) {
+        if (x < 0 || y < 0 || x > width || y > height) {
+            drawArea.hoverMark = ({});
+            drawArea.hoverHandle = -1;
+        } else drawArea.updateHover(x, y);
+    }
     signal toolRequested(string key)
     // A click with the select tool that hit no mark.
     signal emptyClicked(bool hadSelection)
@@ -193,14 +207,17 @@ Item {
                 interaction = "draw";
             guide.requestPaint();
         }
+        function updateHover(x, y) {
+            hoverHandle = handleAt(x, y);
+            if (hoverHandle >= 0) hoverMark = ({});
+            else if (editSurface.tool === "crop") {
+                const crop = editSurface.doc.cropBounds;
+                hoverMark = editSurface.doc.hasCrop && x/width > crop.x && x/width < crop.x+crop.width && y/height > crop.y && y/height < crop.y+crop.height ? ({type: "crop"}) : ({});
+            } else hoverMark = editSurface.doc.hitAt(x / width, y / height, editSurface.tool !== "select");
+        }
         onPositionChanged: function (mouse) {
             if (!pressed) {
-                hoverHandle = handleAt(mouse.x, mouse.y);
-                if (hoverHandle >= 0) hoverMark = ({});
-                else if (editSurface.tool === "crop") {
-                    const crop = editSurface.doc.cropBounds;
-                    hoverMark = editSurface.doc.hasCrop && mouse.x/width > crop.x && mouse.x/width < crop.x+crop.width && mouse.y/height > crop.y && mouse.y/height < crop.y+crop.height ? ({type: "crop"}) : ({});
-                } else hoverMark = editSurface.doc.hitAt(mouse.x / width, mouse.y / height, editSurface.tool !== "select");
+                updateHover(mouse.x, mouse.y);
                 return;
             }
             updatePointer(mouse);

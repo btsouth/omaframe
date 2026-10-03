@@ -1030,7 +1030,7 @@ ApplicationWindow {
                         text: canvasArea.zoom === 1 ? "Fit" : Math.round(canvasArea.zoom * 100) + "% · Fit"
                         quiet: true
                         implicitHeight: 34
-                        hint: "Reset zoom · Wheel to zoom, middle-drag to pan, Shift+wheel to scroll"
+                        hint: "Reset zoom · Wheel to zoom, drag empty space with Select to pan, Shift+wheel to scroll"
                         onClicked: canvasArea.resetZoom()
                     }
                     StudioButton {
@@ -1141,23 +1141,43 @@ ApplicationWindow {
                             }
                         }
                         MouseArea {
+                            id: panArea
                             anchors.fill: parent
                             z: 1
                             anchors.rightMargin: 12
                             anchors.bottomMargin: 12
                             enabled: root.editing && !studio.busy && !markCanvas.dragging
-                            acceptedButtons: Qt.MiddleButton
-                            cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
+                            readonly property bool selectPan: root.tool === "select" && canvasArea.zoom > 1
+                            function canPan(x, y) {
+                                const point = mapToItem(markCanvas, x, y);
+                                return markCanvas.canPanAt(point.x, point.y);
+                            }
+                            acceptedButtons: Qt.MiddleButton | (selectPan ? Qt.LeftButton : Qt.NoButton)
+                            hoverEnabled: true
+                            cursorShape: pressed ? Qt.ClosedHandCursor
+                                : selectPan && canPan(mouseX, mouseY) ? Qt.OpenHandCursor : markCanvas.cursorShape
                             property real startX
                             property real startY
                             property real scrollX
                             property real scrollY
                             onPressed: mouse => {
+                                if (mouse.button === Qt.LeftButton && !canPan(mouse.x, mouse.y)) {
+                                    mouse.accepted = false;
+                                    return;
+                                }
                                 startX = mouse.x; startY = mouse.y;
                                 scrollX = canvasScroll.contentX; scrollY = canvasScroll.contentY;
                             }
                             onPositionChanged: mouse => {
                                 if (pressed) canvasArea.scrollTo(scrollX + startX - mouse.x, scrollY + startY - mouse.y);
+                                else {
+                                    const point = mapToItem(markCanvas, mouse.x, mouse.y);
+                                    markCanvas.updateHoverAt(point.x, point.y);
+                                }
+                            }
+                            onReleased: mouse => {
+                                if (mouse.button === Qt.LeftButton && Math.hypot(mouse.x - startX, mouse.y - startY) <= 3)
+                                    studio.marks.clearSelection();
                             }
                             onWheel: wheel => wheel.accepted = false
                         }
@@ -1171,8 +1191,8 @@ ApplicationWindow {
                             // keep their place. Anything shorter fits as before.
                             contentHeight: imageView.height
                             boundsBehavior: Flickable.StopAtBounds
-                            // While editing, drags belong to the marks: scroll with
-                            // the wheel or the bar instead.
+                            // Mark drags stay in the canvas. The viewport handles
+                            // empty-space drags separately when Select is zoomed in.
                             interactive: !root.editing
                             ScrollBar.vertical: ScrollBar {
                                 policy: root.editing ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
