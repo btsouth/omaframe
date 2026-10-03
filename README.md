@@ -32,16 +32,17 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.7.0 adds scrolling capture and an editor that keeps long pages readable.
-Version 0.7.4 makes scrolling capture window only. Click the window you want
-and crop afterwards if you need less of it.
-See [the release notes](docs/release-notes-0.7.4.md).
+Version 0.8.0 adds mouse-wheel zoom, drag panning, repeated screenshot crops,
+active-tool toggles and a capture bar you can move or hide with H.
+See [the release notes](docs/release-notes-0.8.0.md).
 
 ## Take a screenshot
 
 Press Print Screen. Click a window, drag an area, or press F for the whole
-display. Pick a finish with 1 to 9 and it is copied and saved. Paste it
-anywhere.
+display. If the capture bar is in the way, hold Super and drag it, or drag
+the grip at its left edge. Press H to hide or restore the bar; each new capture
+shows it again. Pick a finish with 1 to 9 and it is copied and saved.
+Paste it anywhere.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
@@ -65,7 +66,7 @@ outside the capture when there is room; otherwise its rows come from the first
 frame, before the panel appeared. Fixed headers and footers are kept once.
 
 The result uses the same finishes and editor as an ordinary screenshot. Long
-pages fit to width; use the wheel or scrollbar to reach the bottom while editing.
+pages fit to width; use Shift+wheel or the scrollbar to reach the bottom while editing.
 Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If it
 loses track of the page, Omaframe switches to manual scrolling. Scrollbars remain in the capture so window
 controls are preserved. Completely
@@ -77,10 +78,17 @@ or replaced content may need manual scrolling.
 
 Press E before you pick a finish. Press T and click to type a label right on
 the image, then add arrows, boxes, highlights, blur or redaction, or crop.
+Use the mouse wheel to zoom in around the pointer for precise cropping and marks.
+With **Select** active, drag empty space to pan the zoomed image. Dragging a mark
+still moves it. You can also pan with the middle mouse button or scrollbars. Click **Fit**
+to reset the view. Zoom changes only the editor view, not the saved image.
+Click an active tool again to return to **Select**. With **Crop**, drag over the
+area to keep; the crop applies and returns to Select. Choose Crop again to trim
+the cropped image further. **Ctrl+Z** restores each previous crop in turn.
 Drag marks to move them, or hold Shift to move straight. Side handles resize
 width or height; text wraps without changing its font size. Drag text corners
 to scale the font. Arrow keys move a selected mark one pixel, or ten with Shift.
-Crop frames and pen strokes have resize handles too. Use the contextual
+Pen strokes have resize handles too. Use the contextual
 **Style** button to change a tool's appearance. Labels offer text and background colors, opacity,
 size and alignment. Arrows offer open or filled heads, color, thickness and a
 contrast outline; lines and pen strokes offer the same color, thickness and
@@ -137,6 +145,7 @@ keeps your edits open.
 | Anywhere | Alt+Print Screen | Start a recording, or stop it |
 | Anywhere | Alt+Shift+Print Screen | Pause or resume recording, after enabling capture shortcuts in Settings |
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
+| Choosing an area | H | Hide or restore the capture bar |
 | Choosing an area to record | D / M | Computer sound / microphone |
 | Picking a finish | 1 to 9, Enter | Copy and save with that finish, or the last one |
 | Picking a finish | E / R | Mark it up / retake |
@@ -147,7 +156,8 @@ keeps your edits open.
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
 | Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
-| In the window | Ctrl+C or Ctrl+S | Copy and save |
+| Reviewing a video | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo trim, cuts and marks |
+| In the window | Ctrl+S (also Ctrl+C for screenshots) | Copy and save |
 
 ## Good to know
 
@@ -249,7 +259,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs seven headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs nine headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 

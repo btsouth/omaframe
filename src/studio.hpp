@@ -76,6 +76,7 @@ class Studio final : public QObject {
   Q_PROPERTY(bool tallImage READ tallImage NOTIFY changed)
   /** True while the selector is set to scroll and stitch what it covers. */
   Q_PROPERTY(bool scrollSelection READ scrollSelection NOTIFY changed)
+  Q_PROPERTY(bool captureBarHidden READ captureBarHidden WRITE setCaptureBarHidden NOTIFY changed)
   /** The scrolling capture, for the progress control. */
   Q_PROPERTY(ScrollCapture *scrollCapture READ scrollCapture CONSTANT)
   /** Whether the last scrolling capture stopped at the size budget or the end
@@ -111,6 +112,7 @@ class Studio final : public QObject {
   /** False until the first-run welcome has been seen or dismissed. */
   Q_PROPERTY(bool welcomed READ welcomed WRITE setWelcomed NOTIFY changed)
   Q_PROPERTY(QSize workingSize READ workingSize NOTIFY changed)
+  Q_PROPERTY(QRectF previewCropBounds READ previewCropBounds NOTIFY changed)
   Q_PROPERTY(QString originalsFolder READ originalsFolder CONSTANT)
   /** The display the pointer is on while selecting, for F. */
   Q_PROPERTY(QString pointerMonitor READ pointerMonitor WRITE setPointerMonitor NOTIFY changed)
@@ -131,6 +133,13 @@ public:
   bool hasImage() const { return !m_original.isNull(); }
   bool tallImage() const;
   bool scrollSelection() const { return m_scrollSelection; }
+  bool captureBarHidden() const { return m_captureBarHidden; }
+  void setCaptureBarHidden(bool hidden) {
+    if (m_captureBarHidden == hidden)
+      return;
+    m_captureBarHidden = hidden;
+    emit changed();
+  }
   ScrollCapture *scrollCapture() { return m_scrollCapture; }
   bool scrollReachedLimit() const { return m_scrollReachedLimit; }
   bool scrollReachedEnd() const { return m_scrollReachedEnd; }
@@ -165,6 +174,7 @@ public:
   bool welcomed() const;
   /** The cropped image the editor shows, and the whole capture, in pixels. */
   QSize workingSize() const { return m_workingSize; }
+  QRectF previewCropBounds() const { return m_previewCropBounds; }
   QSize sourceSize() const { return m_original.size(); }
   bool canReadText() const { return m_reading || m_textRead; }
   int secretCount() const { return uncoveredSecrets().size(); }
@@ -307,6 +317,7 @@ private:
   QSize m_lastAreaPixels;
   QString m_lastAreaMonitor;
   QSize m_workingSize;
+  QRectF m_previewCropBounds;
   QMargins m_edgeRoom;
   MarkDocument m_marks;
   QVariantList m_drafts;
@@ -320,6 +331,7 @@ private:
   int m_originalsCount = 0;
   bool m_busy = false, m_rendering = false, m_demo = true;
   bool m_quickMode = false, m_recordingSelection = false;
+  bool m_captureBarHidden = false;
   bool m_scrollSelection = false, m_scrollReachedLimit = false,
        m_scrollReachedEnd = false;
   /** The scrolling capture and where its progress control goes. */

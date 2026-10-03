@@ -6,7 +6,7 @@ Status: planning archive and backlog. Omaframe 0.5.0 includes recording pause/re
 
 ## Current direction, 2026-09-29
 
-Keep capture quick and the interface small. Basic CI builds on Arch and runs seven headless suites plus OCR pattern tests. Version 0.4.0 adds recording pause/resume within the existing control, with private recorder IPC and a timer that excludes paused time. Version 0.5.0 adds whole-clip crop, automatic recovery drafts, an optional camera track and short looping GIF export. Larger studio features below remain optional backlog, not committed release requirements.
+Keep capture quick and the interface small. At 0.5.0, CI built on Arch and ran seven headless suites plus OCR pattern tests. Version 0.4.0 adds recording pause/resume within the existing control, with private recorder IPC and a timer that excludes paused time. Version 0.5.0 adds whole-clip crop, automatic recovery drafts, an optional camera track and short looping GIF export. Larger studio features below remain optional backlog, not committed release requirements.
 
 Use automated regression checks and handle unusual display configurations through bug reports and targeted fixes. No owner-run hardware matrix, monitor power changes or fresh-desktop walkthrough is required before release. Historical acceptance requirements below are superseded by [RELEASING.md](../RELEASING.md). Validation records remain evidence of what was actually checked, not a pending checklist for the owner.
 

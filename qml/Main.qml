@@ -125,7 +125,7 @@ ApplicationWindow {
     ]
     property string toolDescription: ({
             select: "Drag a mark to move it; hold Shift to move straight. Drag side handles to resize width or height. Double-click a label to edit its words.",
-            crop: "Drag to crop, then move the frame or adjust its handles. Marks outside are kept. Press V when done.",
+            crop: "Drag over the area to keep. Crop again to trim it further, or press Ctrl+Z to undo a crop. Marks outside are kept.",
             arrow: "Drag from the tail to the tip.",
             line: "Drag to draw a line.",
             box: "Drag to draw an outline box.",
@@ -149,7 +149,10 @@ ApplicationWindow {
         else { close.accepted = false; root.requestNavigation("quit"); }
     }
     Binding { target: studio; property: "editing"; value: root.editing && !root.videoMode && root.visible }
-    onEditingChanged: if (!editing && markCanvas.typing) markCanvas.commitText()
+    onEditingChanged: {
+        canvasArea.resetZoom();
+        if (!editing && markCanvas.typing) markCanvas.commitText();
+    }
     onToolChanged: {
         if (markCanvas.typing) markCanvas.commitText();
         if (tool !== "select") studio.marks.clearSelection();
@@ -166,6 +169,8 @@ ApplicationWindow {
         }
         function onEditorRequested() { root.editing = true; root.videoMode = false; root.tool = "select"; }
         function onSourceChanged() {
+            canvasArea.resetZoom();
+            preview.displayedCropBounds = Qt.rect(-1, -1, 0, 0);
             markCanvas.cancelText();
             root.editing = false;
             root.videoMode = false;
@@ -1023,6 +1028,14 @@ ApplicationWindow {
                     Item { Layout.fillWidth: true }
                     StudioButton {
                         visible: root.editing
+                        text: canvasArea.zoom === 1 ? "Fit" : Math.round(canvasArea.zoom * 100) + "% · Fit"
+                        quiet: true
+                        implicitHeight: 34
+                        hint: "Reset zoom · Wheel to zoom, drag empty space with Select to pan, Shift+wheel to scroll"
+                        onClicked: canvasArea.resetZoom()
+                    }
+                    StudioButton {
+                        visible: root.editing
                         glyph: "undo"
                         text: root.narrow ? "" : "Undo"
                         quiet: true
@@ -1084,9 +1097,26 @@ ApplicationWindow {
                     }
                     Item {
                         id: canvasArea
-                        readonly property bool tallCanvas: root.editing && root.tool === "crop"
-                            ? studio.sourceSize.height > studio.sourceSize.width * 2
-                            : studio.tallImage
+                        property real zoom: 1
+                        function resetZoom() {
+                            zoom = 1;
+                            canvasScroll.contentX = 0;
+                            canvasScroll.contentY = 0;
+                        }
+                        function scrollTo(x, y) {
+                            canvasScroll.contentX = Math.max(0, Math.min(canvasScroll.contentWidth - canvasScroll.width, x));
+                            canvasScroll.contentY = Math.max(0, Math.min(canvasScroll.contentHeight - canvasScroll.height, y));
+                        }
+                        function zoomAt(delta, x, y) {
+                            const oldZoom = zoom;
+                            const nextZoom = Math.max(1, Math.min(8, zoom * Math.pow(1.2, delta / 120)));
+                            const ratio = nextZoom / oldZoom;
+                            const nextX = (canvasScroll.contentX + x) * ratio - x;
+                            const nextY = (canvasScroll.contentY + y) * ratio - y;
+                            zoom = nextZoom;
+                            scrollTo(nextX, nextY);
+                        }
+                        readonly property bool tallCanvas: studio.tallImage
                         anchors.fill: parent
                         anchors.margins: root.editing ? 16 : 26
                         clip: true
@@ -1094,47 +1124,112 @@ ApplicationWindow {
                         // Flickable, whose disabled input filtering also blocks
                         // handlers attached to it while annotation drags own input.
                         WheelHandler {
-                            enabled: root.editing && canvasArea.tallCanvas
+                            enabled: root.editing && !markCanvas.locked && !markCanvas.dragging
                             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                             target: null
                             onWheel: event => {
-                                const delta = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
-                                canvasScroll.contentY = Math.max(0, Math.min(
-                                    canvasScroll.contentHeight - canvasScroll.height,
-                                    canvasScroll.contentY - delta));
+                                if (event.modifiers & Qt.ShiftModifier) {
+                                    const dx = event.pixelDelta.x || event.angleDelta.x / 120 * 80;
+                                    const dy = event.pixelDelta.y || event.angleDelta.y / 120 * 80;
+                                    canvasArea.scrollTo(canvasScroll.contentX - dx, canvasScroll.contentY - dy);
+                                } else {
+                                    const delta = event.angleDelta.y || event.pixelDelta.y * 2;
+                                    canvasArea.zoomAt(delta, event.x, event.y);
+                                }
                                 event.accepted = true;
                             }
+                        }
+                        MouseArea {
+                            id: panArea
+                            anchors.fill: parent
+                            z: 1
+                            anchors.rightMargin: 12
+                            anchors.bottomMargin: 12
+                            enabled: root.editing && !markCanvas.locked && !markCanvas.dragging
+                            readonly property bool selectPan: root.tool === "select" && canvasArea.zoom > 1
+                            function canPan(x, y) {
+                                const point = mapToItem(markCanvas, x, y);
+                                return markCanvas.canPanAt(point.x, point.y);
+                            }
+                            acceptedButtons: Qt.MiddleButton | (selectPan ? Qt.LeftButton : Qt.NoButton)
+                            hoverEnabled: true
+                            cursorShape: pressed ? Qt.ClosedHandCursor
+                                : selectPan && canPan(mouseX, mouseY) ? Qt.OpenHandCursor : markCanvas.cursorShape
+                            property real startX
+                            property real startY
+                            property real scrollX
+                            property real scrollY
+                            onPressed: mouse => {
+                                if (mouse.button === Qt.LeftButton && !canPan(mouse.x, mouse.y)) {
+                                    mouse.accepted = false;
+                                    return;
+                                }
+                                startX = mouse.x; startY = mouse.y;
+                                scrollX = canvasScroll.contentX; scrollY = canvasScroll.contentY;
+                            }
+                            onPositionChanged: mouse => {
+                                if (pressed) canvasArea.scrollTo(scrollX + startX - mouse.x, scrollY + startY - mouse.y);
+                                else {
+                                    const point = mapToItem(markCanvas, mouse.x, mouse.y);
+                                    markCanvas.updateHoverAt(point.x, point.y);
+                                }
+                            }
+                            onReleased: mouse => {
+                                if (mouse.button === Qt.LeftButton && Math.hypot(mouse.x - startX, mouse.y - startY) <= 3)
+                                    studio.marks.clearSelection();
+                            }
+                            onWheel: wheel => wheel.accepted = false
                         }
                         Flickable {
                             id: canvasScroll
                             anchors.fill: parent
                             clip: true
-                            contentWidth: width
+                            contentWidth: imageView.width
                             // A tall page is shown fit to width and scrolled, so a
                             // 20000 px capture stays readable and its annotations
                             // keep their place. Anything shorter fits as before.
                             contentHeight: imageView.height
                             boundsBehavior: Flickable.StopAtBounds
-                            // While editing, drags belong to the marks: scroll with
-                            // the wheel or the bar instead.
+                            // Mark drags stay in the canvas. The viewport handles
+                            // empty-space drags separately when Select is zoomed in.
                             interactive: !root.editing
                             ScrollBar.vertical: ScrollBar {
-                                policy: canvasArea.tallCanvas ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                                policy: root.editing ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                            }
+                            ScrollBar.horizontal: ScrollBar {
+                                policy: root.editing ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                             }
                             Item {
                                 id: imageView
-                                width: canvasScroll.width
+                                width: canvasScroll.width * canvasArea.zoom
                                 height: canvasArea.tallCanvas && preview.implicitWidth > 0
-                                    ? Math.max(canvasScroll.height, canvasScroll.width * preview.implicitHeight / preview.implicitWidth)
-                                    : canvasScroll.height
+                                    ? Math.max(canvasScroll.height, canvasScroll.width * preview.implicitHeight / preview.implicitWidth) * canvasArea.zoom
+                                    : canvasScroll.height * canvasArea.zoom
                                 Image {
                                     id: preview
                                     anchors.fill: parent
-                                    source: studio.hasImage && studio.revision > 0 ? "image://frames/" + (root.editing ? (root.tool === "crop" ? "uncropped" : "source") : "preview") + "?" + studio.revision : ""
+                                    source: studio.hasImage && studio.revision > 0 ? "image://frames/" + (root.editing ? "source" : "preview") + "?" + studio.revision : ""
                                     fillMode: Image.PreserveAspectFit
                                     cache: false
                                     asynchronous: true
                                     retainWhileLoading: true
+                                    property rect requestedCropBounds
+                                    property rect displayedCropBounds: Qt.rect(-1, -1, 0, 0)
+                                    property bool requestedEditing: false
+                                    property bool displayedEditing: false
+                                    onSourceChanged: {
+                                        requestedCropBounds = studio.previewCropBounds;
+                                        requestedEditing = root.editing;
+                                    }
+                                    onStatusChanged: if (status === Image.Ready) {
+                                        displayedCropBounds = requestedCropBounds;
+                                        displayedEditing = requestedEditing;
+                                    }
+                                    readonly property bool geometryReady: displayedEditing === root.editing
+                                        && displayedCropBounds.x === studio.marks.cropBounds.x
+                                        && displayedCropBounds.y === studio.marks.cropBounds.y
+                                        && displayedCropBounds.width === studio.marks.cropBounds.width
+                                        && displayedCropBounds.height === studio.marks.cropBounds.height
                                 }
                                 MarkCanvas {
                                     id: markCanvas
@@ -1144,10 +1239,14 @@ ApplicationWindow {
                                     visible: root.editing
                                     doc: studio.marks
                                     tool: root.tool
-                                    locked: studio.busy
+                                    cropCurrentView: true
+                                    locked: studio.busy || !preview.geometryReady
                                     workingSize: studio.workingSize
                                     sourceSize: studio.sourceSize
-                                    onToolRequested: key => root.tool = key
+                                    onToolRequested: key => {
+                                        if (root.tool === "crop" && key === "select") canvasArea.resetZoom();
+                                        root.tool = key;
+                                    }
                                 }
                             }
                         }
@@ -1211,7 +1310,7 @@ ApplicationWindow {
                                     selected: root.tool === modelData.key
                                     quiet: !selected
                                     hint: modelData.label + " · " + modelData.shortcut
-                                    onClicked: root.tool = modelData.key
+                                    onClicked: root.tool = root.tool === modelData.key ? "select" : modelData.key
                                     contentItem: RowLayout {
                                         spacing: 8
                                         Glyph { name: toolButton.glyph; ink: toolButton.ink; Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
@@ -1220,15 +1319,6 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                        }
-                        StudioButton {
-                            visible: root.tool === "crop" && studio.marks.hasCrop
-                            Layout.leftMargin: 14
-                            Layout.rightMargin: 14
-                            Layout.fillWidth: true
-                            text: "Reset crop"
-                            quiet: true
-                            onClicked: studio.marks.clearCrop()
                         }
                         StudioButton {
                             visible: studio.secretCount > 0

@@ -171,7 +171,7 @@ def main():
         boxed("hyprctl", "eval", "hl.dispatch(hl.dsp.window.fullscreen(1))")
         boxed("wait", "--timeout", "5s", "still")
         boxed("click", "--wait", "165", "100")
-        boxed("pointer", "--", "move", "1200", "700", "scroll", "600")
+        boxed("pointer", "--mod", "shift", "--", "move", "1200", "700", "scroll", "600")
         boxed("wait", "--timeout", "5s", "still")
         boxed("shot", "-o", str(evidence / "editor-bottom.png"))
         boxed("click", "1710", "155")
@@ -196,11 +196,9 @@ def main():
         assert bw > 100 and bh > 10 and bx > 1000 and by > 4200, bounds
         verify_page(annotated, expected_width)
 
-        # Cropping must not shrink the uncropped page to a tiny sliver while
-        # the crop tool is active. Undo must restore the exact annotated PNG.
+        # Selecting Crop keeps the current page and scroll position. Applying
+        # the crop returns to Select and fits the kept area into the viewport.
         boxed("click", "1800", "118")
-        boxed("pointer", "--", "move", "80", "660", "down", "left",
-              "move", "1540", "954", "up", "left")
         boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
         crop_view = evidence / "crop-editor.png"
         boxed("shot", "-o", str(crop_view))
@@ -208,13 +206,32 @@ def main():
             "magick", str(crop_view), "-crop", "1x1+200+740", "-depth", "8", "RGB:-"
         ])
         assert sum(pixel) > 550, "Crop tool collapsed the tall page instead of preserving scroll position"
+        boxed("pointer", "--", "move", "80", "660", "down", "left",
+              "move", "1540", "954", "up", "left")
+        boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
         cropped = save(base_count + 2)
         cw, ch = map(int, run("magick", "identify", "-format", "%w %h", str(cropped)).split())
         assert 1500 < cw < 1884 and 200 < ch < 500, (cw, ch)
         shutil.copy2(cropped, evidence / "cropped.png")
+        # Crop the already cropped image, then undo just that crop. The saved
+        # pixels must match the previous crop exactly, including annotations.
+        boxed("click", "1800", "118")
+        boxed("pointer", "--", "move", "250", "440", "down", "left",
+              "move", "1250", "600", "up", "left")
+        boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
+        recropped = save(base_count + 3)
+        rw, rh = map(int, run("magick", "identify", "-format", "%w %h", str(recropped)).split())
+        assert 0 < rw < cw and 0 < rh < ch, (rw, rh, cw, ch)
+        shutil.copy2(recropped, evidence / "recropped.png")
         boxed("keys", "ctrl+z")
         boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
-        restored = save(base_count + 3)
+        previous_crop = save(base_count + 4)
+        changed = run("magick", str(cropped), str(previous_crop), "-compose", "difference",
+                      "-composite", "-alpha", "off", "-threshold", "0", "-format", "%[fx:mean]", "info:")
+        assert float(changed) == 0, f"Repeated crop undo changed saved pixels: {changed}"
+        boxed("keys", "ctrl+z")
+        boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
+        restored = save(base_count + 5)
         changed = run("magick", str(annotated), str(restored), "-compose", "difference",
                       "-composite", "-alpha", "off", "-threshold", "0", "-format", "%[fx:mean]", "info:")
         assert float(changed) == 0, f"Crop undo changed the full-resolution annotations: {changed}"
@@ -224,6 +241,7 @@ def main():
         boxed("wait", "--timeout", "8s", "still", "--quiet", "1s")
         boxed("shot", "-o", str(evidence / "reopened.png"))
         result.update({"annotation_bounds": bounds, "crop": [cw, ch],
+                       "recrop": [rw, rh], "recrop_undo_exact": True,
                        "crop_undo_exact": True, "reopened": True})
         print(json.dumps(result))
     finally:

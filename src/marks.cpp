@@ -371,6 +371,36 @@ void MarkDocument::edit(const QString &type, double x1, double y1,
                    : "Edit applied. Undo is always available.");
   commit();
 }
+bool MarkDocument::cropCurrentView(double x1, double y1, double x2, double y2) {
+  if (locked() || m_base.isNull() || !std::isfinite(x1) || !std::isfinite(y1) ||
+      !std::isfinite(x2) || !std::isfinite(y2))
+    return false;
+  const QPointF a = sourcePoint(x1, y1), b = sourcePoint(x2, y2);
+  if (a.x() == b.x() || a.y() == b.y())
+    return false;
+  const QRect current = Frame::cropPixels(m_base.size(), m_edits);
+  const QRect pixels = Frame::cropPixels(m_base.size(), {{"crop", a, b}});
+  // Invalid sub-two-pixel crops render the full source; reject that fallback
+  // and pixel-equivalent crops without creating an undo step.
+  if (!current.contains(pixels) || pixels == current)
+    return false;
+  const QRectF next(double(pixels.x()) / m_base.width(),
+                    double(pixels.y()) / m_base.height(),
+                    double(pixels.width()) / m_base.width(),
+                    double(pixels.height()) / m_base.height());
+  if (m_edits.size() >= MaxEdits && !hasCrop()) {
+    emit message("This image has reached the 100-edit limit.");
+    return false;
+  }
+  saveHistory();
+  m_edits.removeIf([](const Frame::Edit &edit) { return edit.type == "crop"; });
+  m_edits.append({"crop", next.topLeft(), next.bottomRight()});
+  m_selected = -1;
+  emit message("Crop applied. Undo restores the previous crop.");
+  commit();
+  return true;
+}
+
 void MarkDocument::redactAreas(const QVector<QRectF> &areas) {
   if (locked() || areas.isEmpty())
     return;
@@ -433,6 +463,17 @@ void MarkDocument::saveHistory() {
     m_undoStates.removeFirst();
   m_undoStates.append({m_edits, m_selected});
   m_redoStates.clear();
+}
+QRectF MarkDocument::cropBounds() const {
+  // Video keeps normalized frame geometry; screenshots must map gestures
+  // against the exact pixels shown after the renderer rounds crop edges.
+  if (m_duration > 0 || m_base.isNull())
+    return Frame::cropBounds(m_edits);
+  const QRect pixels = Frame::cropPixels(m_base.size(), m_edits);
+  return {double(pixels.x()) / m_base.width(),
+          double(pixels.y()) / m_base.height(),
+          double(pixels.width()) / m_base.width(),
+          double(pixels.height()) / m_base.height()};
 }
 QPointF MarkDocument::sourcePoint(double x, double y) const {
   const QRectF crop = cropBounds();

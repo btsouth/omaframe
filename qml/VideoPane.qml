@@ -842,7 +842,7 @@ Item {
                 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    text: "MP4 · WebM · MOV · MKV"
+                    text: "MP4 · WebM · MOV · MKV · M4V · AVI"
                     color: theme.faint
                     font.pixelSize: 11
                 }

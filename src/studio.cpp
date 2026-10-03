@@ -348,6 +348,7 @@ struct PreviewResult {
   QImage source, uncropped, preview;
   QVector<QImage> thumbnails;
   QSize workingSize;
+  QRectF cropBounds;
   QMargins edgeRoom;
 };
 void Studio::scheduleRender() {
@@ -369,6 +370,7 @@ void Studio::scheduleRender() {
             for (int i = 0; i < result.thumbnails.size(); ++i)
               m_store->put(QString("style%1").arg(i), result.thumbnails[i]);
             m_workingSize = result.workingSize;
+            m_previewCropBounds = result.cropBounds;
             m_edgeRoom = result.edgeRoom;
             m_rendering = false;
             ++m_revision;
@@ -386,6 +388,12 @@ void Studio::scheduleRender() {
   watcher->setFuture(QtConcurrent::run(&m_previewPool,
       [source = m_original, edits, options = m_options, thumbnails] {
         PreviewResult result;
+        const QRect pixels = Frame::cropPixels(source.size(), edits);
+        if (!source.isNull())
+          result.cropBounds = QRectF(double(pixels.x()) / source.width(),
+                                  double(pixels.y()) / source.height(),
+                                  double(pixels.width()) / source.width(),
+                                  double(pixels.height()) / source.height());
         const QImage uncropped = Frame::applyEdits(source, edits, false);
         const QImage working = Frame::cropImage(uncropped, edits);
         result.workingSize = working.size();
@@ -949,6 +957,7 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
   m_busy = true;
   m_quickMode = true;
   m_quickState = "capturing";
+  m_captureBarHidden = false;
   m_pendingFinish = -1;
   m_status = repeat ? "Capturing the last area…" : "Capturing…";
   m_frozen.clear();

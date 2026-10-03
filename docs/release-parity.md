@@ -1,17 +1,17 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.7.4**. This tracks shipped behavior and possible future
+Current release: **0.8.0**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.7.4 | Future work |
+| Workflow | Omaframe 0.8.0 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
-| Capture and finish | Window, area or display; automatic window scrolling capture with manual takeover; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
-| Screenshot editing | Movable marks, side and corner resize handles, inline multiline labels, contextual styles, crop, blur/redaction, layers, undo/redo, readable tall-image editing and editable drafts | Pinning, curved arrows |
+| Capture and finish | Window, area or display; automatic window scrolling capture with manual takeover; movable and hideable capture bar; finish picker; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
+| Screenshot editing | Movable marks, side and corner resize handles, inline multiline labels, contextual styles, wheel zoom and drag panning, repeated crops, blur/redaction, layers, undo/redo, readable tall-image editing and editable drafts | Pinning, curved arrows |
 | Screenshot text | Copy text with T; hide possible secrets with H in the picker or Shift+H in the editor; optional local Tesseract | Selectable OCR regions |
 | Record and stop | Display or region, computer sound and selected microphone, countdown, pause/resume, optional webcam overlay; controls outside the capture or shortcut/bar stop when no safe placement exists | Window-follow capture |
 | Video review | Playback, trim and middle cuts, sound on/off, timed marks, crop, camera placement, recovery drafts, undo/redo, copy/save MP4 and short looping GIFs | Animated zoom and speed sections |
@@ -106,8 +106,8 @@ For 0.5.0, all nine suites passed in an isolated desktop for crop, recovery
 and camera changes. Focused GIF export and navigation tests then passed,
 including output dimensions, looping, edits, cancellation and the duration
 limit. Light and dark small-window checks used fixture recordings. GIF file
-copying was checked through the isolated clipboard. Current CI builds on
-Arch and runs seven headless suites, OCR pattern tests and install checks.
+copying was checked through the isolated clipboard. At 0.5.0, CI built on
+Arch and ran seven headless suites, OCR pattern tests and install checks.
 These checks do not establish physical camera acquisition or GPU behavior.
 
 All eight test suites passed in an isolated desktop for 0.4.0. Light and dark

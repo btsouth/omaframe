@@ -40,6 +40,8 @@ struct Options {
 };
 QStringList styleNames();
 QRectF cropBounds(const QVector<Edit> &edits);
+/** The source pixels actually displayed, including outward rounding. */
+QRect cropPixels(QSize size, const QVector<Edit> &edits);
 QRectF annotationBounds(const Edit &edit, const QImage &source);
 int textPixelSize(const Edit &edit, const QImage &source);
 /** How far a blur mark spreads each pixel, in pixels of an image of `size`. */

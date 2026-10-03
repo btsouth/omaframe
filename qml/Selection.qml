@@ -6,6 +6,8 @@ import QtQuick.Layouts
 Window {
     id: window
     visible: false
+    onWidthChanged: if (bar && bar.positioned) bar.clampPosition()
+    onHeightChanged: if (bar && bar.positioned) bar.clampPosition()
     palette.window: theme.alpha(theme.background, 1)
     palette.windowText: theme.text
     palette.base: theme.well
@@ -23,6 +25,7 @@ Window {
     color: theme.background
     title: "Omaframe selection"
     Shortcut {sequence: "Escape"; enabled: window.visible; onActivated: studio.cancelSelection()}
+    Shortcut {sequence: "H"; enabled: window.visible && !window.dragging; onActivated: window.toggleBar()}
     Shortcut {sequence: "Tab"; enabled: window.visible && !window.dragging; onActivated: window.toggleMode()}
     Shortcut {sequence: "S"; enabled: window.visible && !window.dragging; onActivated: window.toggleScroll()}
     Shortcut {sequence: "F"; enabled: window.visible && !window.dragging && !studio.scrollSelection; onActivated: window.wholeDisplay()}
@@ -54,6 +57,11 @@ Window {
     // bar gives its own recording indicator.
     readonly property color mark: studio.recordingSelection ? theme.recording : theme.popupFrame
     readonly property color dim: theme.alpha(theme.background, 0.55)
+    function toggleBar() {
+        window.hintOwner = null;
+        studio.captureBarHidden = !studio.captureBarHidden;
+        area.forceActiveFocus();
+    }
     function toggleMode() {
         if (studio.recordingSelection)
             studio.useScreenshotSelection();
@@ -318,18 +326,35 @@ Window {
         }
     }
 
+    component BarDrag: DragHandler {
+        target: bar
+        acceptedButtons: Qt.LeftButton
+        xAxis.minimum: 8
+        xAxis.maximum: Math.max(8, window.width - bar.width - 8)
+        yAxis.minimum: 8
+        yAxis.maximum: Math.max(8, window.height - bar.height - 8)
+        cursorShape: Qt.ClosedHandCursor
+        onActiveChanged: if (active) {
+            bar.positioned = true;
+            window.hintOwner = null;
+            window.hoveredTarget = null;
+        }
+    }
+
     // The capture bar: an Omarchy popup, framed in the active-border color.
     // Video mode keeps the same selection and adds the recording options, so
     // a drag starts recording straight away.
     Rectangle {
         id: bar
-        anchors.horizontalCenter: parent.horizontalCenter
+        visible: !studio.captureBarHidden
+        property bool positioned: false
+        x: (window.width - width) / 2
         y: 36
         width: Math.min(barRow.implicitWidth + 16, window.width - 16)
         clip: true
         // Narrow or high-scale displays drop the key hints, then the prompt,
         // so the mode switch always fits on screen.
-        readonly property bool showHints: window.width >= (studio.recordingSelection ? 1500 : 1000)
+        readonly property bool showHints: window.width >= (studio.recordingSelection ? 1600 : 1200)
         readonly property bool showPrompt: window.width >= (studio.recordingSelection ? 1240 : 720)
         height: 48
         radius: theme.radius
@@ -337,6 +362,15 @@ Window {
         border.width: 2
         border.color: window.mark
         Behavior on border.color { ColorAnimation { duration: 120 } }
+        // The selector owns an overlay surface, so move its bar here rather
+        // than asking the compositor to move a regular application window.
+        BarDrag { acceptedModifiers: Qt.MetaModifier }
+        function clampPosition() {
+            x = Math.max(8, Math.min(window.width - width - 8, x));
+            y = Math.max(8, Math.min(window.height - height - 8, y));
+        }
+        onWidthChanged: if (positioned) clampPosition()
+        onHeightChanged: if (positioned) clampPosition()
         // Clicks on the bar never start a selection underneath it.
         MouseArea {anchors.fill: parent}
         RowLayout {
@@ -344,6 +378,32 @@ Window {
             anchors.fill: parent
             anchors.margins: 7
             spacing: 6
+            Item {
+                id: dragGrip
+                Layout.preferredWidth: 20
+                Layout.fillHeight: true
+                readonly property string hint: "Drag to move the bar, or hold Super and drag anywhere on it"
+                Accessible.role: Accessible.Grip
+                Accessible.name: "Move capture bar"
+                Grid {
+                    anchors.centerIn: parent
+                    columns: 2
+                    spacing: 3
+                    Repeater {
+                        model: 6
+                        Rectangle { width: 3; height: 3; radius: 1.5; color: theme.muted }
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                    cursorShape: Qt.OpenHandCursor
+                    onEntered: window.hintOwner = dragGrip
+                    onExited: if (window.hintOwner === dragGrip) window.hintOwner = null
+                }
+                BarDrag { }
+            }
             ModeButton {
                 label: "Screenshot"
                 glyph: "capture"
@@ -422,6 +482,23 @@ Window {
             Keycap {visible: bar.showHints; key: "S"}
             Text {visible: bar.showHints; text: studio.scrollSelection ? "Screenshot" : "Scroll"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
             Keycap {
+                id: hideButton
+                key: "H"
+                readonly property string hint: "Hide capture bar · Press H to show it again"
+                Accessible.role: Accessible.Button
+                Accessible.name: "Hide capture bar"
+                Accessible.onPressAction: window.toggleBar()
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: window.hintOwner = hideButton
+                    onExited: if (window.hintOwner === hideButton) window.hintOwner = null
+                    onClicked: window.toggleBar()
+                }
+            }
+            Text {visible: bar.showHints; text: "Hide"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.rightMargin: 6}
+            Keycap {
                 key: "Esc"
                 Accessible.role: Accessible.Button
                 Accessible.name: "Cancel capture"
@@ -433,17 +510,17 @@ Window {
     }
     BarHint {
         id: hoverHint
-        anchors.horizontalCenter: bar.horizontalCenter
-        anchors.top: bar.bottom
-        anchors.topMargin: 8
+        x: Math.max(8, Math.min(window.width - width - 8, bar.x + (bar.width - width) / 2))
+        y: bar.y + bar.height + height + 8 <= window.height - 8
+            ? bar.y + bar.height + 8 : bar.y - height - 8
         maximumWidth: Math.min(640, window.width - 32)
-        text: window.visible && !window.dragging && window.hintOwner ? window.hintOwner.hint : ""
+        text: window.visible && bar.visible && !window.dragging && window.hintOwner ? window.hintOwner.hint : ""
     }
     Rectangle {
-        visible: !hoverHint.visible && !bar.showPrompt && !(studio.recordingSelection && recorder.state === "loading")
-        anchors.horizontalCenter: bar.horizontalCenter
-        anchors.top: bar.bottom
-        anchors.topMargin: 8
+        visible: bar.visible && !hoverHint.visible && !bar.showPrompt && !(studio.recordingSelection && recorder.state === "loading")
+        x: Math.max(8, Math.min(window.width - width - 8, bar.x + (bar.width - width) / 2))
+        y: bar.y + bar.height + height + 8 <= window.height - 8
+            ? bar.y + bar.height + 8 : bar.y - height - 8
         width: Math.min(window.width - 32, selectionHint.implicitWidth + 24)
         height: 30
         radius: theme.radius
@@ -465,10 +542,10 @@ Window {
     }
     // Recording options load in the background; say so if they are slow.
     Rectangle {
-        visible: studio.recordingSelection && recorder.state === "loading"
-        anchors.horizontalCenter: bar.horizontalCenter
-        anchors.top: bar.bottom
-        anchors.topMargin: 8
+        visible: bar.visible && studio.recordingSelection && recorder.state === "loading"
+        x: Math.max(8, Math.min(window.width - width - 8, bar.x + (bar.width - width) / 2))
+        y: bar.y + bar.height + height + 8 <= window.height - 8
+            ? bar.y + bar.height + 8 : bar.y - height - 8
         width: loadingText.implicitWidth + 20
         height: 26
         radius: theme.radius
