@@ -178,6 +178,8 @@ Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
   connect(&m_marks, &MarkDocument::edited, this, [this](bool modified) {
     if (modified)
       invalidateSaved();
+    if (m_copyTextPending)
+      copyText();
     scheduleRender();
   });
   connect(&m_marks, &MarkDocument::message, this, [this](const QString &text) {
@@ -448,7 +450,8 @@ void Studio::scheduleRender() {
 void Studio::loadImage(QImage image, QString name, bool demo) {
   if (image.isNull())
     return;
-  saveDraftNow();
+  if (!saveDraftNow())
+    return;
   image.setDevicePixelRatio(1);
   m_original = std::move(image);
   m_workingSize = m_original.size();
@@ -469,7 +472,8 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
 void Studio::closeImage() {
   if (m_busy || m_original.isNull())
     return;
-  saveDraftNow();
+  if (!saveDraftNow())
+    return;
   ++m_generation;
   m_original = {};
   m_workingSize = {};
@@ -492,6 +496,8 @@ void Studio::loadDemo(int variant) {
 }
 void Studio::open(const QUrl &url) {
   if (m_busy || !url.isLocalFile())
+    return;
+  if (!saveDraftNow())
     return;
   if (QStringList{"mp4", "webm", "mkv", "mov", "m4v", "avi"}.contains(
           QFileInfo(url.toLocalFile()).suffix().toLower())) {
@@ -579,25 +585,26 @@ void Studio::refreshDrafts() {
   m_drafts = drafts;
   emit changed();
 }
-void Studio::saveDraftNow() {
+bool Studio::saveDraftNow() {
   if (m_quickState == "copying")
-    return;
+    return !draftDirty();
   if (m_marks.transforming()) {
     m_draftTimer.start();
-    return;
+    return false;
   }
   m_draftTimer.stop();
   if (!m_draftDirty || m_demo || m_original.isNull())
-    return;
+    return true;
   if (m_draftId.isEmpty() && m_marks.edits().isEmpty()) {
     m_draftDirty = false;
-    return;
+    emit changed();
+    return true;
   }
   const QString directory = draftsDirectory();
   if (!QDir().mkpath(directory)) {
     m_status = "Could not save editable draft. Check the application data folder.";
     emit changed();
-    return;
+    return false;
   }
   QFile::setPermissions(directory, QFile::ReadOwner | QFile::WriteOwner |
                                       QFile::ExeOwner);
@@ -610,13 +617,13 @@ void Studio::saveDraftNow() {
         !source.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) {
       m_status = "Could not save the private draft image.";
       emit changed();
-      return;
+      return false;
     }
     QImageWriter writer(&source, "png");
     if (!writer.write(m_original) || !source.commit()) {
       m_status = "Could not finish saving the private draft image.";
       emit changed();
-      return;
+      return false;
     }
   }
   QJsonArray edits;
@@ -636,15 +643,22 @@ void Studio::saveDraftNow() {
       !metadata.commit()) {
     m_status = "Could not finish saving the editable draft.";
     emit changed();
-    return;
+    return false;
   }
   m_draftDirty = false;
   refreshDrafts();
+  return true;
+}
+void Studio::discardUnsavedDraft() {
+  m_draftTimer.stop();
+  m_draftDirty = false;
+  emit changed();
 }
 void Studio::resumeDraft(const QString &id) {
   if (m_busy || !validDraftId(id))
     return;
-  saveDraftNow();
+  if (!saveDraftNow())
+    return;
   const QString directory = draftsDirectory();
   QFile metadata(directory + "/" + id + ".json");
   if (!metadata.open(QIODevice::ReadOnly) ||
@@ -820,6 +834,7 @@ static QString exportStatus(const ExportResult &r) {
 void Studio::accept() {
   if (m_busy || m_rendering || m_original.isNull())
     return;
+  cancelTextCopy();
   saveDraftNow();
   const QSize output = Frame::outputSize(m_workingSize, m_options, m_edgeRoom);
   if (qint64(output.width()) * output.height() > 80000000) {
@@ -908,6 +923,7 @@ void Studio::accept() {
 void Studio::retryOutput() {
   if (m_busy || m_savedPath.isEmpty() || (!m_copyPending && !m_backupPending))
     return;
+  cancelTextCopy();
   m_busy = true;
   if (m_quickMode)
     m_quickState = "saving";
@@ -959,7 +975,7 @@ void Studio::repeatLastArea() {
   captureImpl(false, 0, true);
 }
 void Studio::captureImpl(bool region, int monitor, bool repeat) {
-  if (m_busy)
+  if (m_busy || !saveDraftNow())
     return;
   const auto open = QGuiApplication::allWindows();
   // A capture started from the open studio window returns there afterwards.
@@ -1191,7 +1207,7 @@ void Studio::scrollInstead(const QString &monitor) {
   emit changed();
 }
 void Studio::captureScroll(int monitor) {
-  if (m_busy)
+  if (m_busy || !saveDraftNow())
     return;
   m_recordingSelection = false;
   m_scrollSelection = true;
@@ -1369,6 +1385,7 @@ void Studio::copyQuick() {
       (m_quickState != "choosing" && m_quickState != "copy-failed" &&
        m_quickState != "failed"))
     return;
+  cancelTextCopy();
   m_busy = true;
   m_quickState = "copying";
   m_draftTimer.stop();
@@ -1447,6 +1464,7 @@ void Studio::copyQuick() {
 void Studio::dismissQuick() {
   if (m_busy || m_pendingFinish >= 0)
     return;
+  cancelTextCopy();
   m_quickState = "cancelled";
   emit changed();
   emit dismissRequested();
@@ -1454,17 +1472,16 @@ void Studio::dismissQuick() {
 
 struct ReadResult {
   bool ok = false;
-  QString text;
   QVector<QRectF> secrets;
 };
 void Studio::stopReading() {
   if (m_readCancel)
     m_readCancel->store(true);
   m_readCancel.reset();
+  cancelTextCopy();
   ++m_readGeneration;
   m_reading = m_textRead = m_copyTextPending = false;
   m_secrets.clear();
-  m_text.clear();
   m_textNote.clear();
 }
 void Studio::startReading() {
@@ -1484,15 +1501,7 @@ void Studio::startReading() {
               return;
             m_reading = false;
             m_textRead = result.ok;
-            m_text = result.text;
             m_secrets = result.secrets;
-            if (m_copyTextPending) {
-              m_copyTextPending = false;
-              if (result.ok)
-                writeText();
-              else
-                m_textNote = "Could not read the text.";
-            }
             emit changed();
           });
   // The picker never waits for this. A finish chosen first is saved as
@@ -1504,7 +1513,6 @@ void Studio::startReading() {
         if (!words)
           return result;
         result.ok = true;
-        result.text = Ocr::text(*words);
         const QSizeF size = image.size();
         for (const QRect &found : Ocr::findSecrets(*words)) {
           // A little room past the letters, so no edge of one shows.
@@ -1561,18 +1569,56 @@ void Studio::hideSecrets() {
   emit changed();
 }
 void Studio::copyText() {
-  if (!canReadText())
+  const bool pending = m_copyTextPending;
+  cancelTextCopy();
+  // An edit must invalidate and reissue a pending copy even if the original
+  // image's secret detector failed while that copy was still reading.
+  if ((!canReadText() && !pending) || m_original.isNull())
     return;
-  if (m_reading) {
-    m_copyTextPending = true;
-    emit changed();
-    return;
-  }
-  writeText();
+  m_copyTextCancel = std::make_shared<std::atomic_bool>(false);
+  const int generation = m_copyTextGeneration;
+  m_copyTextPending = true;
+  auto *watcher = new QFutureWatcher<std::optional<QString>>(this);
+  connect(watcher, &QFutureWatcher<std::optional<QString>>::finished, this,
+          [this, watcher, generation] {
+            const auto text = watcher->result();
+            watcher->deleteLater();
+            if (generation != m_copyTextGeneration)
+              return;
+            m_copyTextPending = false;
+            m_copyTextCancel.reset();
+            if (text)
+              writeText(*text);
+            else
+              m_textNote = "Could not read the text.";
+            emit changed();
+          });
+  // Secret detection reads the original. Copying reads the current crop and
+  // rendered marks, including redactions and blurs.
+  // Rendering text uses GUI font resources, so join this worker before the
+  // studio and GUI application are destroyed, just like preview rendering.
+  watcher->setFuture(QtConcurrent::run(&m_previewPool,
+      [image = m_original, edits = m_marks.edits(), cancel = m_copyTextCancel] {
+        if (cancel->load())
+          return std::optional<QString>{};
+        const QImage edited = Frame::applyEdits(image, edits);
+        const auto words = Ocr::read(edited, cancel.get());
+        return words ? std::optional<QString>{Ocr::text(*words)} : std::nullopt;
+      }));
   emit changed();
 }
-void Studio::writeText() {
-  const QString text = m_text.trimmed();
+void Studio::cancelTextCopy() {
+  const bool pending = m_copyTextPending;
+  if (m_copyTextCancel)
+    m_copyTextCancel->store(true);
+  m_copyTextCancel.reset();
+  ++m_copyTextGeneration;
+  m_copyTextPending = false;
+  if (pending)
+    emit changed();
+}
+void Studio::writeText(const QString &recognized) {
+  const QString text = recognized.trimmed();
   if (text.isEmpty()) {
     m_textNote = "No text found.";
     return;
@@ -1619,7 +1665,7 @@ void Studio::recordingOptions(const QString &monitor) {
   emit recordOptionsRequested();
 }
 void Studio::captureVideo() {
-  if (m_busy)
+  if (m_busy || !saveDraftNow())
     return;
   m_recordingSelection = true;
   captureImpl(true, 0, false);

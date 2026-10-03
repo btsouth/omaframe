@@ -768,11 +768,28 @@ private slots:
     QCOMPARE(studio.marks()->edits().size(), 1);
     QCOMPARE(studio.marks()->edits().first().type, QString("redact"));
     QVERIFY(studio.textNote().startsWith("Hid 1 possible secret."));
+    studio.copyText();
+    QTRY_COMPARE_WITH_TIMEOUT(studio.textNote(), QString("Copied the text."), 20000);
+    paste.start("wl-paste", {"--no-newline"});
+    QVERIFY(paste.waitForFinished(3000));
+    const QString hiddenText = QString::fromUtf8(paste.readAllStandardOutput());
+    QVERIFY(hiddenText.contains("Build finished in 4 seconds"));
+    QVERIFY(!hiddenText.contains("ghp_"));
     // An ordinary mark: one undo brings the secret back.
     studio.marks()->undo();
     QCOMPARE(studio.secretCount(), 1);
     studio.marks()->redo();
     QCOMPARE(studio.secretCount(), 0);
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 8000);
+    QVERIFY(studio.marks()->cropCurrentView(0, 0.45, 1, 1));
+    studio.copyText();
+    QTRY_COMPARE_WITH_TIMEOUT(studio.textNote(), QString("Copied the text."), 20000);
+    paste.start("wl-paste", {"--no-newline"});
+    QVERIFY(paste.waitForFinished(3000));
+    const QString croppedText = QString::fromUtf8(paste.readAllStandardOutput());
+    QVERIFY(croppedText.contains("Build finished in 4 seconds"));
+    QVERIFY(!croppedText.contains("TOKEN"));
+    studio.marks()->undo();
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 8000);
     studio.saveDraftNow();
     // What was read never reaches the disk.

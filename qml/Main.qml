@@ -63,6 +63,7 @@ ApplicationWindow {
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
     function requestNavigation(command, file) {
         if (studio.busy || video.busy || navigation.saving) return;
+        studio.cancelTextCopy();
         if (markCanvas.typing) markCanvas.commitText();
         captureMenu.close();
         settingsPopup.close();
@@ -78,10 +79,12 @@ ApplicationWindow {
             videoPane.pause();
             videoPane.syncDraft();
             video.saveDraftNow();
-        }
+        } else studio.saveDraftNow();
         navigation.request(command, file || "");
     }
-    Binding { target: navigation; property: "dirty"; value: root.videoLoaded && !root.videoUnchanged && !root.videoSavedCurrent && video.draftSignature !== videoPane.signature }
+    Binding { target: navigation; property: "dirty"; value: root.videoLoaded
+        ? !root.videoUnchanged && !root.videoSavedCurrent && video.draftSignature !== videoPane.signature
+        : studio.draftDirty }
     function acceptCurrent() {
         if (markCanvas.typing)
             markCanvas.commitText();
@@ -212,7 +215,13 @@ ApplicationWindow {
         function onChanged() { if (!navigation.pending) leaveDialog.close(); }
         function onSaveRequested() {
             leaveDialog.close();
-            video.exportEdited(videoPane.clipStart, videoPane.clipEnd, videoPane.muted, videoPane.cuts);
+            if (root.videoLoaded)
+                video.exportEdited(videoPane.clipStart, videoPane.clipEnd, videoPane.muted, videoPane.cuts);
+            else if (studio.saveDraftNow()) navigation.saveSucceeded();
+            else {
+                leaveDialog.saveError = studio.status;
+                navigation.saveFailed();
+            }
         }
     }
     Shortcut {
@@ -358,10 +367,12 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 14
-            Text { Layout.fillWidth: true; text: "Save your video edits?"; color: theme.text; font.pixelSize: 16; font.weight: Font.Medium; wrapMode: Text.Wrap }
+            Text { Layout.fillWidth: true; text: root.videoLoaded ? "Save your video edits?" : "Keep your screenshot edits?"; color: theme.text; font.pixelSize: 16; font.weight: Font.Medium; wrapMode: Text.Wrap }
             Text {
                 Layout.fillWidth: true
-                text: "Your changes to " + video.name + " haven't been saved. Save them before continuing, or discard the edits. Your original video stays unchanged."
+                text: root.videoLoaded
+                    ? "Your changes to " + video.name + " haven't been saved. Save them before continuing, or discard the edits. Your original video stays unchanged."
+                    : "Your editable screenshot draft couldn't be saved. Retry before continuing, or discard the unsaved edits."
                 color: theme.muted
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
@@ -373,8 +384,11 @@ ApplicationWindow {
                 spacing: 8
                 Item { Layout.fillWidth: true }
                 StudioButton { id: leaveCancel; text: "Cancel"; quiet: true; onClicked: navigation.cancel() }
-                StudioButton { text: "Discard edits"; danger: true; onClicked: navigation.discard() }
-                StudioButton { text: "Save and continue"; primary: true; onClicked: navigation.save() }
+                StudioButton { objectName: "discardUnsavedEdits"; text: "Discard edits"; danger: true; onClicked: {
+                    if (!root.videoLoaded) studio.discardUnsavedDraft();
+                    navigation.discard();
+                } }
+                StudioButton { text: root.videoLoaded ? "Save and continue" : "Retry and continue"; primary: true; onClicked: navigation.save() }
             }
         }
     }
@@ -1084,7 +1098,7 @@ ApplicationWindow {
                         implicitHeight: 34
                         enabled: !root.working
                         hint: "Close this image. Editable drafts stay in Recent edits."
-                        onClicked: { markCanvas.cancelText(); studio.closeImage(); }
+                        onClicked: root.requestNavigation("home")
                     }
                 }
                 Rectangle {

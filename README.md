@@ -67,7 +67,8 @@ something that looks like a secret, such as an API key, a token, an email
 address or a card number, a **Hide possible secrets** button appears. Press H
 and each one gets a redaction you can still move or undo in the editor. It can
 miss things, so look before you share. Press T to copy the text in the
-screenshot instead.
+screenshot instead. Text copying reads the current crop and edits, so hidden
+or cropped-out text is excluded.
 
 ## Capture a scrolling page
 
@@ -191,6 +192,8 @@ example `eng+deu`) to read other languages, as Omarchy's own text capture does.
 Screenshot drafts keep a private copy of the capture. Video drafts keep only
 edits and refer to the original video. Both appear under **Recent edits**.
 Deleting a video draft leaves the original video and exports in place.
+If a screenshot draft cannot be saved, the studio keeps the image and edits
+open and offers retry or discard before you leave.
 
 Camera recordings keep a separate camera video and a small `.camera.json`
 file beside the screen recording. Keep these files together to edit the camera
@@ -277,7 +280,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs ten headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs eleven headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 

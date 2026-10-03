@@ -30,10 +30,10 @@ sharing a candidate.
 
 ## Automated checks
 
-- GitHub CI builds the app and all test binaries on Arch, runs ten
+- GitHub CI builds the app and all test binaries on Arch, runs eleven
   headless suites plus OCR pattern tests, and checks the installed desktop entry, icon and licenses.
   See [docs/ci.md](docs/ci.md) for coverage and local commands.
-- Run the complete twelve-suite CTest set in an isolated omabox for changes
+- Run the complete thirteen-suite CTest set in an isolated omabox for changes
   to capture, clipboard or desktop integration. These tests use a simulated
   recorder and fixture camera frames; they do not establish real GPU,
   microphone or physical camera behavior.

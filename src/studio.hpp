@@ -107,6 +107,7 @@ class Studio final : public QObject {
   Q_PROPERTY(bool hasLastArea READ hasLastArea NOTIFY changed)
   Q_PROPERTY(MarkDocument *marks READ marks CONSTANT)
   Q_PROPERTY(QVariantList drafts READ drafts NOTIFY changed)
+  Q_PROPERTY(bool draftDirty READ draftDirty NOTIFY changed)
   Q_PROPERTY(bool keepOriginals READ keepOriginals WRITE setKeepOriginals NOTIFY changed)
   Q_PROPERTY(bool autoSaveScreenshots READ autoSaveScreenshots WRITE setAutoSaveScreenshots NOTIFY changed)
   Q_PROPERTY(bool editing READ editing WRITE setEditing NOTIFY changed)
@@ -186,6 +187,7 @@ public:
   QRectF previewCropBounds() const { return m_previewCropBounds; }
   QSize sourceSize() const { return m_original.size(); }
   bool canReadText() const { return m_reading || m_textRead; }
+  bool draftDirty() const { return m_draftDirty && !m_demo && hasImage(); }
   int secretCount() const { return uncoveredSecrets().size(); }
   QString textNote() const;
   QString originalsFolder() const;
@@ -222,7 +224,8 @@ public:
   Q_INVOKABLE void revealSaved();
   Q_INVOKABLE void resumeDraft(const QString &id);
   Q_INVOKABLE void deleteDraft(const QString &id);
-  Q_INVOKABLE void saveDraftNow();
+  Q_INVOKABLE bool saveDraftNow();
+  Q_INVOKABLE void discardUnsavedDraft();
   bool recordingSelection() const { return m_recordingSelection; }
   void setRecordingSelection(bool value) {
     m_recordingSelection = value;
@@ -283,6 +286,7 @@ public:
   Q_INVOKABLE void hideSecrets();
   /** Copies the text in the image, once it has been read. */
   Q_INVOKABLE void copyText();
+  Q_INVOKABLE void cancelTextCopy();
 signals:
   void changed();
   void hideStudio();
@@ -319,7 +323,7 @@ private:
   void startReading();
   void stopReading();
   QVector<QRectF> uncoveredSecrets() const;
-  void writeText();
+  void writeText(const QString &text);
   ImageStore *m_store;
   // Preview workers must finish before this studio and the GUI application
   // are destroyed. The global pool otherwise outlives Qt's GUI resources.
@@ -360,8 +364,10 @@ private:
   // What OCR found, only ever kept in memory. Secrets are fractions of the
   // whole image, already grown to cover their edges.
   QVector<QRectF> m_secrets;
-  QString m_text, m_textNote;
+  QString m_textNote;
   bool m_reading = false, m_textRead = false, m_copyTextPending = false;
   int m_readGeneration = 0;
   std::shared_ptr<std::atomic_bool> m_readCancel;
+  int m_copyTextGeneration = 0;
+  std::shared_ptr<std::atomic_bool> m_copyTextCancel;
 };

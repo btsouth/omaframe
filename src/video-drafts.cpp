@@ -115,7 +115,7 @@ bool Video::saveDraftNow() {
       m_editState.value("clipEnd").toDouble() < m_duration - 0.001 ||
       m_editState.value("muted").toBool() ||
       !m_editState.value("cuts").toList().isEmpty() ||
-      (!m_cameraSource.isEmpty() && m_cameraLayout.value("visible").toBool());
+      !m_cameraSource.isEmpty();
   m_draftId = idFor(m_source);
   if (!edited) {
     QFile::remove(directory() + "/" + m_draftId + ".json");

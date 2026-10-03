@@ -28,8 +28,12 @@ Item {
     property string notice: ""
     // Taken when a trim handle is grabbed; pushed on the first real change.
     property var pendingUndo: null
+    // Opening restores backend state before loaded, even after busy clears.
+    // Keep draft writes stopped until the pane has copied the whole edit.
+    property bool loadingEditState: true
+    property bool editStateInitialized: false
     readonly property bool loaded: video.source.toString().length > 0
-    readonly property bool editable: loaded && !video.busy
+    readonly property bool editable: loaded && !video.busy && !loadingEditState
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
     readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations, video.marks.cropBounds, video.cameraLayout])
     // The mark tool: select, blur, redact, arrow, box, text or step.
@@ -93,6 +97,9 @@ Item {
     }
     onSignatureChanged: syncDraft()
     function loadEditState() {
+        loadingEditState = true;
+        markLane.cancel();
+        pendingUndo = null;
         const state = video.editState;
         clipStart = state.clipStart || 0;
         clipEnd = state.clipEnd || video.duration;
@@ -105,9 +112,14 @@ Item {
         redoStack = [];
         tool = "select";
         clearSelection();
+        editStateInitialized = true;
+        loadingEditState = false;
         syncDraft();
     }
-    Component.onCompleted: if (loaded) loadEditState()
+    Component.onCompleted: {
+        if (loaded && !video.busy) loadEditState();
+        else if (!video.busy) loadingEditState = false;
+    }
     function changeCamera(layout) {
         if (Object.keys(layout).every(key => video.cameraLayout[key] === layout[key]))
             return;
@@ -181,7 +193,8 @@ Item {
     // Esc steps back one layer: a drag, the selected mark, the mark tool,
     // then the selected part of the timeline.
     function stepBack() {
-        if (markCanvas.dragging) markCanvas.cancelDrag();
+        if (markLane.dragging) markLane.cancel();
+        else if (markCanvas.dragging) markCanvas.cancelDrag();
         else if (markSelected) video.marks.clearSelection();
         else if (tool !== "select") tool = "select";
         else clearSelection();
@@ -351,7 +364,7 @@ Item {
         return false;
     }
 
-    onVisibleChanged: if (!visible) { player.pause(); videoStyle.close(); }
+    onVisibleChanged: if (!visible) { player.pause(); markLane.cancel(); videoStyle.close(); }
     onMarkSelectedChanged: if (markSelected) {
         hasSelection = false;
         selectedCut = -1;
@@ -366,7 +379,7 @@ Item {
         video.marks.clearSelection();
     }
     // A twentieth of a second of slack: a seek can land a frame early.
-    onHeadChanged: if (markSelected && (head < selectedMark.start - 0.05 || (head > selectedMark.end + 0.05 && selectedMark.end < video.duration)))
+    onHeadChanged: if (!markLane.dragging && markSelected && (head < selectedMark.start - 0.05 || (head > selectedMark.end + 0.05 && selectedMark.end < video.duration)))
         video.marks.clearSelection()
     Binding { target: video.marks; property: "playhead"; value: pane.head }
     Connections {
@@ -385,6 +398,7 @@ Item {
     }
     MediaPlayer {
         id: player
+        objectName: "videoPlayer"
         source: video.source
         videoOutput: output
         audioOutput: AudioOutput {
@@ -418,15 +432,34 @@ Item {
     }
     Connections {
         target: video
+        function onOpening() {
+            pane.loadingEditState = true;
+            markLane.cancel();
+            pane.pendingUndo = null;
+        }
         function onLoaded() { pane.loadEditState(); }
+        function onChanged() {
+            // A failed open has no loaded signal. Defer until backend work
+            // returns so intermediate restoration notifications cannot unlock
+            // draft writes. A successful loaded signal already clears the guard.
+            if (pane.loadingEditState && !video.busy)
+                Qt.callLater(function() {
+                    if (pane.loadingEditState && !video.busy) {
+                        if (!pane.editStateInitialized && pane.loaded)
+                            pane.loadEditState();
+                        else
+                            pane.loadingEditState = false;
+                    }
+                });
+        }
     }
 
     readonly property bool popupOpen: cameraMenu.opened || videoStyle.opened
-    readonly property bool keys: visible && editable && shortcutsAllowed && !typing && !popupOpen && !markCanvas.dragging
+    readonly property bool keys: visible && editable && shortcutsAllowed && !typing && !popupOpen && !markCanvas.dragging && !markLane.dragging
     Shortcut { sequence: "Space"; enabled: pane.keys; onActivated: pane.togglePlay() }
     Shortcut { sequence: "I"; enabled: pane.keys; onActivated: pane.setIn() }
     Shortcut { sequence: "O"; enabled: pane.keys; onActivated: pane.setOut() }
-    Shortcut { sequence: "Escape"; enabled: (pane.keys || markCanvas.dragging) && (pane.barMode !== "none" || markCanvas.dragging); onActivated: pane.stepBack() }
+    Shortcut { sequence: "Escape"; enabled: (pane.keys || markCanvas.dragging || markLane.dragging) && (pane.barMode !== "none" || markCanvas.dragging || markLane.dragging); onActivated: pane.stepBack() }
     Shortcut { sequences: ["Delete", "Backspace"]; enabled: pane.keys && (pane.hasSelection || pane.markSelected); onActivated: pane.deleteSelected() }
     Shortcut { sequence: "C"; enabled: pane.keys; onActivated: pane.useTool("crop") }
     Shortcut { sequence: "G"; enabled: pane.keys; onActivated: pane.useTool("blur") }
@@ -505,6 +538,7 @@ Item {
         signal dragged(real edge)
         signal grabbed()
         signal released()
+        signal canceled()
         height: lane.height
         y: lane.y
         radius: theme.radius
@@ -521,6 +555,7 @@ Item {
         }
         MouseArea {
             id: grab
+            objectName: "trimHandleGrab"
             property real offset: 0
             anchors.fill: parent
             anchors.leftMargin: -4
@@ -537,6 +572,7 @@ Item {
                     handle.dragged(mapToItem(handle.lane, mouse.x, 0).x + offset);
             }
             onReleased: handle.released()
+            onCanceled: handle.canceled()
         }
     }
     component Divider: Rectangle {
@@ -1275,6 +1311,7 @@ Item {
 
             Item {
                 id: track
+                objectName: "videoTimelineTrack"
                 x: timeline.gutter
                 y: 8
                 width: timeline.width - 2 * timeline.gutter
@@ -1484,6 +1521,8 @@ Item {
                 width: timeline.gutter
                 onGrabbed: pane.pendingUndo = pane.snapshot()
                 onDragged: edge => pane.setStart(Math.round(track.secondsAt(edge) * 10) / 10, false)
+                onReleased: pane.pendingUndo = null
+                onCanceled: pane.pendingUndo = null
             }
             TrimHandle {
                 lane: track
@@ -1493,12 +1532,15 @@ Item {
                 width: timeline.gutter
                 onGrabbed: pane.pendingUndo = pane.snapshot()
                 onDragged: edge => pane.setEnd(Math.round(track.secondsAt(edge) * 10) / 10, false)
+                onReleased: pane.pendingUndo = null
+                onCanceled: pane.pendingUndo = null
             }
 
             // One bar per mark, for when it shows. Click one to select it; the
             // selected one has handles.
             Item {
                 id: markLane
+                objectName: "videoMarkLane"
                 x: track.x
                 y: track.y + track.height + 6
                 width: track.width
@@ -1508,17 +1550,26 @@ Item {
                 // so the whole drag is one undo step.
                 property real draftStart: -1
                 property real draftEnd: -1
+                property int draftMark: -1
+                readonly property bool dragging: draftMark >= 0
                 readonly property real shownStart: draftStart >= 0 ? draftStart : pane.selectedMark.start || 0
                 readonly property real shownEnd: draftEnd >= 0 ? draftEnd : pane.selectedMark.end || 0
                 function grab() {
+                    if (!pane.editable || !pane.markSelected)
+                        return;
+                    draftMark = pane.selectedMark.index;
                     player.pause();
                     draftStart = pane.selectedMark.start;
                     draftEnd = pane.selectedMark.end;
                 }
                 function commit() {
-                    if (draftStart >= 0)
+                    if (dragging && pane.editable && pane.selectedMark.index === draftMark)
                         video.marks.setSelectedTimes(draftStart, draftEnd);
+                    cancel();
+                }
+                function cancel() {
                     draftStart = draftEnd = -1;
+                    draftMark = -1;
                 }
                 Repeater {
                     model: video.marks.annotations
@@ -1544,6 +1595,7 @@ Item {
                 }
             }
             TrimHandle {
+                objectName: "videoMarkStartHandle"
                 lane: markLane
                 visible: pane.markSelected
                 label: "Mark start"
@@ -1552,12 +1604,15 @@ Item {
                 width: 10
                 onGrabbed: markLane.grab()
                 onDragged: edge => {
+                    if (!markLane.dragging) return;
                     markLane.draftStart = Math.max(0, Math.min(markLane.draftEnd - 0.1, Math.round(track.secondsAt(edge) * 10) / 10));
                     pane.seek(markLane.draftStart);
                 }
                 onReleased: markLane.commit()
+                onCanceled: markLane.cancel()
             }
             TrimHandle {
+                objectName: "videoMarkEndHandle"
                 lane: markLane
                 visible: pane.markSelected
                 label: "Mark end"
@@ -1566,10 +1621,12 @@ Item {
                 width: 10
                 onGrabbed: markLane.grab()
                 onDragged: edge => {
+                    if (!markLane.dragging) return;
                     markLane.draftEnd = Math.min(video.duration, Math.max(markLane.draftStart + 0.1, Math.round(track.secondsAt(edge) * 10) / 10));
                     pane.seek(Math.max(markLane.draftStart, markLane.draftEnd - 0.1));
                 }
                 onReleased: markLane.commit()
+                onCanceled: markLane.cancel()
             }
 
             // The time ruler doubles as a scrub strip.

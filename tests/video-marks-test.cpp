@@ -268,6 +268,53 @@ private slots:
     for (const auto &draft : reopened.drafts())
       QVERIFY(draft.toMap().value("id").toString() != id);
   }
+  void hidingCameraIsEnoughToKeepADraft() {
+    const QString source = temp.filePath("hide-camera.mp4");
+    const QString camera = temp.filePath("hide-camera-webcam.mp4");
+    QVERIFY(QFile::copy(plain, source));
+    QVERIFY(QFile::copy(plain, camera));
+    QFile sidecar(source + ".camera.json");
+    QVERIFY(sidecar.open(QIODevice::WriteOnly));
+    const auto bytes =
+        QJsonDocument(QJsonObject{{"version", 1},
+                                  {"file", QFileInfo(camera).fileName()},
+                                  {"duration", 4.0}})
+            .toJson();
+    QCOMPARE(sidecar.write(bytes), bytes.size());
+    sidecar.close();
+
+    Video video;
+    video.open(QUrl::fromLocalFile(source));
+    QTRY_VERIFY_WITH_TIMEOUT(!video.busy(), 12000);
+    QCOMPARE(video.cameraSource(), QUrl::fromLocalFile(camera));
+    QVERIFY(video.cameraLayout().value("visible").toBool());
+    auto layout = video.cameraLayout();
+    layout["visible"] = false;
+    video.setCameraLayout(layout);
+    // No trims, cuts, mute, crop or marks: hiding the camera is the only edit.
+    video.setEditState({{"clipStart", 0.0},
+                        {"clipEnd", video.duration()},
+                        {"muted", false},
+                        {"cuts", QVariantList{}},
+                        {"signature", "camera-hidden"}});
+    QVERIFY(video.saveDraftNow());
+    QString id;
+    for (const auto &draft : video.drafts())
+      if (draft.toMap().value("name").toString() == "hide-camera.mp4")
+        id = draft.toMap().value("id").toString();
+    QVERIFY(!id.isEmpty());
+
+    Video reopened;
+    QSignalSpy loaded(&reopened, &Video::loaded);
+    reopened.resumeDraft(id);
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+    QCOMPARE(reopened.cameraSource(), QUrl::fromLocalFile(camera));
+    QCOMPARE(reopened.cameraLayout(), layout);
+    QVERIFY(!reopened.cameraLayout().value("visible").toBool());
+    QCOMPARE(reopened.editState(), video.editState());
+    QVERIFY(reopened.marks()->edits().isEmpty());
+    reopened.deleteDraft(id);
+  }
   void changedOriginalDoesNotSilentlyRestoreDraft() {
     const QString source = temp.filePath("changed-original.mp4");
     QVERIFY(QFile::copy(plain, source));
