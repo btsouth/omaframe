@@ -280,7 +280,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs ten headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs eleven headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 

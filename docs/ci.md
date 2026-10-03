@@ -6,7 +6,7 @@ a GitHub-hosted runner, builds the app and every test binary, and checks the
 CMake install layout and desktop entry. It uploads CTest results and the test
 log, including when tests fail. It does not publish packages or releases.
 
-Ten CTest suites have the `headless` label:
+Eleven CTest suites have the `headless` label:
 
 | Suite | Coverage |
 | --- | --- |
@@ -17,6 +17,7 @@ Ten CTest suites have the `headless` label:
 | renderer | Finishes, edge room, original scrollbar widths at multiple capture lengths and edge orientations, annotations and output dimensions |
 | theme | Color parsing, fixture themes and theme-change handling |
 | video-marks | Timed marks, cuts, crop, camera composition, draft restoration and looping GIF export using FFmpeg fixtures |
+| video-pane | Real QML edit restoration, timing-handle drags, cancellation and undo/redo |
 | webcam | Bounded FFmpeg camera encoding, pause-aware timestamps, aspect ratio and encoder failures using fixture frames |
 | scroll-capture | Alignment, repeated content, full-width headers and footers, scrollbar cleanup and preservation of textured edges, automatic/manual handoff, interruptions and image-size limits |
 | scroll-studio | Control placement, tall-image previews, draft validation, result handoff and shutdown with active preview jobs |
@@ -34,7 +35,7 @@ hosted CI. No recognition assertions are removed from that suite.
 
 The `pipelines` suite has the `desktop` label because it exercises native
 Wayland capture and clipboard handoff. It is not run in hosted CI. Run all
-twelve suites locally inside omabox:
+thirteen suites locally inside omabox:
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
