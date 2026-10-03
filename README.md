@@ -32,9 +32,9 @@ Open Omaframe from the launcher and enable its capture shortcuts. It only
 replaces Omarchy's default actions for those two keys, backs up your bindings
 first, and never touches a key you set up yourself.
 
-Version 0.8.0 adds mouse-wheel zoom, drag panning, repeated screenshot crops,
-active-tool toggles and a capture bar you can move or hide with H.
-See [the release notes](docs/release-notes-0.8.0.md).
+Version 0.8.1 adds optional automatic screenshot saving and Ctrl+C to copy
+from the finish chooser without saving. Automatic saving stays on by default.
+See [the release notes](docs/release-notes-0.8.1.md).
 
 ## Take a screenshot
 

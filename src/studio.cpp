@@ -1541,7 +1541,7 @@ QString Studio::textNote() const {
   return m_copyTextPending ? QString("Reading text…") : m_textNote;
 }
 void Studio::hideSecrets() {
-  if (m_busy)
+  if (m_busy || (m_quickMode && !recoveryAction().isEmpty()))
     return;
   const QVector<QRectF> open = uncoveredSecrets();
   if (open.isEmpty())

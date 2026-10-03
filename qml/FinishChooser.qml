@@ -112,7 +112,7 @@ Window {
                     visible: studio.secretCount > 0 && !chooser.captureError
                     Layout.fillWidth: true
                     spacing: 12
-                    StudioButton {text: "Hide " + studio.secretCount + (studio.secretCount === 1 ? " possible secret" : " possible secrets"); glyph: "redact"; primary: true; enabled: chooser.ready; hint: "Redact possible keys, tokens, emails and card numbers · H"; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: studio.hideSecrets(); Keys.onEnterPressed: studio.hideSecrets(); onClicked: studio.hideSecrets()}
+                    StudioButton {text: "Hide " + studio.secretCount + (studio.secretCount === 1 ? " possible secret" : " possible secrets"); glyph: "redact"; primary: true; enabled: chooser.canChoose; hint: "Redact possible keys, tokens, emails and card numbers · H"; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: studio.hideSecrets(); Keys.onEnterPressed: studio.hideSecrets(); onClicked: studio.hideSecrets()}
                     Text {Layout.fillWidth: true; text: "Check the screenshot for anything else before sharing."; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 11; wrapMode: Text.Wrap}
                 }
                 GridLayout {
@@ -206,7 +206,7 @@ Window {
                     StudioButton {visible: studio.quickState === "failed" && !studio.recoveryAction.length; text: chooser.inlineFolderDialog ? "Change folder" : "Edit to change folder"; glyph: "folder"; enabled: chooser.ready; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.changeFolder(); Keys.onEnterPressed: chooser.changeFolder(); onClicked: chooser.changeFolder()}
                     StudioButton {visible: studio.recoveryAction.length > 0; text: studio.recoveryAction; glyph: "copy"; primary: true; enabled: !studio.busy; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: studio.retryOutput(); Keys.onEnterPressed: studio.retryOutput(); onClicked: studio.retryOutput()}
                     StudioButton {text: chooser.captureError ? "Try capture again" : "Retake"; glyph: "capture"; quiet: !chooser.captureError; enabled: !studio.busy; hint: "Select a new region · R"; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: studio.capture(true); Keys.onEnterPressed: studio.capture(true); onClicked: studio.capture(true)}
-                    StudioButton {objectName: "saveButton"; visible: !chooser.captureError && !studio.recoveryAction.length; text: "Copy and save"; glyph: "copy"; primary: true; enabled: chooser.ready; hint: studio.autoSaveScreenshots ? "Copy and save to the folder · Enter" : "Copy and save to the folder"; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.save(); Keys.onEnterPressed: chooser.save(); onClicked: chooser.save()}
+                    StudioButton {objectName: "saveButton"; visible: !chooser.captureError && !studio.recoveryAction.length; text: "Copy and save"; glyph: "copy"; primary: true; enabled: chooser.canChoose; hint: studio.autoSaveScreenshots ? "Copy and save to the folder · Enter" : "Copy and save to the folder"; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.save(); Keys.onEnterPressed: chooser.save(); onClicked: chooser.save()}
                 }
             }
         }

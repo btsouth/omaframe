@@ -67,7 +67,7 @@ class QuickCopyTest : public QObject {
   QString clipboard() const { return temp.filePath("clipboard.png"); }
   void prepare(Studio &studio) {
     studio.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("output")));
-    // PATH contains only the clipboard stub, so this starts quick mode but
+    // PATH contains fixture stubs, so this starts quick mode but
     // cannot query Hyprland or reach native capture. Supply a capture in memory
     // using the same result entry point as the scrolling capture tests.
     studio.capture(false);
@@ -84,6 +84,7 @@ private slots:
     QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), bin + "/wl-copy"));
     // finishNotice() only needs availability; no notification process is run.
     QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), bin + "/notify-send"));
+    QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), bin + "/tesseract"));
     qputenv("PATH", QFile::encodeName(bin));
     qputenv("COPY_TEST_OUTPUT", QFile::encodeName(clipboard()));
   }
@@ -96,6 +97,7 @@ private slots:
     QFile::remove(clipboard());
     QFile::remove(clipboard() + ".calls");
     qunsetenv("COPY_TEST_FAIL");
+    qunsetenv("COPY_TEST_SECRET");
   }
   void automaticSavingDefaultsOnAndPersists() {
     // An existing config with no new key keeps its current behavior.
@@ -443,9 +445,11 @@ private slots:
     QCOMPARE(contents(clipboard()), contents(studio.savedPath()));
   }
   void copyDoesNotDropAPendingRetry() {
+    qputenv("COPY_TEST_SECRET", "1");
     ImageStore store;
     Studio studio(&store, false);
     prepare(studio);
+    QTRY_COMPARE(studio.secretCount(), 1);
     studio.setKeepOriginals(true);
     // A file where the originals folder belongs makes the private backup fail
     // after the finished PNG is saved, leaving "Retry backup" to recover.
@@ -478,6 +482,9 @@ private slots:
     studio.chooseFinish(1);
     studio.copyQuick();
     studio.openEditor();
+    studio.hideSecrets();
+    QCOMPARE(studio.secretCount(), 1);
+    QVERIFY(studio.marks()->edits().isEmpty());
     QCOMPARE(studio.quickState(), QString("failed"));
     QCOMPARE(studio.recoveryAction(), QString("Retry backup"));
     QCOMPARE(studio.savedPath(), saved);
@@ -666,6 +673,16 @@ private slots:
 };
 
 int main(int argc, char **argv) {
+  if (QFileInfo(QString::fromLocal8Bit(argv[0])).fileName() == "tesseract") {
+    QFile input;
+    if (!input.open(stdin, QIODevice::ReadOnly))
+      return 2;
+    input.readAll();
+    if (qEnvironmentVariableIsSet("COPY_TEST_SECRET"))
+      std::fputs("5\t1\t1\t1\t1\t1\t10\t10\t100\t20\t99\t"
+                 "ghp_R8x2KqLm4Vn7Pz9Wt3Ys6Bd1Fh5Jc0Ae2Gk\n", stdout);
+    return 0;
+  }
   if (argc > 1 && QByteArray(argv[1]) == "--type")
     return clipboardStub(argc, argv);
   QTemporaryDir home, runtime;
