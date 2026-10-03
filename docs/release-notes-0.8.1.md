@@ -1,6 +1,6 @@
 # Omaframe 0.8.1
 
-You can now turn off **Automatically save screenshots** in Settings. Picking a
+You can now turn off **Save screenshots automatically** in Settings. Picking a
 finish then copies it to the clipboard and closes the chooser without saving
 a screenshot or private original. Automatic saving stays on by default, so
 existing users keep the same flow.
