@@ -108,6 +108,7 @@ class Studio final : public QObject {
   Q_PROPERTY(MarkDocument *marks READ marks CONSTANT)
   Q_PROPERTY(QVariantList drafts READ drafts NOTIFY changed)
   Q_PROPERTY(bool keepOriginals READ keepOriginals WRITE setKeepOriginals NOTIFY changed)
+  Q_PROPERTY(bool autoSaveScreenshots READ autoSaveScreenshots WRITE setAutoSaveScreenshots NOTIFY changed)
   Q_PROPERTY(bool editing READ editing WRITE setEditing NOTIFY changed)
   /** False until the first-run welcome has been seen or dismissed. */
   Q_PROPERTY(bool welcomed READ welcomed WRITE setWelcomed NOTIFY changed)
@@ -116,7 +117,7 @@ class Studio final : public QObject {
   Q_PROPERTY(QString originalsFolder READ originalsFolder CONSTANT)
   /** The display the pointer is on while selecting, for F. */
   Q_PROPERTY(QString pointerMonitor READ pointerMonitor WRITE setPointerMonitor NOTIFY changed)
-  /** Notify after a quick screenshot is copied and saved. */
+  /** Notify after a quick screenshot is copied. */
   Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY changed)
   Q_PROPERTY(QSize sourceSize READ sourceSize NOTIFY changed)
   /** Whether the text in this image can be read: tesseract is installed and
@@ -176,6 +177,8 @@ public:
   /** Whether each accepted capture also keeps a private, unedited copy. */
   bool keepOriginals() const;
   void setKeepOriginals(bool);
+  bool autoSaveScreenshots() const;
+  void setAutoSaveScreenshots(bool);
   bool editing() const { return m_editing; }
   bool welcomed() const;
   /** The cropped image the editor shows, and the whole capture, in pixels. */
@@ -269,6 +272,8 @@ public:
   Q_INVOKABLE void scrollCancelled();
   Q_INVOKABLE void cancelSelection();
   Q_INVOKABLE void chooseFinish(int style);
+  /** Save and copy the selected finish, regardless of automatic saving. */
+  Q_INVOKABLE void saveQuick();
   Q_INVOKABLE void openEditor();
   Q_INVOKABLE void showFinishes();
   /** Copy the capture with its edits and chosen finish, without saving it. */
@@ -307,6 +312,7 @@ private:
   void persistOptions();
   void refreshDrafts();
   void invalidateSaved();
+  void finishQuick(int style, bool save);
   void captureImpl(bool region, int monitor, bool repeat);
   /** Starts reading the text in the current image in the background, and
    *  forgets what was read from the previous one. */

@@ -282,7 +282,8 @@ void Studio::invalidateSaved() {
     m_draftDirty = true;
 }
 void Studio::setStyle(int value) {
-  if (m_busy || value == style() || value < 0 || value > 8)
+  if (m_busy || (m_quickMode && !recoveryAction().isEmpty()) ||
+      value == style() || value < 0 || value > 8)
     return;
   m_options.style = value;
   invalidateSaved();
@@ -336,6 +337,15 @@ void Studio::setWelcomed(bool value) {
 }
 bool Studio::keepOriginals() const {
   return QSettings().value("privacy/keepOriginals", false).toBool();
+}
+bool Studio::autoSaveScreenshots() const {
+  return QSettings().value("autoSaveScreenshots", true).toBool();
+}
+void Studio::setAutoSaveScreenshots(bool value) {
+  if (value == autoSaveScreenshots())
+    return;
+  QSettings().setValue("autoSaveScreenshots", value);
+  emit changed();
 }
 void Studio::setKeepOriginals(bool value) {
   if (value == keepOriginals())
@@ -1303,23 +1313,32 @@ void Studio::cancelSelection() {
   emit dismissRequested();
 }
 void Studio::chooseFinish(int value) {
+  finishQuick(value, autoSaveScreenshots());
+}
+void Studio::saveQuick() {
+  finishQuick(style(), true);
+}
+void Studio::finishQuick(int value, bool save) {
   if (!m_quickMode || (m_quickState != "choosing" && m_quickState != "failed" &&
                        m_quickState != "copy-failed"))
     return;
   if (m_busy || m_pendingFinish >= 0 || value < 0 || value > 8)
     return;
-  if (!recoveryAction().isEmpty() && value == style()) {
-    retryOutput();
+  if (!recoveryAction().isEmpty()) {
+    if (value == style())
+      retryOutput();
     return;
   }
   setStyle(value);
-  if (m_rendering)
+  if (!save)
+    copyQuick();
+  else if (m_rendering)
     m_pendingFinish = value;
   else
     accept();
 }
 void Studio::openEditor() {
-  if (m_busy || m_pendingFinish >= 0)
+  if (m_busy || m_pendingFinish >= 0 || !recoveryAction().isEmpty())
     return;
   m_quickState = "editing";
   emit changed();
@@ -1335,7 +1354,7 @@ void Studio::showFinishes() {
 Studio::Notice Studio::finishNotice() const {
   if (m_quickState == "copied")
     // Same headline as a saved screenshot; the body says where it went.
-    return {"Screenshot copied", "Saved in clipboard", m_copyPreview};
+    return {"Screenshot copied", "Copied to clipboard", m_copyPreview};
   if (m_quickState == "done" && !m_savedPath.isEmpty())
     return {"Screenshot copied",
             "Saved in " + QFileInfo(m_savedPath).absolutePath().replace(QDir::homePath(), "~"),
@@ -1343,10 +1362,10 @@ Studio::Notice Studio::finishNotice() const {
   return {};
 }
 void Studio::copyQuick() {
-  // A saved screenshot still owed its private backup keeps "Retry backup";
-  // a successful copy would clear it and lose the only way to recover.
+  // Complete a partially saved screenshot through retryOutput(), preserving
+  // its file and any private backup that is still owed.
   if (!m_quickMode || m_busy || m_pendingFinish >= 0 || m_original.isNull() ||
-      (!m_savedPath.isEmpty() && m_backupPending) ||
+      !recoveryAction().isEmpty() ||
       (m_quickState != "choosing" && m_quickState != "copy-failed" &&
        m_quickState != "failed"))
     return;
@@ -1374,16 +1393,23 @@ void Studio::copyQuick() {
     m_quickState = error.isEmpty() ? "copied" : "copy-failed";
     m_status = error.isEmpty()
                    ? "Copied to the clipboard without saving."
-                   : "Clipboard copy failed: " + error + " Press Esc to retry.";
+                   : "Clipboard copy failed: " + error + " Press Ctrl+C to retry.";
     emit changed();
     if (error.isEmpty())
       emit dismissRequested();
   });
+  const bool notificationPreview = notifications() &&
+                                  !QStandardPaths::findExecutable("notify-send").isEmpty();
   watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_marks.edits(),
-                                        options = m_options] {
+                                        options = m_options, notificationPreview] {
     // The same image accept() would save: edits and the chosen finish. A
     // fresh raster strips source metadata.
-    const QImage composed = Frame::compose(Frame::applyEdits(source, edits), options);
+    const QImage edited = Frame::applyEdits(source, edits);
+    const QSize output = Frame::outputSize(edited.size(), options, Frame::edgeRoom(edited));
+    if (qint64(output.width()) * output.height() > 80000000)
+      return CopyResult{"This canvas would exceed 80 megapixels. Use a smaller border "
+                        "or a different aspect ratio.", {}};
+    const QImage composed = Frame::compose(edited, options);
     QImage flattened(composed.size(), QImage::Format_ARGB32_Premultiplied);
     flattened.fill(Qt::transparent);
     {
@@ -1399,6 +1425,8 @@ void Studio::copyQuick() {
       return CopyResult{writer.errorString(), {}};
     CopyResult result;
     if (!copyPngBytes(png, result.error))
+      return result;
+    if (!notificationPreview)
       return result;
     // The notification shows this like a saved screenshot's thumbnail. It
     // stays in the private runtime folder, usually RAM, and the next copy

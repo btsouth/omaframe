@@ -41,13 +41,22 @@ See [the release notes](docs/release-notes-0.8.0.md).
 Press Print Screen. Click a window, drag an area, or press F for the whole
 display. If the capture bar is in the way, hold Super and drag it, or drag
 the grip at its left edge. Press H to hide or restore the bar; each new capture
-shows it again. Pick a finish with 1 to 9 or a click, then:
+shows it again. On the finish chooser:
 
-- Press Esc or **Clipboard** to copy it. Nothing is saved.
-- Press Enter or **Copy and save** to copy it and save it to the folder.
+- Click it, press its number, or press Enter to copy it. When **Save
+  screenshots automatically** is on, the file is also saved and the chooser
+  closes; when it is off, only the clipboard gets the capture.
+- Press **Ctrl+C** or **Clipboard** to copy the selected finish once without
+  saving. Press **Esc** to cancel.
+- Press **Copy and save** to save the file even when automatic saving is off.
+
+**Save screenshots automatically** is on by default. Turn it off in Settings
+to stop keeping screenshot files. This does not disable editable drafts that
+are autosaved while you edit.
 
 Paste it anywhere. Crops, marks and redactions you made in the editor are kept
-either way. If copying fails, the panel stays open; press Esc to try again. The
+either way. If copying fails, the panel stays open; Ctrl+C retries a clipboard-only
+copy, and a saved screenshot offers a retry for its unfinished step. The
 close button still cancels, and Esc while choosing an area still cancels the
 capture.
 
@@ -154,9 +163,9 @@ keeps your edits open.
 | Choosing an area | F / Tab / Esc | Whole display / switch to video / cancel |
 | Choosing an area | H | Hide or restore the capture bar |
 | Choosing an area to record | D / M | Computer sound / microphone |
-| Picking a finish | 1 to 9 | Pick that finish |
-| Picking a finish | Esc | Copy without saving |
-| Picking a finish | Enter | Copy and save |
+| Picking a finish | 1 to 9, Enter | Copy, saving a file when automatic saving is on |
+| Picking a finish | Ctrl+C | Copy the selected finish without saving |
+| Picking a finish | Esc | Cancel |
 | Picking a finish | E / R | Mark it up / retake |
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
@@ -268,7 +277,7 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs nine headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs ten headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
 

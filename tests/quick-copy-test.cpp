@@ -82,6 +82,8 @@ private slots:
     const QString bin = temp.filePath("bin");
     QVERIFY(QDir().mkpath(bin));
     QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), bin + "/wl-copy"));
+    // finishNotice() only needs availability; no notification process is run.
+    QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), bin + "/notify-send"));
     qputenv("PATH", QFile::encodeName(bin));
     qputenv("COPY_TEST_OUTPUT", QFile::encodeName(clipboard()));
   }
@@ -95,19 +97,43 @@ private slots:
     QFile::remove(clipboard() + ".calls");
     qunsetenv("COPY_TEST_FAIL");
   }
+  void automaticSavingDefaultsOnAndPersists() {
+    // An existing config with no new key keeps its current behavior.
+    QSettings().setValue("style", 4);
+    ImageStore store;
+    Studio studio(&store, false);
+    QVERIFY(studio.autoSaveScreenshots());
+    QSignalSpy changed(&studio, &Studio::changed);
+    studio.setAutoSaveScreenshots(false);
+    QCOMPARE(changed.count(), 1);
+    QVERIFY(!studio.autoSaveScreenshots());
+    studio.setAutoSaveScreenshots(false);
+    QCOMPARE(changed.count(), 1);
+    QSettings().sync();
+    Studio reopened(&store, false);
+    QVERIFY(!reopened.autoSaveScreenshots());
+    QCOMPARE(reopened.style(), 4);
+    reopened.setAutoSaveScreenshots(true);
+    QVERIFY(studio.autoSaveScreenshots());
+  }
   void chooserActions_data() {
     QTest::addColumn<QString>("action");
-    for (const QString action : {"escape", "empty", "capture-error", "close", "background", "retry",
-                                 "pick-then-escape", "click-then-escape", "enter-saves",
-                                 "save-button", "clipboard-button"})
-      QTest::newRow(qPrintable(action)) << action;
+    QTest::addColumn<bool>("autoSave");
+    for (const QString action : {"escape", "empty", "capture-error", "close", "background",
+                                 "retry", "number", "card-click", "focused-card-enter", "enter",
+                                 "save-button", "clipboard-button", "ctrl-c", "focus-ctrl-c",
+                                 "modified-c"})
+      for (bool autoSave : {false, true})
+        QTest::newRow(qPrintable(action + (autoSave ? "-save" : "-copy"))) << action << autoSave;
   }
   void chooserActions() {
     QFETCH(QString, action);
+    QFETCH(bool, autoSave);
     QQmlEngine engine;
     auto *store = new ImageStore;
     engine.addImageProvider("frames", store);
     Studio studio(store, false);
+    studio.setAutoSaveScreenshots(autoSave);
     OmarchyTheme theme(nullptr, temp.filePath("theme"), temp.filePath("theme-config"), false);
     if (action != "empty")
       prepare(studio);
@@ -129,83 +155,97 @@ private slots:
     QTest::qWait(50); // Let the offscreen scene polish its anchored layout.
     QTRY_VERIFY(chooser->activeFocusItem());
     QSignalSpy dismissed(&studio, &Studio::dismissRequested);
-    const auto button = [&](const char *name) {
-      auto *item = chooser->findChild<QQuickItem *>(name);
-      return item && item->isVisible() ? item : nullptr;
+    const auto item = [&](const QString &name) {
+      QQuickItem *found = nullptr;
+      std::function<void(QQuickItem *)> find = [&](QQuickItem *child) {
+        if (child->objectName() == name) found = child;
+        for (auto *next : child->childItems()) find(next);
+      };
+      find(chooser->contentItem());
+      return found;
     };
-    const auto pickedWithoutSaving = [&](int style) {
-      // Picking a finish only selects it. Nothing closes, copies or saves.
-      QTRY_COMPARE(studio.style(), style);
-      QTest::qWait(200);
-      QCOMPARE(dismissed.count(), 0);
-      QVERIFY(chooser->isVisible());
-      QCOMPARE(studio.quickState(), QString("choosing"));
-      QVERIFY(!QFileInfo::exists(clipboard()));
-      QVERIFY(!QDir(temp.filePath("output")).exists());
+    const auto click = [&](QQuickItem *control) {
+      QVERIFY(control);
+      QVERIFY(control->isVisible());
+      QVERIFY(control->isEnabled());
+      const QPoint center = control->mapToScene(QPointF(control->width() / 2,
+                                                        control->height() / 2)).toPoint();
+      QTest::mouseClick(chooser.get(), Qt::LeftButton, Qt::NoModifier, center);
     };
+    int expectedStyle = studio.style();
     if (action == "close")
       chooser->close();
     else if (action == "background")
       QTest::mouseClick(chooser.get(), Qt::LeftButton, Qt::NoModifier, QPoint(2, 2));
-    else if (action == "pick-then-escape") {
+    else if (action == "number") {
+      expectedStyle = 1;
       QTest::keyClick(chooser.get(), Qt::Key_2);
-      pickedWithoutSaving(1);
-      QTest::keyClick(chooser.get(), Qt::Key_Escape);
-    } else if (action == "click-then-escape") {
-      // Repeater delegates are visual children only, so walk the item tree.
-      QQuickItem *card = nullptr;
-      std::function<void(QQuickItem *)> find = [&](QQuickItem *item) {
-        if (item->objectName() == "finish3")
-          card = item;
-        for (auto *child : item->childItems())
-          find(child);
-      };
-      find(chooser->contentItem());
-      QVERIFY(card);
-      QVERIFY(QMetaObject::invokeMethod(card, "clicked"));
-      pickedWithoutSaving(3);
-      QTest::keyClick(chooser.get(), Qt::Key_Escape);
-    } else if (action == "enter-saves") {
-      QTest::keyClick(chooser.get(), Qt::Key_2);
-      pickedWithoutSaving(1);
+    } else if (action == "card-click") {
+      expectedStyle = 3;
+      click(item("finish3"));
+    } else if (action == "focused-card-enter") {
+      expectedStyle = 3;
+      QVERIFY(item("finish3"));
+      item("finish3")->forceActiveFocus();
       QTest::keyClick(chooser.get(), Qt::Key_Return);
-    } else if (action == "clipboard-button") {
-      QVERIFY2(button("clipboardButton"), "The chooser needs a visible Clipboard button.");
-      QVERIFY(QMetaObject::invokeMethod(button("clipboardButton"), "clicked"));
-    } else if (action == "save-button") {
-      QVERIFY2(button("saveButton"), "The chooser needs a visible Save and copy button.");
-      QVERIFY(QMetaObject::invokeMethod(button("saveButton"), "clicked"));
-    } else {
+    } else if (action == "enter")
+      QTest::keyClick(chooser.get(), Qt::Key_Return);
+    else if (action == "clipboard-button")
+      click(item("clipboardButton"));
+    else if (action == "save-button")
+      click(item("saveButton"));
+    else if (action == "modified-c") {
+      QTest::keyClick(chooser.get(), Qt::Key_C, Qt::ControlModifier | Qt::AltModifier);
+      QTest::qWait(100);
+      QCOMPARE(dismissed.count(), 0);
+      QCOMPARE(studio.quickState(), QString("choosing"));
+      QVERIFY(!QFileInfo::exists(clipboard()));
+      QTest::keyClick(chooser.get(), Qt::Key_Escape);
+    } else if (action == "ctrl-c" || action == "focus-ctrl-c" || action == "retry") {
+      if (action == "focus-ctrl-c") {
+        QVERIFY(item("finish3"));
+        item("finish3")->forceActiveFocus();
+      }
       if (action == "retry")
         qputenv("COPY_TEST_FAIL", "1");
+      QTest::keyClick(chooser.get(), Qt::Key_C, Qt::ControlModifier);
+    } else
       QTest::keyClick(chooser.get(), Qt::Key_Escape);
-    }
     if (action == "retry") {
       QTRY_VERIFY_WITH_TIMEOUT(!studio.busy(), 15000);
       QCOMPARE(dismissed.count(), 0);
       QCOMPARE(studio.quickState(), QString("copy-failed"));
       QVERIFY(chooser->isVisible());
       bool visibleError = false;
-      for (auto *item : chooser->findChildren<QQuickItem *>())
-        visibleError |= item->isVisible() && item->property("text").toString() == studio.status();
+      for (auto *child : chooser->findChildren<QQuickItem *>())
+        visibleError |= child->isVisible() && child->property("text").toString() == studio.status();
       QVERIFY2(visibleError, "The copy failure must be visible in the chooser.");
       qunsetenv("COPY_TEST_FAIL");
-      QTest::keyClick(chooser.get(), Qt::Key_Escape);
+      QTest::keyClick(chooser.get(), Qt::Key_C, Qt::ControlModifier);
     }
     QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
-    const bool saved = action == "enter-saves" || action == "save-button";
-    const bool copied = saved || action == "escape" || action == "retry" ||
-                        action == "pick-then-escape" || action == "click-then-escape" ||
-                        action == "clipboard-button";
+    const bool defaultAction = action == "number" || action == "card-click" ||
+                               action == "focused-card-enter" || action == "enter";
+    const bool saved = action == "save-button" || (autoSave && defaultAction);
+    const bool copied = defaultAction || saved || action == "retry" || action == "ctrl-c" ||
+                        action == "focus-ctrl-c" || action == "clipboard-button";
     QCOMPARE(studio.quickState(),
              saved ? QString("done") : copied ? QString("copied") : QString("cancelled"));
+    QCOMPARE(studio.style(), expectedStyle);
     QCOMPARE(QFileInfo::exists(clipboard()), copied);
     QCOMPARE(QDir(temp.filePath("output")).exists(), saved);
     QCOMPARE(studio.savedPath().isEmpty(), !saved);
+    QCOMPARE(studio.autoSaveScreenshots(), autoSave); // Overrides never change the preference.
     if (saved)
       QCOMPARE(contents(clipboard()), contents(studio.savedPath()));
+    if (copied) {
+      const QImage expected = Frame::compose(captureImage(), {expectedStyle, studio.padding(), studio.aspect()});
+      QCOMPARE(QImage(clipboard()), expected.convertToFormat(QImage::Format_ARGB32));
+      QCOMPARE(contents(clipboard() + ".calls"),
+               action == "retry" ? QByteArray("copy\ncopy\n") : QByteArray("copy\n"));
+    }
   }
-  void escCopiesTheChosenFinish() {
+  void copiesTheChosenFinish() {
     ImageStore store;
     Studio studio(&store, false);
     prepare(studio);
@@ -243,7 +283,7 @@ private slots:
     QCOMPARE(dismissed.count(), 0);
     QCOMPARE(studio.quickState(), QString("copy-failed"));
     QVERIFY(studio.status().contains("wl-copy"));
-    QVERIFY(studio.status().contains("Esc to retry"));
+    QVERIFY(studio.status().contains("Ctrl+C to retry"));
     QVERIFY(studio.savedPath().isEmpty());
     QVERIFY(studio.recoveryAction().isEmpty());
     QVERIFY(!QDir(studio.outputDirectory()).exists());
@@ -365,6 +405,7 @@ private slots:
     ImageStore store;
     Studio studio(&store, false);
     prepare(studio);
+    studio.setAutoSaveScreenshots(false); // Explicit editor saves still save.
     studio.openEditor();
     studio.marks()->edit("redact", 0.5, 0, 1, 1);
     studio.marks()->edit("crop", 0.25, 0, 0.75, 1);
@@ -430,8 +471,61 @@ private slots:
     QCOMPARE(studio.recoveryAction(), QString("Retry backup"));
     QCOMPARE(studio.savedPath(), saved);
     QCOMPARE(contents(clipboard() + ".calls"), callsBefore);
+    // Changing the preference or finish must not discard an outstanding backup.
+    studio.setAutoSaveScreenshots(false);
+    studio.setStyle(1);
+    QCOMPARE(studio.style(), 0);
+    studio.chooseFinish(1);
+    studio.copyQuick();
+    studio.openEditor();
+    QCOMPARE(studio.quickState(), QString("failed"));
+    QCOMPARE(studio.recoveryAction(), QString("Retry backup"));
+    QCOMPARE(studio.savedPath(), saved);
+    QCOMPARE(contents(clipboard() + ".calls"), callsBefore);
     QVERIFY(blocker.remove());
-    studio.setKeepOriginals(false);
+    studio.chooseFinish(0); // The already-requested save is completed, even with the setting off.
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("done"), 15000);
+    QCOMPARE(studio.savedPath(), saved);
+    QVERIFY(QFileInfo::exists(originals));
+  }
+  void pendingSavedCopyCannotBeReplacedByCopyOnly() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    qputenv("COPY_TEST_FAIL", "1");
+    studio.chooseFinish(0);
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("failed"), 15000);
+    QCOMPARE(studio.recoveryAction(), QString("Retry copy"));
+    const QString saved = studio.savedPath();
+    studio.copyQuick();
+    QCOMPARE(studio.savedPath(), saved);
+    QCOMPARE(studio.quickState(), QString("failed"));
+    qunsetenv("COPY_TEST_FAIL");
+    studio.setAutoSaveScreenshots(false);
+    studio.chooseFinish(0);
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("done"), 15000);
+    QCOMPARE(studio.savedPath(), saved);
+    QCOMPARE(contents(clipboard()), contents(saved));
+  }
+  void copyRejectsOversizedCanvasAndCanRecover() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    QImage tall(160, 12000, QImage::Format_ARGB32_Premultiplied);
+    tall.fill(QColor("#446688"));
+    studio.scrollFinished(tall, false, true);
+    studio.setAspect(1); // Small source, but a square finish would exceed 144 megapixels.
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 15000);
+    studio.copyQuick();
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("copy-failed"), 15000);
+    QVERIFY(studio.status().contains("80 megapixels"));
+    QVERIFY(!QFileInfo::exists(clipboard()));
+    QVERIFY(!QDir(studio.outputDirectory()).exists());
+    QVERIFY(studio.savedPath().isEmpty());
+    studio.setAspect(0);
+    studio.copyQuick();
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("copied"), 15000);
+    QVERIFY(!QImage(clipboard()).isNull());
   }
   void missingClipboardToolStaysOpen() {
     ImageStore store;
@@ -444,7 +538,7 @@ private slots:
     QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), stub));
     QCOMPARE(studio.quickState(), QString("copy-failed"));
     QVERIFY(studio.status().contains("installed"));
-    QVERIFY(studio.status().contains("Esc to retry"));
+    QVERIFY(studio.status().contains("Ctrl+C to retry"));
     QVERIFY(studio.savedPath().isEmpty());
     QVERIFY(!QFileInfo::exists(clipboard()));
   }
@@ -462,7 +556,7 @@ private slots:
     QTRY_COMPARE_WITH_TIMEOUT(copiedOnly.quickState(), QString("copied"), 15000);
     const auto copied = copiedOnly.finishNotice();
     QCOMPARE(copied.summary, QString("Screenshot copied"));
-    QCOMPARE(copied.body, QString("Saved in clipboard"));
+    QCOMPARE(copied.body, QString("Copied to clipboard"));
     // The preview looks like a saved screenshot's, but lives in the private
     // runtime folder (RAM on most systems), never under HOME.
     const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
@@ -495,23 +589,58 @@ private slots:
     cancelled.dismissQuick();
     QVERIFY(cancelled.finishNotice().summary.isEmpty());
   }
+  void copyWithoutNotificationDoesNotWriteAPreview_data() {
+    QTest::addColumn<bool>("enabled");
+    QTest::addColumn<bool>("available");
+    QTest::newRow("disabled") << false << true;
+    QTest::newRow("unavailable") << true << false;
+    QTest::newRow("disabled-and-unavailable") << false << false;
+  }
+  void copyWithoutNotificationDoesNotWriteAPreview() {
+    QFETCH(bool, enabled);
+    QFETCH(bool, available);
+    const QString helper = temp.filePath("bin/notify-send");
+    if (!available)
+      QVERIFY(QFile::remove(helper));
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.setNotifications(enabled);
+    const auto runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    const auto before = filesUnder(runtime);
+    studio.copyQuick();
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), QString("copied"), 15000);
+    QVERIFY(studio.finishNotice().image.isEmpty());
+    QCOMPARE(filesUnder(runtime), before);
+    if (!available)
+      QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), helper));
+  }
   void copiesRawPixelsWithoutSaving_data() {
     QTest::addColumn<bool>("keepOriginals");
-    QTest::newRow("no-private-backup") << false;
-    QTest::newRow("private-backup-enabled") << true;
+    QTest::addColumn<bool>("automatic");
+    for (bool keepOriginals : {false, true})
+      for (bool automatic : {false, true})
+        QTest::newRow(qPrintable(QString("originals-%1-automatic-%2").arg(keepOriginals).arg(automatic)))
+            << keepOriginals << automatic;
   }
   void copiesRawPixelsWithoutSaving() {
     QFETCH(bool, keepOriginals);
+    QFETCH(bool, automatic);
     ImageStore store;
     Studio studio(&store, false);
     prepare(studio);
     studio.setStyle(8); // Raw: the copy is exactly the source pixels.
     QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 15000);
     studio.setKeepOriginals(keepOriginals);
+    if (automatic)
+      studio.setAutoSaveScreenshots(false);
     QSettings().sync();
     const auto before = filesUnder(QDir::homePath());
     QSignalSpy dismissed(&studio, &Studio::dismissRequested);
-    QVERIFY(QMetaObject::invokeMethod(&studio, "copyQuick"));
+    if (automatic) {
+      studio.chooseFinish(8);
+    } else
+      studio.copyQuick();
     QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
     QCOMPARE(studio.quickState(), QString("copied"));
     QVERIFY(!studio.busy());

@@ -6,10 +6,11 @@ a GitHub-hosted runner, builds the app and every test binary, and checks the
 CMake install layout and desktop entry. It uploads CTest results and the test
 log, including when tests fail. It does not publish packages or releases.
 
-Nine CTest suites have the `headless` label:
+Ten CTest suites have the `headless` label:
 
 | Suite | Coverage |
 | --- | --- |
+| quick-copy | Finish chooser actions, clipboard-only copies, failure retry and guards for busy, empty or cancelled captures |
 | navigation | Unsaved-edit decisions, repeated commands, save completion, failed-save retry and cancellation |
 | recording | Recorder lifecycle, readiness, pause/resume, failure handling, stop placement and shortcut setup that preserves custom bindings, with stub tools |
 | displays | Display geometry, window targets and powered-off display filtering from fixtures |
@@ -33,7 +34,7 @@ hosted CI. No recognition assertions are removed from that suite.
 
 The `pipelines` suite has the `desktop` label because it exercises native
 Wayland capture and clipboard handoff. It is not run in hosted CI. Run all
-eleven suites locally inside omabox:
+twelve suites locally inside omabox:
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
