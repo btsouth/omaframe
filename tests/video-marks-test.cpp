@@ -10,6 +10,7 @@
 #include <QScopeGuard>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -347,6 +348,9 @@ private slots:
     QCoreApplication::setOrganizationName("Omaframe-test");
     QCoreApplication::setApplicationName("VideoMarks");
     QSettings().clear();
+    // Drafts from an earlier run would be found before this run's own.
+    QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .removeRecursively();
     QVERIFY(temp.isValid());
     plain = temp.filePath("plain.mp4");
     pattern = temp.filePath("pattern.mp4");
