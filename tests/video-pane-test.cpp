@@ -317,6 +317,12 @@ private slots:
     QTest::mouseRelease(&scene.window, Qt::LeftButton, Qt::NoModifier, at(0.55, 0.55));
     QTRY_COMPARE(scene.video.marks()->edits().size(), 2);
     QCOMPARE(scene.video.marks()->edits()[1].type, QString("box"));
+    // Step places a number with a click, so a click inside a box still places one.
+    scene.video.marks()->clearSelection();
+    QVERIFY(scene.pane->setProperty("tool", "step"));
+    QTest::mouseClick(&scene.window, Qt::LeftButton, Qt::NoModifier, at(0.3, 0.6));
+    QTRY_COMPARE(scene.video.marks()->edits().size(), 3);
+    QCOMPARE(scene.video.marks()->edits()[2].type, QString("step"));
   }
   void timingDrag_data() {
     QTest::addColumn<bool>("start");

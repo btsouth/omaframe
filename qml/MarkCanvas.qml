@@ -256,7 +256,8 @@ Item {
                 strokePoints = [];
             } else if (interaction === "newText")
                 textEditor.create(startX / width, startY / height);
-            else if (interaction === "draw" && pressedInside >= 0 && !moved)
+            // Step places its number with a click, so it never selects instead.
+            else if (interaction === "draw" && pressedInside >= 0 && !moved && editSurface.tool !== "step")
                 editSurface.doc.select(pressedInside);
             else if (interaction === "draw") {
                 if (editSurface.tool === "crop" && editSurface.cropCurrentView) {
