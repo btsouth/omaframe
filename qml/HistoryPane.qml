@@ -28,10 +28,9 @@ ColumnLayout {
         confirmation.message = (confirmation.isDraft ? "Delete this editable draft? Saved exports stay in place.\n" : "Move this one saved file to Trash? Drafts and camera files stay in place.\n") + history.pathAt(list.currentIndex);
         confirmation.open();
     }
-    onVisibleChanged: {
-        if (visible) { history.refresh(); list.forceActiveFocus(); }
-        else history.setVisibleRange(0, -1);
-    }
+    Component.onCompleted: { history.refresh(); list.forceActiveFocus(); }
+    Component.onDestruction: history.setVisibleRange(0, -1)
+    onVisibleChanged: { if (!visible) history.setVisibleRange(0, -1); }
     Connections {
         target: history
         function onModelReset() { list.currentIndex = Math.min(Math.max(0, list.currentIndex), list.count - 1); Qt.callLater(pane.visibleRows); }

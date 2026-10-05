@@ -63,7 +63,7 @@ ApplicationWindow {
     }
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
     function requestNavigation(command, file) {
-        if (studio.busy || video.busy || navigation.saving || (command === "history" && recorder.active())) return;
+        if (studio.busy || video.busy || navigation.saving || (command === "history" && recorder.active)) return;
         studio.cancelTextCopy();
         studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
@@ -784,13 +784,17 @@ ApplicationWindow {
             }
         }
 
-        HistoryPane {
+        Loader {
             id: historyPane
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 24
-            visible: root.historyMode
-            onHomeRequested: root.requestNavigation("home")
+            visible: active
+            active: root.historyMode
+            readonly property bool popupOpen: item ? item.popupOpen : false
+            sourceComponent: Component {
+                HistoryPane { onHomeRequested: root.requestNavigation("home") }
+            }
         }
 
         // Start screen: no image or video open.

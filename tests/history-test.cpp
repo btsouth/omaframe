@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -19,7 +20,9 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include <QUuid>
+#include <QtConcurrent>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -286,6 +289,32 @@ private slots:
     QVERIFY(
         History::thumbnail(changed, folder + "/cancelled", cancel).isNull());
     QVERIFY(!QFileInfo::exists(folder + "/cancelled"));
+  }
+  void cancelAnActiveThumbnailWorker() {
+    const auto input = folder + "/Recording-slow.mp4";
+    write(input);
+    const auto e = scan().first();
+    const auto tools = folder + "/tools";
+    QVERIFY(QDir().mkpath(tools));
+    write(tools + "/ffmpeg",
+          "#!/usr/bin/python3\nimport time\ntime.sleep(10)\n");
+    QVERIFY(QFile::setPermissions(tools + "/ffmpeg", QFile::ReadOwner |
+                                                         QFile::WriteOwner |
+                                                         QFile::ExeOwner));
+    const auto previousPath = qgetenv("PATH");
+    qputenv("PATH", tools.toUtf8() + ':' + previousPath);
+    const auto restore = qScopeGuard([&] { qputenv("PATH", previousPath); });
+    QElapsedTimer elapsed;
+    elapsed.start();
+    QFutureWatcher<QImage> watcher;
+    watcher.setFuture(QtConcurrent::run([&, e] {
+      return History::thumbnail(e, folder + "/late-cache", cancel);
+    }));
+    QTimer::singleShot(150, this, [this] { *cancel = true; });
+    QTRY_VERIFY_WITH_TIMEOUT(watcher.isFinished(), 2000);
+    QVERIFY(watcher.result().isNull());
+    QVERIFY(elapsed.elapsed() < 2000);
+    QVERIFY(!QFileInfo::exists(folder + "/late-cache"));
   }
   void publicationAndCameraNames() {
     const auto final = folder + "/Recording-2026-10-05_12-30-00-abcdef.mp4";
