@@ -742,8 +742,10 @@ QVariantMap MarkDocument::previewConstrainedTransform(int handle, double x,
                          : handle == 1 ? r.bottomLeft()
                          : handle == 2 ? r.topLeft()
                                        : r.topRight();
+  // A degenerate box has no proportion to keep; fall back to a square.
+  const double ratio = (r.width() * width) / (r.height() * height);
   const double aspect =
-      vector ? 1. : (r.width() * width) / (r.height() * height);
+      vector || !std::isfinite(ratio) || ratio <= 0. ? 1. : ratio;
   const auto result = MarkConstraints::resolve(original.type, anchor, {x, y},
                                                {width, height}, true, aspect);
   if (result.valid)
