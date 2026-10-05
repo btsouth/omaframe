@@ -6,7 +6,13 @@ namespace CaptureDismissal {
 inline const QString scope = QStringLiteral("omaframe-capture-countdown");
 // Install before mapping. A failed compositor rule must not start a timer.
 bool prepare(QString &error);
+int frameWait(QScreen *screen);
+void restoreAnimations();
+void clearDesktop(QObject *owner, QScreen *screen,
+                  std::function<void(bool)> done);
 // Destroy the platform surface, acknowledge its removal, then cross two
 // compositor frames. Failure is bounded and never falls through to a grab.
-void clear(QQuickWindow *badge, QObject *owner, std::function<void(bool)> done);
+void clear(
+    QQuickWindow *badge, QObject *owner, std::function<void(bool)> done,
+    std::function<bool()> current = [] { return true; });
 } // namespace CaptureDismissal

@@ -677,17 +677,26 @@ int main(int argc, char **argv) {
           studio.delayDesktopCleared(generation, false);
           return;
         }
-        const bool visible = (window && window->isVisible()) ||
-                             (chooser && chooser->isVisible()) ||
-                             !selections.isEmpty();
-        hideCaptureSurfaces();
-        // The selector's exclusive keyboard layer is destroyed by
-        // clearSelections. Flush Qt's unmaps before the existing UI dismissal
-        // interval elapses.
-        QTimer::singleShot(visible ? 250 : 0, &studio, [&, generation] {
-          studio.delayDesktopCleared(generation, true);
-        });
-      });
+        // Allow the compositor to apply the dismissal rules before unmapping.
+        QTimer::singleShot(
+            CaptureDismissal::frameWait(QGuiApplication::primaryScreen()),
+            &studio, [&, generation] {
+              if (!studio.currentDelay(generation))
+                return;
+              hideCaptureSurfaces();
+              if (window)
+                window->destroy();
+              if (chooser)
+                chooser->destroy();
+              CaptureDismissal::clearDesktop(
+                  &studio, QGuiApplication::primaryScreen(),
+                  [&, generation](bool success) {
+                    if (studio.currentDelay(generation))
+                      CaptureDismissal::restoreAnimations();
+                    studio.delayDesktopCleared(generation, success);
+                  });
+            });
+  });
   QObject::connect(&studio, &Studio::delayBadgeRequested, &app, [&] {
     if (!studio.delayedCapture())
       return;
@@ -738,16 +747,21 @@ int main(int argc, char **argv) {
           studio.delayBadgeCleared(generation, false);
           return;
         }
-        CaptureDismissal::clear(captureCountdown, &studio,
-                                [&, generation](bool success) {
-                                  studio.delayBadgeCleared(generation, success);
-                                });
+        CaptureDismissal::clear(
+            captureCountdown, &studio,
+            [&, generation](bool success) {
+              if (studio.currentDelay(generation))
+                CaptureDismissal::restoreAnimations();
+              studio.delayBadgeCleared(generation, success);
+            },
+            [&, generation] { return studio.currentDelay(generation); });
       });
   QObject::connect(&studio, &Studio::delayCancelled, &app, [&] {
     if (captureCountdown) {
       captureCountdown->hide();
       captureCountdown->destroy();
     }
+    CaptureDismissal::restoreAnimations();
     hideCaptureSurfaces();
     const bool returning = studio.takeReturnToStudio();
     studio.leaveQuickMode();
