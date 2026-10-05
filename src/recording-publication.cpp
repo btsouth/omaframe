@@ -6,7 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
-#include <QSaveFile>
+#include <QTemporaryFile>
+#include <QUuid>
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/stat.h>
@@ -98,16 +99,26 @@ QString Recording::publishPart(const QString &part, const QString &final,
     auto doc = QJsonDocument::fromJson(input.readAll()).object();
     input.close();
     if (doc.value("version").toInt() != 1) {
-      rollback();
-      return {};
+      if (!incomplete) {
+        rollback();
+        return {};
+      }
+      doc = QJsonObject{{"version", 1}, {"missing", true}};
     }
     if (movedCamera)
       doc.insert("file", QFileInfo(newCamera).fileName());
-    QSaveFile output(newSidecar);
+    QTemporaryFile output(
+        QFileInfo(final).dir().filePath(".omaframe-camera-XXXXXX"));
     const auto bytes = QJsonDocument(doc).toJson(QJsonDocument::Compact);
-    if (QFileInfo::exists(newSidecar) || !output.open(QIODevice::WriteOnly) ||
+    if (!output.open() ||
         !output.setPermissions(QFile::ReadOwner | QFile::WriteOwner) ||
-        output.write(bytes) != bytes.size() || !output.commit()) {
+        output.write(bytes) != bytes.size() || !output.flush()) {
+      rollback();
+      return {};
+    }
+    const auto temporary = output.fileName();
+    output.close();
+    if (!renameFile(temporary, newSidecar)) {
       rollback();
       return {};
     }
@@ -138,7 +149,11 @@ void Recording::recoverParts(const QString &folder, qint64 minimumAgeSeconds) {
             minimumAgeSeconds ||
         openByRecorder(file.absoluteFilePath()))
       continue;
-    publishPart(file.absoluteFilePath(),
-                file.dir().filePath(match.captured(1) + ".mp4"), true);
+    auto final = file.dir().filePath(match.captured(1) + ".mp4");
+    if (QFileInfo::exists(final.left(final.size() - 4) + "-incomplete.mp4"))
+      final = file.dir().filePath(
+          match.captured(1) + "-" +
+          QUuid::createUuid().toString(QUuid::Id128).left(6) + ".mp4");
+    publishPart(file.absoluteFilePath(), final, true);
   }
 }

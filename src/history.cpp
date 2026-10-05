@@ -98,7 +98,7 @@ bool History::unchanged(const Entry &e) {
   return true;
 }
 QString History::discoveredKind(const QString &name) {
-  if (name.startsWith('.') || name.contains("-webcam") ||
+  if (name.startsWith('.') || name.endsWith("-webcam.mp4") ||
       name.contains(".part") || name.contains(".cleaning"))
     return {};
   static const QRegularExpression shot("^Omaframe-[^/]+\\.png$");
@@ -668,6 +668,8 @@ bool CaptureHistoryModel::action(int row, const QString &action,
         const auto bytes = readFile(e.path, e.identity, 256 * 1024 * 1024);
         if (bytes.isEmpty()) {
           delete mime;
+          m_status = "Could not read the saved PNG. It may have changed.";
+          emit changed();
           return false;
         }
         mime->setData("image/png", bytes);

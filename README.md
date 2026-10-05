@@ -143,7 +143,7 @@ Version 0.5.0 adds video crop, recovery drafts, camera overlay and GIF export:
 
 - Press C and drag a rectangle to crop the whole clip. Press V to preview it,
   or **Reset crop** to restore the full frame.
-- Edits are kept automatically in **Recent edits**, including trim, cuts,
+- Edits are kept automatically in **History**, including trim, cuts,
   sound, marks, crop and camera placement. Reopen a draft to continue. Keep
   the original video in place; drafts store edits without copying large videos.
 - Turn on **Camera overlay** in recording Options and choose your camera.
@@ -162,6 +162,15 @@ keeps your edits open.
 <p align="center"><img src="docs/media/record.gif" width="800" alt="Recording an area with the Stop button outside it, cutting a part in review and copying the clip"></p>
 
 [Watch the full 50-second demo](https://github.com/btsouth/omaframe/releases/download/v0.2.1/omaframe-demo.mp4)
+
+## History
+
+Find saved captures and editable drafts in History from the toolbar, with Ctrl+H, or with `omaframe --history`. Filter by type, search filenames, and refresh to see folder changes. Previously used save folders are scanned too; forget them in Settings. Only matching files directly in those folders appear.
+
+Copy again uses the saved PNG bytes or a video file link. Open captures in the editor, resume linked drafts, reveal files, or move one file to Trash after confirmation. Incomplete recordings carry an Incomplete badge.
+
+Clipboard-only copies add no history item. Editable drafts may remain. Screenshot draft previews apply the saved edits and finish. Video previews use a bounded private JPEG cache; history keeps no extra full captures.
+
 
 ## Keys
 
@@ -204,7 +213,7 @@ them the button and T are simply not there. Set `OMARCHY_OCR_LANGS` (for
 example `eng+deu`) to read other languages, as Omarchy's own text capture does.
 
 Screenshot drafts keep a private copy of the capture. Video drafts keep only
-edits and refer to the original video. Both appear under **Recent edits**.
+edits and refer to the original video. Both appear under **History**.
 Deleting a video draft leaves the original video and exports in place.
 If a screenshot draft cannot be saved, the studio keeps the image and edits
 open and offers retry or discard before you leave.
@@ -314,11 +323,3 @@ MIT. The native Wayland capture code is adapted from Omasnap at
 license is kept in [docs/OMASNAP-LICENSE](docs/OMASNAP-LICENSE). MatteShot and
 Omaroll informed the workflow and style; Omaframe has its own interface and
 renderer.
-
-### History
-
-Find saved captures and editable drafts in History from the toolbar, with Ctrl+H, or with `omaframe --history`. Filter by type, search filenames, and refresh to see folder changes. Previously used save folders are scanned too; forget them in Settings. Only matching files directly in those folders appear.
-
-Copy again uses the saved PNG bytes or a video file link. Open captures in the editor, resume linked drafts, reveal files, or move one file to Trash after confirmation. Incomplete recordings carry an Incomplete badge.
-
-Clipboard-only copies add no history item. Editable drafts may remain. Screenshot draft previews apply the saved edits and finish. Video previews use a bounded private JPEG cache; history keeps no extra full captures.

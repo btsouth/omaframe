@@ -70,9 +70,9 @@ private slots:
     QTest::addColumn<QString>("kind");
     for (const auto &s : {"Omaframe-2026.png", "Omaframe-a.png"})
       QTest::newRow(s) << QString(s) << QString("Screenshot");
-    for (const auto &s :
-         {"Recording-2026.mp4", "Recording-a-incomplete.mp4",
-          "movie-edited.mp4", "movie-edited-2.gif", "movie-edited-10.mp4"})
+    for (const auto &s : {"Recording-2026.mp4", "Recording-a-incomplete.mp4",
+                          "movie-edited.mp4", "movie-edited-2.gif",
+                          "movie-edited-10.mp4", "my-webcam-edited.mp4"})
       QTest::newRow(s) << QString(s) << QString("Recording");
     for (const auto &s :
          {".Omaframe-a.png", ".Recording-a.part.mp4",
@@ -342,6 +342,24 @@ private slots:
     const auto rows = scan();
     QCOMPARE(rows.size(), 2);
     QVERIFY(rows[0].incomplete || rows[1].incomplete);
+  }
+  void orphanRecoveryKeepsCollisionsAndDamagedMetadata() {
+    const auto final = folder + "/Recording-2026-10-05_12-30-00-abcdef.mp4";
+    const auto part = Recording::partPath(final);
+    const auto incomplete = final.left(final.size() - 4) + "-incomplete.mp4";
+    write(incomplete, "older recording");
+    write(part, "crashed recording");
+    write(part + ".camera.json", "damaged metadata");
+    old(part);
+    Recording::recoverParts(folder);
+    QVERIFY(!QFileInfo::exists(part));
+    QFile older(incomplete);
+    QVERIFY(older.open(QIODevice::ReadOnly));
+    QCOMPARE(older.readAll(), QByteArray("older recording"));
+    const auto rows = scan();
+    QCOMPARE(rows.size(), 2);
+    for (const auto &e : rows)
+      QVERIFY(e.incomplete);
   }
   void orphanRecoveryProtectsWritersAndRecentParts() {
     const auto final = folder + "/Recording-2026-10-05_12-30-00-abcdef.mp4";
