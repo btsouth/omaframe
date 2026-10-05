@@ -92,7 +92,7 @@ may repeat.
 The result uses the same finishes and editor as an ordinary screenshot. Long
 pages fit to width; use Shift+wheel or the scrollbar to reach the bottom while editing.
 Capture stops at 32000 pixels along the scrolling direction, 200 MiB of image
-pixels, or 200 MiB of retained frame bands. Tiny scroll steps can reach the
+pixels, or 400 MiB of retained frame bands. Tiny scroll steps can reach the
 frame-band limit first. If it loses track of the page, Omaframe switches to
 manual scrolling. A scrollbar is removed when its gutter is verified; window
 controls are preserved. Completely repeating content uses wheel cadence and

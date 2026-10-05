@@ -531,8 +531,8 @@ bool StitchAccumulator::pushOriented(const QImage &image, int delta,
   // be finished: the caller reports this and the user stitches what they have.
   if (wouldExceedBudget(delta)) {
     error = QStringLiteral("scroll capture reached its length or memory limit "
-                           "(%1 MB); finish to keep what was captured")
-                .arg(kMaxStitchedBytes / (1024 * 1024));
+                           "(200 MiB output, 400 MiB retained); finish to keep "
+                           "what was captured");
     return false;
   }
 

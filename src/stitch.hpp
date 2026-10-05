@@ -35,8 +35,10 @@ inline constexpr int kMaxStitchedEdge = 32000;
 /// capture is not refused at allocation time, it is OOM-killed part-way
 /// through assembly, after the user has spent a minute scrolling.
 inline constexpr long long kMaxStitchedBytes = 200LL * 1024 * 1024;
-/// Retained frame bands have their own cap, including footer analysis rows.
-inline constexpr long long kMaxRetainedBytes = 200LL * 1024 * 1024;
+/// Allow analysis rows as well as output pixels. Ordinary steps at least as
+/// deep as the analysis edge fit within twice the output budget; tiny steps
+/// cannot retain arbitrarily many overlapping bands.
+inline constexpr long long kMaxRetainedBytes = 2 * kMaxStitchedBytes;
 inline constexpr long long kMaxStitchedPixels = kMaxStitchedBytes / 4;
 /// Whether growing a capture of `crossLen` to `axisExtent` along the motion
 /// axis would pass that budget.

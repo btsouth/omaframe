@@ -770,19 +770,19 @@ bool runStitchChecks() {
   // must stop before the output-length cap, preserving all verified pixels.
   {
     const int width = 4096, viewport = 1024;
-    const QImage doc = makeTexture(width, viewport + 160);
+    const QImage doc = makeTexture(width, viewport + 260);
     QString error;
     bool ok = false;
     StitchAccumulator acc(doc.copy(0, 0, width, viewport), Axis::Vertical, ok, error);
     if (!ok)
       CHECK_FAILED;
     int top = 0;
-    while (!acc.wouldExceedBudget(2, 2) && top < 160) {
+    while (!acc.wouldExceedBudget(2, 2) && top < 260) {
       ++top;
       if (!acc.pushForward(doc.copy(0, top, width, viewport), 1, error))
         CHECK_FAILED;
     }
-    if (top == 160 || exceedsStitchBudget(width, acc.extent() + 2))
+    if (top == 260 || exceedsStitchBudget(width, acc.extent() + 2))
       CHECK_FAILED;
     // A pair is refused together even when one of its bands still fits.
     if (acc.wouldExceedBudget(1) || !acc.wouldExceedBudget(2, 2))
