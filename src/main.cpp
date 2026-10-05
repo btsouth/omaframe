@@ -693,10 +693,11 @@ int main(int argc, char **argv) {
   QObject::connect(&app, &QGuiApplication::screenRemoved, &recorder,
                    [&](QScreen *) { recorder.layoutChanged(); });
   CaptureDismissal::Boundary dismissal(&app);
-  dismissal.recover([&](bool success) {
+  // This runs on every launch, so only log: a delayed capture retries the
+  // restore itself and reports a real failure to the user.
+  dismissal.recover([](bool success) {
     if (!success)
-      notify("Screenshot delay unavailable",
-             "Could not restore Omaframe's dismissal animations.", {});
+      qWarning("Could not restore Omaframe's dismissal animations at startup.");
   });
   QObject::connect(
       &studio, &Studio::delayHideRequested, &app, [&](quint64 generation) {
