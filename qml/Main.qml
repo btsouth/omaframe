@@ -63,6 +63,9 @@ ApplicationWindow {
     }
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
     function requestNavigation(command, file) {
+        requestCaptureNavigation(command, file, -1);
+    }
+    function requestCaptureNavigation(command, file, delaySeconds) {
         if (studio.busy || video.busy || navigation.saving || (command === "history" && recorder.active)) return;
         studio.cancelTextCopy();
         studio.cancelPendingAccept();
@@ -82,7 +85,7 @@ ApplicationWindow {
             videoPane.syncDraft();
             video.saveDraftNow();
         } else studio.saveDraftNow();
-        navigation.request(command, file || "");
+        navigation.request(command, file || "", delaySeconds === undefined ? -1 : delaySeconds);
     }
     Binding { target: navigation; property: "dirty"; value: root.videoLoaded
         ? !root.videoUnchanged && !root.videoSavedCurrent && video.draftSignature !== videoPane.signature

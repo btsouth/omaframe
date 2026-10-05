@@ -1,3 +1,5 @@
+#include "capture-dismissal.hpp"
+#include "capture-request.hpp"
 #include "navigation.hpp"
 #include "omarchy-theme.hpp"
 #include "recording.hpp"
@@ -8,9 +10,10 @@
 #include <LayerShellQt/Window>
 #include <QCommandLineParser>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QElapsedTimer>
-#include <QFont>
 #include <QFileInfo>
+#include <QFont>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -25,13 +28,12 @@
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QSettings>
 #include <QStandardPaths>
-#include <QThreadPool>
 #include <QThread>
+#include <QThreadPool>
 #include <QTimer>
 #include <QtConcurrent>
-#include <QDir>
-#include <QSettings>
 #include <algorithm>
 #include <cstdio>
 #include <memory>
@@ -78,6 +80,12 @@ int main(int argc, char **argv) {
   parser.addOption({"history", "Open saved captures and editable drafts."});
   parser.addOption({"studio", "Open the Omaframe window."});
   parser.addOption({"capture", "Capture a region immediately."});
+  parser.addOption(
+      {"delay", "Wait N seconds before taking a screenshot (0..30).", "N"});
+  QCommandLineOption rememberedDelay("delayed-capture",
+                                     "Use the remembered screenshot delay.");
+  rememberedDelay.setFlags(QCommandLineOption::HiddenFromHelp);
+  parser.addOption(rememberedDelay);
   parser.addOption({"repeat", "Capture the last selected screen area again."});
   parser.addOption({"screen", "Capture the active monitor immediately."});
   parser.addOption({"scroll",
@@ -85,6 +93,27 @@ int main(int argc, char **argv) {
                     "image."});
   parser.addPositionalArgument("file", "Image or video to open.", "[file]");
   parser.process(app);
+  int delaySeconds = -1;
+  QString delayError;
+  if (!CaptureRequest::cliDelay(parser, delaySeconds, delayError)) {
+    fprintf(stderr, "%s\n", qPrintable(delayError));
+    return 1;
+  }
+  if (parser.isSet("delayed-capture")) {
+    if (parser.isSet("delay") || !parser.positionalArguments().isEmpty() ||
+        parser.isSet("studio") || parser.isSet("history") ||
+        parser.isSet("screen") ||
+        parser.isSet("repeat") || parser.isSet("scroll") ||
+        parser.isSet("record") || parser.isSet("stop-recording") ||
+        parser.isSet("pause-recording") || parser.isSet("resume-recording") ||
+        parser.isSet("toggle-recording-pause")) {
+      fprintf(stderr, "The delayed shortcut is for screenshot capture only.\n");
+      return 1;
+    }
+    const int remembered =
+        QSettings().value("screenshot/delaySeconds", 3).toInt();
+    delaySeconds = remembered == 5 || remembered == 10 ? remembered : 3;
+  }
   const bool captureStartup =
       parser.positionalArguments().isEmpty() && !parser.isSet("studio") && !parser.isSet("history");
   const QString file =
@@ -122,17 +151,15 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Omaframe is already starting. Try again in a moment.\n");
       return 1;
     }
-    client.write(
-        QJsonDocument(QJsonObject{{"command", command}, {"file", file}})
-            .toJson(QJsonDocument::Compact) +
-        '\n');
+    client.write(QJsonDocument(QJsonObject{{"command", command},
+                                           {"file", file},
+                                           {"delaySeconds", delaySeconds}})
+                     .toJson(QJsonDocument::Compact) +
+                 '\n');
     client.waitForBytesWritten(1000);
-    if (recordingControl) {
-      if (client.bytesAvailable() == 0 && !client.waitForReadyRead(4000))
-        return 1;
-      return client.readAll().trimmed() == "ok" ? 0 : 1;
-    }
-    return 0;
+    if (client.bytesAvailable() == 0 && !client.waitForReadyRead(4000))
+      return 1;
+    return client.readAll().trimmed() == "ok" ? 0 : 1;
   }
   if (recordingControl)
     return 1;
@@ -227,7 +254,9 @@ int main(int argc, char **argv) {
   QQuickWindow *recordSetup = nullptr;
   QQuickWindow *recordControl = nullptr;
   QQuickWindow *scrollControl = nullptr;
+  QQuickWindow *captureCountdown = nullptr;
   bool quickRecordingReview = false, reviewReturnsToStudio = false;
+  bool delayedEditorOrigin = false;
   QObject::connect(&video, &Video::opening, &app,
                    [&] { quickRecordingReview = false; });
   auto ensureWindow = [&]() -> bool {
@@ -250,12 +279,14 @@ int main(int argc, char **argv) {
     chooser = qobject_cast<QQuickWindow *>(engine.rootObjects().last());
     return chooser != nullptr;
   };
-  auto requestNavigation = [&](const QString &cmd, const QUrl &path = QUrl()) {
+  auto requestNavigation = [&](const QString &cmd, const QUrl &path = QUrl(),
+                               int seconds = -1) {
     if (window)
-      QMetaObject::invokeMethod(window, "requestNavigation",
-                               Q_ARG(QVariant, cmd), Q_ARG(QVariant, path));
+      QMetaObject::invokeMethod(window, "requestCaptureNavigation",
+                                Q_ARG(QVariant, cmd), Q_ARG(QVariant, path),
+                                Q_ARG(QVariant, seconds));
     else
-      navigation.request(cmd, path);
+      navigation.request(cmd, path, seconds);
   };
   QList<QQuickWindow *> selections;
   auto screenFor = [](const QString &name) {
@@ -281,7 +312,7 @@ int main(int argc, char **argv) {
         p.start("hyprctl", args);
         if (!p.waitForFinished(800)) {
           p.kill();
-          p.waitForFinished();
+          p.waitForFinished(100);
           return QByteArray();
         }
         return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
@@ -661,6 +692,101 @@ int main(int argc, char **argv) {
       });
   QObject::connect(&app, &QGuiApplication::screenRemoved, &recorder,
                    [&](QScreen *) { recorder.layoutChanged(); });
+  CaptureDismissal::Boundary dismissal(&app);
+  // This runs on every launch, so only log: a delayed capture retries the
+  // restore itself and reports a real failure to the user.
+  dismissal.recover([](bool success) {
+    if (!success)
+      qWarning("Could not restore Omaframe's dismissal animations at startup.");
+  });
+  QObject::connect(
+      &studio, &Studio::delayHideRequested, &app, [&](quint64 generation) {
+        delayedEditorOrigin = true;
+        if (!shortcuts.checking())
+          shortcuts.refresh();
+        dismissal.begin(
+            generation, QGuiApplication::primaryScreen(),
+            [&] {
+              hideCaptureSurfaces();
+              if (window)
+                window->destroy();
+              if (chooser)
+                chooser->destroy();
+            },
+            [&, generation](bool success) {
+              studio.delayDesktopCleared(generation, success);
+            });
+      });
+  QObject::connect(&studio, &Studio::delayBadgeRequested, &app, [&] {
+    const auto generation = studio.delayGeneration();
+    dismissal.placeBadge(generation, [&, generation](QScreen *screen) {
+      if (!studio.currentDelay(generation))
+        return;
+      if (!captureCountdown) {
+        QQmlComponent component(&engine, QUrl("qrc:/qml/CaptureCountdown.qml"));
+        captureCountdown = qobject_cast<QQuickWindow *>(component.create());
+      }
+      if (!captureCountdown || !screen) {
+        studio.cancelDelayedCapture();
+        return;
+      }
+      auto *layer = LayerShellQt::Window::get(captureCountdown);
+      layer->setScope(CaptureDismissal::scope);
+      layer->setLayer(LayerShellQt::Window::LayerOverlay);
+      layer->setExclusiveZone(-1);
+      layer->setAnchors(LayerShellQt::Window::AnchorTop);
+      layer->setKeyboardInteractivity(
+          LayerShellQt::Window::KeyboardInteractivityNone);
+      layer->setMargins(QMargins(0, 64, 0, 0));
+      captureCountdown->setScreen(screen);
+      layer->setScreen(screen);
+      captureCountdown->setMask(QRegion(270, 16, 60, 32));
+      captureCountdown->show();
+    });
+  });
+  QObject::connect(
+      &studio, &Studio::delayClearRequested, &app, [&](quint64 generation) {
+        if (!captureCountdown) {
+          studio.delayBadgeCleared(generation, false);
+          return;
+        }
+        dismissal.clear(generation, captureCountdown,
+                        [&, generation](bool success) {
+                          studio.delayBadgeCleared(generation, success);
+                        });
+      });
+  QObject::connect(&studio, &Studio::delayCancelled, &app, [&] {
+    delayedEditorOrigin = false;
+    if (captureCountdown) {
+      captureCountdown->hide();
+      captureCountdown->destroy();
+    }
+    hideCaptureSurfaces();
+    const bool returning = studio.takeReturnToStudio();
+    studio.leaveQuickMode();
+    const bool quitting = !returning && pendingReview.isEmpty() && !recorder.active();
+    const auto request = studio.beginDelayCleanup();
+    dismissal.cancel([&, quitting, request](bool restored) {
+      studio.finishDelayCleanup(request, restored);
+      if (quitting && studio.currentCaptureRequest(request) && !studio.busy() &&
+          !video.busy() && !studio.quickMode() && !studio.delayedCapture() &&
+          !recorder.active() &&
+          !(window && window->isVisible()))
+        QTimer::singleShot(0, &app, &QCoreApplication::quit);
+    });
+    if (!pendingReview.isEmpty() && !recorder.active()) {
+      const QUrl review = pendingReview;
+      pendingReview.clear();
+      requestReview(review, returning);
+    } else if (returning)
+      showStudioWindow();
+  });
+  QObject::connect(&studio, &Studio::delayFailed, &app, [&] {
+    notify("Screenshot cancelled",
+           "Could not clear the screenshot surfaces or restore their animations safely.", {});
+    // Keep the failure visible even when desktop notifications are disabled.
+    showStudioWindow();
+  });
   QObject::connect(&studio, &Studio::hideStudio, &app, hideCaptureSurfaces);
   QObject::connect(&studio, &Studio::selectionDone, &app, clearSelections);
   QObject::connect(&studio, &Studio::chooserRequested, &app, showChooser);
@@ -683,6 +809,7 @@ int main(int argc, char **argv) {
       adjustWindow(window, studio.quickMode());
   });
   QObject::connect(&studio, &Studio::dismissRequested, &app, [&] {
+    delayedEditorOrigin = false;
     // Read it before returning to the studio clears the quick state.
     const Studio::Notice notice = studio.finishNotice();
     const auto notifyScreenshot = [&] {
@@ -709,6 +836,14 @@ int main(int argc, char **argv) {
   });
   QObject::connect(
       &studio, &Studio::selectionReady, &app, [&](const QStringList &names) {
+        if (delayedEditorOrigin) {
+          delayedEditorOrigin = false;
+          quickRecordingReview = false;
+          if (window) {
+            window->setProperty("videoMode", false);
+            window->setProperty("recordingReview", false);
+          }
+        }
         mark("capture pixels ready");
         for (const auto &name : names) {
           auto *screen = screenFor(name);
@@ -743,10 +878,13 @@ int main(int argc, char **argv) {
                      if (studio.quickState() == "selecting")
                        studio.cancelSelection();
                    });
-  QObject::connect(&history, &CaptureHistoryModel::navigate, &app, requestNavigation);
-  QObject::connect(&navigation, &Navigation::proceed, &app,
+  QObject::connect(&history, &CaptureHistoryModel::navigate, &app,
                    [&](const QString &cmd, const QUrl &path) {
-                     if (window) {
+                     requestNavigation(cmd, path);
+                   });
+  QObject::connect(&navigation, &Navigation::proceed, &app,
+                   [&](const QString &cmd, const QUrl &path, int seconds) {
+                     if (window && !(cmd == "capture" && seconds > 0)) {
                        if (cmd != "open") window->setProperty("historyMode", false);
                        // Keep the current editor alive while an open is
                        // checked. A failed open must retain its edit state.
@@ -755,7 +893,8 @@ int main(int argc, char **argv) {
                          window->setProperty("videoMode", false);
                        window->setProperty("recordingReview", false);
                      }
-                     quickRecordingReview = false;
+                     if (!(cmd == "capture" && seconds > 0))
+                       quickRecordingReview = false;
                      if (cmd == "quit") {
                        if (window)
                          window->setProperty("closingApproved", true);
@@ -774,6 +913,8 @@ int main(int argc, char **argv) {
                        studio.captureVideo();
                      else if (cmd == "repeat")
                        studio.repeatLastArea();
+                     else if (cmd == "capture" && seconds > 0)
+                       studio.delayCapture(seconds);
                      else if (cmd == "capture" || cmd == "screen")
                        studio.capture(cmd == "capture");
                      else if (cmd == "scroll")
@@ -808,31 +949,44 @@ int main(int argc, char **argv) {
           return;
         const auto request =
             QJsonDocument::fromJson(client->readLine()).object();
-        const auto cmd = request.value("command").toString();
-        if (cmd == "pause-recording" || cmd == "resume-recording" ||
-            cmd == "toggle-recording-pause") {
-          QObject::connect(&recorder, &Recorder::pauseFinished, client,
-                           [client](bool success) {
-                             client->write(success ? "ok\n" : "unhandled\n");
-                             client->disconnectFromServer();
-                           });
-          const bool paused =
-              cmd == "pause-recording" ||
-              (cmd == "toggle-recording-pause" && recorder.state() != "paused");
-          if (!recorder.setPaused(paused)) {
-            client->write("unhandled\n");
-            client->disconnectFromServer();
-          }
+        QString cmd;
+        int seconds;
+        if (!CaptureRequest::decode(request, cmd, seconds)) {
+          client->write("invalid\n");
+          client->disconnectFromServer();
           return;
         }
-        const bool stopping =
-            cmd == "stop-recording" || (cmd == "record" && recorder.active());
-        if (stopping) {
-          const bool handled = recorder.active();
-          client->write(handled ? "ok\n" : "unhandled\n");
+        if (CaptureRequest::dispatchControl(
+                cmd, recorder.active(),
+                [&](const QString &control) {
+                  QObject::connect(&recorder, &Recorder::pauseFinished, client,
+                                   [client](bool success) {
+                                     client->write(success ? "ok\n" : "unhandled\n");
+                                     client->disconnectFromServer();
+                                   });
+                  const bool paused = control == "pause-recording" ||
+                      (control == "toggle-recording-pause" && recorder.state() != "paused");
+                  if (!recorder.setPaused(paused)) {
+                    client->write("unhandled\n");
+                    client->disconnectFromServer();
+                  }
+                },
+                [&] {
+                  const bool handled = recorder.active();
+                  client->write(handled ? "ok\n" : "unhandled\n");
+                  client->disconnectFromServer();
+                  if (handled)
+                    recorder.stop();
+                }))
+          return;
+        const auto handling = CaptureRequest::handle(
+            cmd, studio.delayedCapture(), studio.busy() || video.busy());
+        if (handling != CaptureRequest::Handling::Proceed) {
+          client->write(
+              handling == CaptureRequest::Handling::Cancel ? "ok\n" : "busy\n");
           client->disconnectFromServer();
-          if (handled)
-            recorder.stop();
+          if (handling == CaptureRequest::Handling::Cancel)
+            studio.cancelDelayedCapture();
           return;
         }
         client->write("ok\n");
@@ -840,9 +994,9 @@ int main(int argc, char **argv) {
         if (recorder.active()) {
           if (!studio.busy() && !video.busy() && !studio.quickMode()) {
             if (cmd == "repeat")
-              requestNavigation(cmd);
+              requestNavigation(cmd, {}, seconds);
             else if (cmd == "capture" || cmd == "screen" || cmd == "scroll")
-              requestNavigation(cmd);
+              requestNavigation(cmd, {}, seconds);
           }
           return;
         }
@@ -867,7 +1021,7 @@ int main(int argc, char **argv) {
               cmd, QUrl::fromLocalFile(request.value("file").toString()));
         else if (cmd == "record" || cmd == "repeat" || cmd == "capture" ||
                  cmd == "screen" || cmd == "scroll" || cmd == "history")
-          requestNavigation(cmd);
+          requestNavigation(cmd, {}, seconds);
         else
           showStudioWindow();
       });
@@ -899,7 +1053,10 @@ int main(int argc, char **argv) {
         studio.captureScroll();
       else {
         mark("capture requested");
-        studio.capture(command != "screen");
+        if (delaySeconds > 0)
+          studio.delayCapture(delaySeconds);
+        else
+          studio.capture(command != "screen");
       }
     });
   const int result = app.exec();
@@ -907,5 +1064,6 @@ int main(int argc, char **argv) {
   delete recordSetup;
   delete recordControl;
   delete scrollControl;
+  delete captureCountdown;
   return result;
 }

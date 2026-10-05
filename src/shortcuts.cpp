@@ -21,19 +21,24 @@ const char *legacyStart = "-- omaframe:recording-shortcut:start";
 const char *legacyEnd = "-- omaframe:recording-shortcut:end";
 
 QString description(Shortcuts::Action action) {
+  if (action == Shortcuts::Action::Delay)
+    return "Delayed screenshot with Omaframe";
   if (action == Shortcuts::Action::Pause)
     return "Pause recording with Omaframe";
   return action == Shortcuts::Action::Screenshot ? "Screenshot with Omaframe"
                                                  : "Record with Omaframe";
 }
 QString stockDescription(Shortcuts::Action action) {
-  return action == Shortcuts::Action::Screenshot ? "Screenshot"
-                                                 : "Screenrecording";
+  return (action == Shortcuts::Action::Screenshot ||
+          action == Shortcuts::Action::Delay)
+             ? "Screenshot"
+             : "Screenrecording";
 }
 int defaultMask(Shortcuts::Action action) {
-  return action == Shortcuts::Action::Screenshot ? 0
-         : action == Shortcuts::Action::Pause    ? altMask | 1
-                                                 : altMask;
+  return action == Shortcuts::Action::Delay        ? 1
+         : action == Shortcuts::Action::Screenshot ? 0
+         : action == Shortcuts::Action::Pause      ? altMask | 1
+                                                   : altMask;
 }
 bool isDefaultKey(const QJsonObject &bind, Shortcuts::Action action) {
   return bind.value("key").toString().compare("Print", Qt::CaseInsensitive) ==
@@ -46,7 +51,7 @@ QByteArray hyprctl(const QStringList &args, int timeout = 2500) {
   p.start("hyprctl", args);
   if (!p.waitForFinished(timeout)) {
     p.kill();
-    p.waitForFinished();
+    p.waitForFinished(100);
     return {};
   }
   return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
@@ -72,8 +77,9 @@ bool withoutBlocks(QByteArray &text, QList<Shortcuts::Action> *found) {
       if (to < text.size() && text.at(to) == '\n')
         ++to;
       const QByteArray block = text.mid(from, to - from);
-      for (auto action : {Shortcuts::Action::Screenshot,
-                          Shortcuts::Action::Record, Shortcuts::Action::Pause})
+      for (auto action :
+           {Shortcuts::Action::Screenshot, Shortcuts::Action::Record,
+            Shortcuts::Action::Pause, Shortcuts::Action::Delay})
         if (block.contains(description(action).toUtf8()) &&
             !found->contains(action))
           found->append(action);
@@ -122,6 +128,59 @@ bool Shortcuts::runsOmaframe(const QJsonObject &bind, Action action) {
       R"((?:^|[\s/'"])omaframe['"]?\s+--(?:record|stop-recording)(?:['"\s;&|]|$))");
   static const QRegularExpression screenshot(
       R"((?:^|[\s/'"])omaframe['"]?(?:\s+--(?:capture|screen|repeat))?\s*(?:['";&|]|$))");
+  // Parse the supported capture invocation rather than assuming option order.
+  // Split shell command segments, then use Qt's quote-aware argument splitter.
+  if (action == Action::Delay) {
+    const auto commands = bind.value("arg").toString().split(
+        QRegularExpression("[;&|]+"), Qt::SkipEmptyParts);
+    for (const auto &command : commands) {
+      auto args = QProcess::splitCommand(command.trimmed());
+      if (!args.isEmpty() && args.first() == "exec")
+        args.removeFirst();
+      if (!args.isEmpty() && args.first() == "env")
+        args.removeFirst();
+      while (!args.isEmpty() && QRegularExpression("^[A-Za-z_][A-Za-z0-9_]*=")
+                                    .match(args.first())
+                                    .hasMatch())
+        args.removeFirst();
+      if (args.isEmpty())
+        continue;
+      QString executable = args.takeFirst();
+      if (executable.startsWith('\'') && executable.endsWith('\''))
+        executable = executable.mid(1, executable.size() - 2);
+      if (QFileInfo(executable).fileName() != "omaframe")
+        continue;
+      bool delayed = false, valid = true;
+      for (int i = 0; i < args.size(); ++i) {
+        const auto arg = args[i];
+        if (arg == "--capture")
+          continue;
+        if (arg == "--delayed-capture") {
+          if (delayed)
+            valid = false;
+          delayed = true;
+          continue;
+        }
+        QString seconds;
+        if (arg == "--delay" && i + 1 < args.size())
+          seconds = args[++i];
+        else if (arg.startsWith("--delay="))
+          seconds = arg.mid(8);
+        else {
+          valid = false;
+          continue;
+        }
+        bool ok;
+        const int n = seconds.toInt(&ok);
+        valid &= !delayed && ok && n >= 0 && n <= 30 &&
+                 QRegularExpression("^[0-9]+$").match(seconds).hasMatch();
+        delayed = true;
+      }
+      if (delayed && valid)
+        return true;
+    }
+    return false;
+  }
   static const QRegularExpression pause(
       R"((?:^|[\s/'"])omaframe['"]?\s+--(?:toggle-recording-pause|pause-recording|resume-recording)(?:['"\s;&|]|$))");
   return (action == Action::Record  ? record
@@ -147,9 +206,10 @@ QString Shortcuts::omaframeKey(const QJsonArray &binds, Action action) {
 }
 
 QString Shortcuts::defaultKey(Action action) {
-  return action == Action::Screenshot ? "Print"
-         : action == Action::Pause    ? "Alt+Shift+Print"
-                                      : "Alt+Print";
+  return action == Action::Delay        ? "Shift+Print"
+         : action == Action::Screenshot ? "Print"
+         : action == Action::Pause      ? "Alt+Shift+Print"
+                                        : "Alt+Print";
 }
 
 QString Shortcuts::defaultKeyState(const QJsonArray &binds, Action action) {
@@ -176,16 +236,18 @@ QString Shortcuts::command(Action action, const QString &executable) {
     program = "omaframe";
   else
     program = "'" + QString(executable).replace("'", "'\\''") + "'";
-  return program + (action == Action::Screenshot ? " --capture"
-                    : action == Action::Pause    ? " --toggle-recording-pause"
-                                                 : " --record");
+  return program + (action == Action::Delay        ? " --delayed-capture"
+                    : action == Action::Screenshot ? " --capture"
+                    : action == Action::Pause      ? " --toggle-recording-pause"
+                                                   : " --record");
 }
 
 QString Shortcuts::luaLine(Action action, const QString &executable) {
   return QString("hl.unbind(%1)\no.bind(%1, %2, %3)")
-      .arg(luaString(action == Action::Screenshot ? "PRINT"
-                     : action == Action::Pause    ? "ALT + SHIFT + PRINT"
-                                                  : "ALT + PRINT"),
+      .arg(luaString(action == Action::Delay        ? "SHIFT + PRINT"
+                     : action == Action::Screenshot ? "PRINT"
+                     : action == Action::Pause      ? "ALT + SHIFT + PRINT"
+                                                    : "ALT + PRINT"),
            luaString(description(action)),
            luaString(command(action, executable)));
 }
@@ -223,7 +285,9 @@ bool Shortcuts::install(const QString &configDir, const QString &executable,
   // Drop any they have overridden since the previous setup.
   for (Action action : QList<Action>(wanted)) {
     const QRegularExpression custom(
-        action == Action::Screenshot
+        action == Action::Delay
+            ? R"((?:o\.(?:re)?bind|hl\.bind)\s*\(\s*["']\s*SHIFT\s*\+\s*PRINT\s*["'])"
+        : action == Action::Screenshot
             ? R"((?:o\.(?:re)?bind|hl\.bind)\s*\(\s*["']\s*PRINT\s*["'])"
         : action == Action::Pause
             ? R"((?:o\.(?:re)?bind|hl\.bind)\s*\(\s*["']\s*(?:ALT\s*\+\s*SHIFT|SHIFT\s*\+\s*ALT)\s*\+\s*PRINT\s*["'])"
@@ -245,7 +309,8 @@ bool Shortcuts::install(const QString &configDir, const QString &executable,
   QByteArray block = QByteArray("\n") + startMarker +
                      "\n-- Added by Omaframe. Delete this block to restore "
                      "Omarchy's defaults.\n";
-  for (Action action : {Action::Screenshot, Action::Record, Action::Pause})
+  for (Action action :
+       {Action::Screenshot, Action::Record, Action::Pause, Action::Delay})
     if (wanted.contains(action))
       block += luaLine(action, executable).toUtf8() + '\n';
   block += QByteArray(endMarker) + '\n';
@@ -296,6 +361,12 @@ void ShortcutSetup::setUp() {
     run(actions);
 }
 
+void ShortcutSetup::setUpDelay() {
+  if (m_available && !m_checking && m_delayKey.isEmpty() &&
+      (m_delayState == "stock" || m_delayState == "none"))
+    run({Shortcuts::Action::Delay});
+}
+
 void ShortcutSetup::setUpRecording() {
   QList<Shortcuts::Action> actions;
   if (m_recordKey.isEmpty() &&
@@ -328,6 +399,10 @@ void ShortcutSetup::run(const QList<Shortcuts::Action> &actions) {
             m_checking = false;
             m_available = r.available;
             using Shortcuts::Action;
+            m_delayKey = Shortcuts::omaframeKey(r.binds, Action::Delay);
+            m_delayState =
+                r.available ? Shortcuts::defaultKeyState(r.binds, Action::Delay)
+                            : "unknown";
             m_screenshotKey = Shortcuts::omaframeKey(r.binds, Action::Screenshot);
             m_recordKey = Shortcuts::omaframeKey(r.binds, Action::Record);
             m_pauseKey = Shortcuts::omaframeKey(r.binds, Action::Pause);

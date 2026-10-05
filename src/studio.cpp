@@ -187,7 +187,32 @@ Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
     m_status = text;
     emit changed();
   });
+  connect(&m_delay, &DelayCapture::changed, this, &Studio::changed);
+  connect(&m_delay, &DelayCapture::hideRequested, this,
+          &Studio::delayHideRequested);
+  connect(&m_delay, &DelayCapture::badgeRequested, this,
+          &Studio::delayBadgeRequested);
+  connect(&m_delay, &DelayCapture::clearRequested, this,
+          &Studio::delayClearRequested);
+  connect(&m_delay, &DelayCapture::grabRequested, this,
+          [this](quint64 generation) {
+            m_busy = false;
+            captureImpl(true, 0, false, generation);
+          });
+  connect(&m_delay, &DelayCapture::cancelled, this, [this] {
+    m_status = m_delayStatus;
+    m_busy = false;
+    m_quickState = "cancelled";
+    emit changed();
+    emit delayCancelled();
+  });
+  connect(&m_delay, &DelayCapture::failed, this, [this] {
+    reportDelayFailure();
+    emit delayFailed();
+  });
   QSettings settings;
+  const int delay = settings.value("screenshot/delaySeconds", 3).toInt();
+  m_delaySeconds = delay == 5 || delay == 10 ? delay : 3;
   m_options.style = std::clamp(settings.value("style", 0).toInt(), 0, 8);
   double savedPadding = settings.value("padding", 0.05).toDouble();
   if (settings.value("paddingVersion", 1).toInt() < 2) {
@@ -1011,6 +1036,90 @@ void Studio::retryOutput() {
   }));
 }
 
+void Studio::setDelaySeconds(int seconds) {
+  if ((seconds != 3 && seconds != 5 && seconds != 10) ||
+      m_delaySeconds == seconds)
+    return;
+  m_delaySeconds = seconds;
+  QSettings().setValue("screenshot/delaySeconds", seconds);
+  emit changed();
+}
+void Studio::reportDelayFailure() {
+  m_status = "Screenshot cancelled: could not clear the screenshot surfaces "
+             "or restore Omaframe's animations safely.";
+  emit changed();
+}
+quint64 Studio::beginDelayCleanup() {
+  m_delayCleanupPending = true;
+  return m_captureRequestGeneration;
+}
+void Studio::finishDelayCleanup(quint64 request, bool restored) {
+  m_delayCleanupPending = false;
+  if (!restored) {
+    qWarning("Could not restore Omaframe's dismissal animations after cancellation.");
+    if (currentCaptureRequest(request)) {
+      reportDelayFailure();
+      emit delayFailed();
+    }
+  }
+  auto capture = std::move(m_captureAfterCleanup);
+  m_captureAfterCleanup = {};
+  if (capture) {
+    m_busy = false;
+    capture();
+  }
+}
+void Studio::afterDelayCleanup(std::function<void()> capture) {
+  // Immediate and delayed requests supersede cancellation UI alike. Reserve
+  // busy while waiting so only one acquisition follows the bounded restore.
+  ++m_captureRequestGeneration;
+  if (m_delayCleanupPending) {
+    m_busy = true;
+    m_quickState = "capturing";
+    m_captureAfterCleanup = std::move(capture);
+    emit changed();
+  } else
+    capture();
+}
+void Studio::delayCapture(int seconds) {
+  const bool fromSelection = m_quickState == "selecting";
+  if (m_delay.active() || (m_busy && !fromSelection) || m_recordingSelection ||
+      m_scrollSelection || !saveDraftNow())
+    return;
+  if (seconds < 0)
+    seconds = m_delaySeconds;
+  if (seconds == 0) {
+    capture(true);
+    return;
+  }
+  if (seconds < 1 || seconds > 30)
+    return;
+  afterDelayCleanup([this, seconds, fromSelection] {
+    beginDelayedCapture(seconds, fromSelection);
+  });
+}
+void Studio::beginDelayedCapture(int seconds, bool fromSelection) {
+  if (!m_quickMode && !m_returnToStudio) {
+    const auto windows = QGuiApplication::allWindows();
+    m_returnToStudio =
+        std::any_of(windows.cbegin(), windows.cend(), [](QWindow *w) {
+          return w->isVisible() && w->title() == "Omaframe";
+        });
+  }
+  m_delayStatus = m_status;
+  for (const auto &name : m_frozen.keys())
+    m_store->put("capture/" + name, {});
+  m_frozen.clear();
+  m_windowTargets.clear();
+  m_busy = true;
+  m_quickMode = true;
+  m_quickState = "countdown";
+  if (!fromSelection)
+    m_captureBarHidden = false;
+  m_pendingFinish = -1;
+  emit changed();
+  m_delay.begin(seconds);
+}
 void Studio::capture(bool region, int monitor) {
   captureImpl(region, monitor, false);
 }
@@ -1022,9 +1131,19 @@ void Studio::repeatLastArea() {
   m_recordingSelection = false;
   captureImpl(false, 0, true);
 }
-void Studio::captureImpl(bool region, int monitor, bool repeat) {
-  if (m_busy || !saveDraftNow())
+void Studio::captureImpl(bool region, int monitor, bool repeat,
+                         quint64 delayGeneration) {
+  if (m_busy || (!delayGeneration && !saveDraftNow()))
     return;
+  if (delayGeneration)
+    acquireCapture(region, monitor, repeat, delayGeneration);
+  else
+    afterDelayCleanup([this, region, monitor, repeat] {
+      acquireCapture(region, monitor, repeat, 0);
+    });
+}
+void Studio::acquireCapture(bool region, int monitor, bool repeat,
+                           quint64 delayGeneration) {
   const auto open = QGuiApplication::allWindows();
   // A capture started from the open studio window returns there afterwards.
   // Keep that until it is used: going through recording options hides the
@@ -1036,7 +1155,8 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
   m_busy = true;
   m_quickMode = true;
   m_quickState = "capturing";
-  m_captureBarHidden = false;
+  if (!delayGeneration)
+    m_captureBarHidden = false;
   m_pendingFinish = -1;
   m_status = repeat ? "Capturing the last area…" : "Capturing…";
   m_frozen.clear();
@@ -1065,7 +1185,10 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
   QTimer::singleShot(
       wasVisible ? 220 : 0, this,
       [this, region, repeat, requested, screens, lastArea = m_lastArea,
-       lastPixels = m_lastAreaPixels]() mutable {
+       lastPixels = m_lastAreaPixels, delayGeneration,
+       grab = m_captureGrab]() mutable {
+        if (delayGeneration && !m_delay.current(delayGeneration))
+          return;
         struct SelectionCapture {
           Capture::Screens screens;
           QVariantList targets;
@@ -1075,9 +1198,14 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
         };
         auto *watcher = new QFutureWatcher<SelectionCapture>(this);
         connect(watcher, &QFutureWatcher<SelectionCapture>::finished, this,
-                [this, watcher, region, repeat, lastArea, lastPixels] {
+                [this, watcher, region, repeat, lastArea, lastPixels,
+                 delayGeneration] {
                   auto result = watcher->result();
                   watcher->deleteLater();
+                  if (delayGeneration && !m_delay.current(delayGeneration))
+                    return;
+                  if (delayGeneration)
+                    m_delay.complete(delayGeneration);
                   if (!result.screens.error.isEmpty()) {
                     // Report it where the user is looking, not on the primary
                     // display, which may be off or out of sight.
@@ -1129,7 +1257,7 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
                   }
                 });
         watcher->setFuture(QtConcurrent::run([requested, screens, region,
-                                              repeat]() mutable {
+                                              repeat, grab]() mutable {
           if (requested.isEmpty()) {
             QProcess process;
             process.start("hyprctl", {"-j", "monitors"});
@@ -1196,13 +1324,15 @@ void Studio::captureImpl(bool region, int monitor, bool repeat) {
               cursor.waitForFinished();
             }
           }
-          result.screens = Capture::freeze(requested, [](const QString &name,
-                                                         QImage &image,
-                                                         QString &error) {
-            MonitorInfo info;
-            info.name = name;
-            return captureOutputSurface(info, image, error);
-          });
+          result.screens =
+              Capture::freeze(requested, [grab](const QString &name,
+                                                QImage &image, QString &error) {
+                if (grab)
+                  return grab(name, image, error);
+                MonitorInfo info;
+                info.name = name;
+                return captureOutputSurface(info, image, error);
+              });
           return result;
         }));
       });

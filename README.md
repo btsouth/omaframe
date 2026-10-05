@@ -75,6 +75,13 @@ miss things, so look before you share. Press T to copy the text in the
 screenshot instead. Text copying reads the current crop and edits, so hidden
 or cropped-out text is excluded.
 
+Need a menu or tooltip? Press Print Screen, choose **Delay**, then open it.
+When the screen freezes, choose what to capture. Pick 3, 5 or 10 seconds, or
+press **T** in the screenshot selector to use your last choice. Settings can
+also set up the optional **Shift+Print** shortcut. During the countdown, click
+**Cancel** or press either screenshot shortcut again. Ordinary Print stays
+immediate. The badge may appear in an ongoing recording.
+
 ## Capture a scrolling page
 
 Press S in the screenshot selector, or run `omaframe --scroll`. Click the window
@@ -179,6 +186,8 @@ Clipboard-only copies add no history item. Editable drafts may remain. Screensho
 
 | Where | Key | Does |
 | --- | --- | --- |
+| Anywhere | Shift+Print | Start a delayed screenshot, when enabled in Settings |
+| Choosing a screenshot area | T | Start the remembered screenshot delay |
 | Anywhere | Print Screen | Take a screenshot |
 | Anywhere | Alt+Print Screen | Start a recording, or stop it |
 | Anywhere | Alt+Shift+Print Screen | Pause or resume recording, after enabling capture shortcuts in Settings |
@@ -270,6 +279,10 @@ switches to a different camera on its own.
 Enable capture shortcuts in Settings to use **Alt+Shift+Print Screen** for
 pause/resume, including whole-display recordings without a visible control.
 Setup keeps custom bindings and adds the new key only when it is free.
+
+For a menu or tooltip capture, run `omaframe --delay 5` or
+`omaframe --capture --delay 5`. The delay is integer seconds from 0 to 30;
+0 captures immediately. Other modes cannot use `--delay`.
 
 For scripts or custom keys, use `omaframe --pause-recording`,
 `omaframe --resume-recording`, or `omaframe --toggle-recording-pause`. These commands
