@@ -270,6 +270,11 @@ public:
   }
   void setDelaySeconds(int seconds);
   void reportDelayFailure();
+  quint64 beginDelayCleanup();
+  void finishDelayCleanup(quint64 request, bool restored);
+  bool currentCaptureRequest(quint64 request) const {
+    return request == m_captureRequestGeneration;
+  }
   Q_INVOKABLE void delayCapture(int seconds = -1);
   Q_INVOKABLE void cancelDelayedCapture() { m_delay.cancel(); }
   void delayDesktopCleared(quint64 generation, bool success) {
@@ -345,6 +350,13 @@ signals:
 private:
   friend class DelayTest;
   Capture::Grab m_captureGrab;
+  quint64 m_captureRequestGeneration = 0;
+  bool m_delayCleanupPending = false;
+  std::function<void()> m_captureAfterCleanup;
+  void afterDelayCleanup(std::function<void()> capture);
+  void beginDelayedCapture(int seconds, bool fromSelection);
+  void acquireCapture(bool region, int monitor, bool repeat,
+                      quint64 delayGeneration);
   void loadImage(QImage image, QString name, bool demo);
   void scheduleRender();
   void persistOptions();

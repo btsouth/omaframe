@@ -379,6 +379,99 @@ private slots:
     QCOMPARE(mapped, 0);
     QCOMPARE(cancelled, 1); // Cancel restoration errors are reported.
   }
+  void cancelledCleanupSerializesCapture_data() {
+    QTest::addColumn<bool>("timeout");
+    QTest::addColumn<bool>("delayed");
+    QTest::newRow("immediate-failed-restore") << false << false;
+    QTest::newRow("immediate-timed-out-restore") << true << false;
+    QTest::newRow("delayed-failed-restore") << false << true;
+    QTest::newRow("delayed-timed-out-restore") << true << true;
+  }
+  void cancelledCleanupSerializesCapture() {
+    QFETCH(bool, timeout);
+    QFETCH(bool, delayed);
+    ImageStore store;
+    Studio studio(&store, false);
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    QQuickWindow editor;
+    editor.setTitle("Omaframe");
+    editor.show();
+    int cleanup = 0;
+    std::atomic_int grabs = 0;
+    studio.m_captureGrab = [&](const QString &, QImage &image, QString &) {
+      ++grabs;
+      image = QImage(40, 30, QImage::Format_RGB32);
+      image.fill(Qt::blue);
+      return true;
+    };
+    connect(&studio, &Studio::hideStudio, &editor, &QQuickWindow::hide);
+    connect(&studio, &Studio::delayFailed, &editor, &QQuickWindow::show);
+    connect(&studio, &Studio::delayHideRequested, &studio,
+            [&](quint64 generation) {
+              boundary.begin(generation, nullptr, [&] { editor.hide(); },
+                             [&, generation](bool ok) {
+                               studio.delayDesktopCleared(generation, ok);
+                             });
+            });
+    connect(&studio, &Studio::delayCancelled, &studio, [&] {
+      editor.hide();
+      studio.leaveQuickMode();
+      const auto request = studio.beginDelayCleanup();
+      boundary.cancel([&, request](bool restored) {
+        ++cleanup;
+        studio.finishDelayCleanup(request, restored);
+      });
+    });
+    QSignalSpy ready(&studio, &Studio::selectionReady);
+    QSignalSpy failed(&studio, &Studio::delayFailed);
+    QSignalSpy hiding(&studio, &Studio::delayHideRequested);
+    studio.delayCapture(3);
+    QCOMPARE(fake.calls.size(), 1);
+    studio.cancelDelayedCapture();
+    QCOMPARE(fake.calls.size(), 2);
+    const auto cancelledRequest = studio.m_captureRequestGeneration;
+    if (delayed)
+      studio.delayCapture(3);
+    else
+      studio.capture(true);
+    QVERIFY(!studio.currentCaptureRequest(cancelledRequest));
+    QVERIFY(studio.busy());
+    QTest::qWait(50);
+    QCOMPARE(grabs.load(), 0);
+    QCOMPARE(hiding.size(), 1);
+    QCOMPARE(fake.calls.size(), 2);
+    QVERIFY(!editor.isVisible());
+    QTest::ignoreMessage(QtWarningMsg,
+        "Could not restore Omaframe's dismissal animations after cancellation.");
+    if (!timeout)
+      fake.reply(1, false);
+    QTRY_COMPARE(cleanup, 1); // The existing 500 ms deadline releases the wait.
+    if (timeout)
+      QVERIFY(fake.calls[1]->stopped);
+    QCOMPARE(failed.size(), 0);
+    QVERIFY(!editor.isVisible());
+    QVERIFY(!studio.status().contains("Screenshot cancelled"));
+    if (delayed) {
+      QCOMPARE(hiding.size(), 2);
+      QVERIFY(studio.delayedCapture());
+      QCOMPARE(fake.calls.size(), 3); // Fresh delayed dismissal starts now.
+    } else {
+      QTRY_COMPARE(ready.size(), 1);
+      QVERIFY(grabs.load() > 0);
+      QCOMPARE(studio.quickState(), QString("selecting"));
+      QCOMPARE(studio.m_frozen.constBegin().value().pixelColor(0, 0),
+               QColor(Qt::blue));
+    }
+    fake.reply(0); // Late replies cannot map Studio into the new operation.
+    fake.reply(1);
+    QTest::qWait(50);
+    QCOMPARE(cleanup, 1);
+    QCOMPARE(failed.size(), 0);
+    QVERIFY(!editor.isVisible());
+    if (!delayed)
+      QCOMPARE(ready.size(), 1);
+  }
   void productionStartupCleanupOwnsOnlySavedRules() {
     FakeCompositor fake;
     CaptureDismissal::Boundary boundary(nullptr, fake.transport());

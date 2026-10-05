@@ -1047,6 +1047,38 @@ void Studio::reportDelayFailure() {
              "or restore Omaframe's animations safely.";
   emit changed();
 }
+quint64 Studio::beginDelayCleanup() {
+  m_delayCleanupPending = true;
+  return m_captureRequestGeneration;
+}
+void Studio::finishDelayCleanup(quint64 request, bool restored) {
+  m_delayCleanupPending = false;
+  if (!restored) {
+    qWarning("Could not restore Omaframe's dismissal animations after cancellation.");
+    if (currentCaptureRequest(request)) {
+      reportDelayFailure();
+      emit delayFailed();
+    }
+  }
+  auto capture = std::move(m_captureAfterCleanup);
+  m_captureAfterCleanup = {};
+  if (capture) {
+    m_busy = false;
+    capture();
+  }
+}
+void Studio::afterDelayCleanup(std::function<void()> capture) {
+  // Immediate and delayed requests supersede cancellation UI alike. Reserve
+  // busy while waiting so only one acquisition follows the bounded restore.
+  ++m_captureRequestGeneration;
+  if (m_delayCleanupPending) {
+    m_busy = true;
+    m_quickState = "capturing";
+    m_captureAfterCleanup = std::move(capture);
+    emit changed();
+  } else
+    capture();
+}
 void Studio::delayCapture(int seconds) {
   const bool fromSelection = m_quickState == "selecting";
   if (m_delay.active() || (m_busy && !fromSelection) || m_recordingSelection ||
@@ -1060,6 +1092,11 @@ void Studio::delayCapture(int seconds) {
   }
   if (seconds < 1 || seconds > 30)
     return;
+  afterDelayCleanup([this, seconds, fromSelection] {
+    beginDelayedCapture(seconds, fromSelection);
+  });
+}
+void Studio::beginDelayedCapture(int seconds, bool fromSelection) {
   if (!m_quickMode && !m_returnToStudio) {
     const auto windows = QGuiApplication::allWindows();
     m_returnToStudio =
@@ -1096,6 +1133,15 @@ void Studio::captureImpl(bool region, int monitor, bool repeat,
                          quint64 delayGeneration) {
   if (m_busy || (!delayGeneration && !saveDraftNow()))
     return;
+  if (delayGeneration)
+    acquireCapture(region, monitor, repeat, delayGeneration);
+  else
+    afterDelayCleanup([this, region, monitor, repeat] {
+      acquireCapture(region, monitor, repeat, 0);
+    });
+}
+void Studio::acquireCapture(bool region, int monitor, bool repeat,
+                           quint64 delayGeneration) {
   const auto open = QGuiApplication::allWindows();
   // A capture started from the open studio window returns there afterwards.
   // Keep that until it is used: going through recording options hides the

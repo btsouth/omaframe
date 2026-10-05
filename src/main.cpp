@@ -743,15 +743,12 @@ int main(int argc, char **argv) {
     const bool returning = studio.takeReturnToStudio();
     studio.leaveQuickMode();
     const bool quitting = !returning && pendingReview.isEmpty() && !recorder.active();
-    dismissal.cancel([&, quitting](bool restored) {
-      if (!restored) {
-        studio.reportDelayFailure();
-        notify("Screenshot cancelled",
-               "Could not restore Omaframe's dismissal animations.", {});
-        showStudioWindow();
-      }
-      if (quitting && !studio.busy() && !video.busy() && !studio.quickMode() &&
-          !studio.delayedCapture() && !recorder.active() &&
+    const auto request = studio.beginDelayCleanup();
+    dismissal.cancel([&, quitting, request](bool restored) {
+      studio.finishDelayCleanup(request, restored);
+      if (quitting && studio.currentCaptureRequest(request) && !studio.busy() &&
+          !video.busy() && !studio.quickMode() && !studio.delayedCapture() &&
+          !recorder.active() &&
           !(window && window->isVisible()))
         QTimer::singleShot(0, &app, &QCoreApplication::quit);
     });
