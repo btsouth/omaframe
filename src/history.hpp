@@ -1,6 +1,7 @@
 #pragma once
 #include <QAbstractListModel>
 #include <QCache>
+#include <QDateTime>
 #include <QImage>
 #include <QJsonObject>
 #include <QMutex>
@@ -20,11 +21,13 @@ struct Identity {
 struct Entry {
   QString path, name, kind, draftId, draftKind, draftPath, sourcePath;
   Identity identity, draftIdentity, sourceIdentity;
-  qint64 modified = 0;
+  qint64 modified = 0, captured = 0;
   bool incomplete = false, draft = false;
 };
 Identity identify(const QString &path);
 bool unchanged(const Entry &entry);
+QDateTime captureTime(const QString &name, qint64 modified);
+QString dayLabel(const QDate &day, const QDate &today = QDate::currentDate());
 QString discoveredKind(const QString &name);
 QStringList previousFolders();
 void rememberFolder(const QString &path);
@@ -34,7 +37,8 @@ QImage draftPreview(const Entry &entry);
 QString thumbnailKey(const Entry &entry);
 void trimCache(const QString &directory, qint64 byteCap);
 QImage thumbnail(const Entry &entry, const QString &cacheDirectory,
-                 const std::shared_ptr<std::atomic_bool> &cancel);
+                 const std::shared_ptr<std::atomic_bool> &cancel,
+                 qint64 *duration = nullptr);
 } // namespace History
 
 class HistoryImages final : public QQuickImageProvider {
@@ -66,7 +70,9 @@ public:
     Draft,
     HasDraft,
     Thumbnail,
-    FilePath
+    FilePath,
+    CanEdit,
+    Duration
   };
   explicit CaptureHistoryModel(HistoryImages *images,
                                QObject *parent = nullptr);
@@ -90,6 +96,7 @@ public:
   Q_INVOKABLE QString keyAt(int row) const;
   Q_INVOKABLE QString pathAt(int row) const;
   Q_INVOKABLE bool isDraftAt(int row) const;
+  Q_INVOKABLE bool canEditAt(int row) const;
   Q_INVOKABLE bool hasDraftAt(int row) const;
   Q_INVOKABLE QString nameAt(int row) const;
 signals:
@@ -103,6 +110,7 @@ private:
   HistoryImages *m_images;
   QVector<History::Entry> m_all, m_rows;
   QHash<QString, QString> m_thumbnails;
+  QHash<QString, qint64> m_durations;
   QStringList m_previousFolders;
   QString m_filter = "All", m_search, m_status;
   bool m_busy = false, m_scanned = false;

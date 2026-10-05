@@ -14,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocalSocket>
+#include <QLocale>
 #include <QMimeData>
 #include <QProcess>
 #include <QScopeGuard>
@@ -26,6 +27,7 @@
 #include <QUuid>
 #include <QtConcurrent>
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 
 class HistoryTest : public QObject {
@@ -198,6 +200,9 @@ private slots:
                             {"name", "Private draft"},
                             {"savedPath", output},
                             {"style", 8},
+                            {"padding", .05},
+                            {"aspect", 0},
+                            {"selected", -1},
                             {"edits", QJsonArray{Frame::editToJson(redact)}}};
     json(data + "/drafts/" + id + ".json", draft);
     auto rows = scan();
@@ -222,6 +227,86 @@ private slots:
     damaged["edits"] = QJsonArray{QJsonObject{{"type", "unknown"}}};
     json(data + "/drafts/" + id + ".json", damaged);
     QVERIFY(History::draftPreview(scan()[0]).isNull());
+  }
+  void malformedDraftMetadata_data() {
+    QTest::addColumn<QString>("field");
+    QTest::addColumn<QJsonValue>("value");
+    QTest::newRow("missing-edits")
+        << QString("edits") << QJsonValue(QJsonValue::Undefined);
+    for (const auto &value :
+         {QJsonValue(QJsonValue::Null), QJsonValue("bad"), QJsonValue(42),
+          QJsonValue(false), QJsonValue(QJsonObject())})
+      QTest::newRow(qPrintable("edits-" + QString::number(value.type())))
+          << QString("edits") << value;
+    for (const auto *field :
+         {"name", "style", "padding", "aspect", "selected", "savedPath"})
+      QTest::newRow(field) << QString(field) << QJsonValue(QJsonArray());
+  }
+  void malformedDraftMetadata() {
+    QFETCH(QString, field);
+    QFETCH(QJsonValue, value);
+    const QString id(32, 'a');
+    const auto path = data + "/drafts/" + id;
+    QImage source(100, 100, QImage::Format_RGB32);
+    source.fill(Qt::red);
+    QVERIFY(source.save(path + ".png"));
+    QJsonObject doc{{"version", 1},    {"name", "Private"},    {"style", 8},
+                    {"padding", .05},  {"aspect", 0},          {"selected", -1},
+                    {"savedPath", ""}, {"edits", QJsonArray()}};
+    doc.insert(field, value);
+    json(path + ".json", doc);
+    const auto rows = scan();
+    QCOMPARE(rows.size(), 1);
+    QVERIFY(History::draftPreview(rows.first()).isNull());
+  }
+  void captureTimesAndDayLabels() {
+    const auto fallback = QDateTime(QDate(2026, 10, 5), QTime(18, 0));
+    QCOMPARE(History::captureTime("Omaframe-2026-09-28_12-30-01-123-abc.png",
+                                  fallback.toMSecsSinceEpoch()),
+             QDateTime(QDate(2026, 9, 28), QTime(12, 30, 1, 123)));
+    QCOMPARE(History::captureTime(
+                 "Recording-2026-10-04_12-35-02-abcdef-incomplete.mp4",
+                 fallback.toMSecsSinceEpoch()),
+             QDateTime(QDate(2026, 10, 4), QTime(12, 35, 2)));
+    for (const auto *name :
+         {"Omaframe-legacy.png", "Omaframe-2026-02-30_12-30-01-123-abc.png",
+          "source-edited.gif"})
+      QCOMPARE(History::captureTime(name, fallback.toMSecsSinceEpoch()),
+               fallback);
+    const QDate today(2026, 10, 5);
+    QCOMPARE(History::dayLabel(today, today), QString("Today"));
+    QCOMPARE(History::dayLabel(today.addDays(-1), today), QString("Yesterday"));
+    QCOMPARE(History::dayLabel(today.addDays(-3), today),
+             QLocale().dayName(5, QLocale::LongFormat));
+    QCOMPARE(History::dayLabel(today.addDays(-7), today),
+             QLocale().toString(today.addDays(-7), "ddd, MMM d"));
+    QCOMPARE(History::dayLabel(QDate(2025, 9, 28), today),
+             QLocale().toString(QDate(2025, 9, 28), "ddd, MMM d, yyyy"));
+    write(folder + "/Omaframe-2026-09-28_12-30-01-123-abc.png");
+    write(folder + "/Recording-2026-10-04_12-35-02-abcdef.mp4");
+    const auto rows = scan();
+    QCOMPARE(rows.first().kind, QString("Recording"));
+    QCOMPARE(
+        rows.first().captured,
+        QDateTime(QDate(2026, 10, 4), QTime(12, 35, 2)).toMSecsSinceEpoch());
+  }
+  void gifNeverOpensInEditor() {
+    const auto path = folder + "/source-edited.gif";
+    write(path);
+    QSettings().setValue("videoDirectory", folder);
+    HistoryImages images;
+    CaptureHistoryModel model(&images);
+    model.refresh();
+    QTRY_VERIFY(!model.busy());
+    QCOMPARE(model.rowCount(), 1);
+    QSignalSpy navigation(&model, &CaptureHistoryModel::navigate);
+    QVERIFY(!model.canEditAt(0));
+    QVERIFY(!model.data(model.index(0), CaptureHistoryModel::CanEdit).toBool());
+    QVERIFY(!model.action(0, "edit", model.keyAt(0)));
+    QVERIFY(navigation.isEmpty());
+    QVERIFY(model.action(0, "copy", model.keyAt(0)));
+    QCOMPARE(QGuiApplication::clipboard()->mimeData()->urls(),
+             QList<QUrl>{QUrl::fromLocalFile(path)});
   }
   void exactPngCopyAndFilters() {
     const auto path = folder + "/Omaframe-saved.png";
@@ -294,7 +379,12 @@ private slots:
     QVERIFY2(p.exitCode() == 0, p.readAllStandardError().constData());
     auto e = scan().first();
     const auto cache = folder + "/cache";
-    QVERIFY(!History::thumbnail(e, cache, cancel).isNull());
+    qint64 duration = -1;
+    QVERIFY(!History::thumbnail(e, cache, cancel, &duration).isNull());
+    QCOMPARE(duration, 200);
+    qint64 cachedDuration = -1;
+    QVERIFY(!History::thumbnail(e, cache, cancel, &cachedDuration).isNull());
+    QCOMPARE(cachedDuration, duration);
     const auto cached = cache + '/' + History::thumbnailKey(e) + ".jpg";
     QVERIFY(QFileInfo::exists(cached));
     const auto publicPermissions = QFile::ReadGroup | QFile::WriteGroup |
@@ -348,6 +438,71 @@ private slots:
     QVERIFY(watcher.result().isNull());
     QVERIFY(elapsed.elapsed() < 2000);
     QVERIFY(!QFileInfo::exists(folder + "/late-cache"));
+  }
+  void thumbnailDiesWithAbruptParentTermination() {
+    const auto input = folder + "/Recording-slow.mp4";
+    write(input);
+    const auto tools = folder + "/tools";
+    QVERIFY(QDir().mkpath(tools));
+    const auto pidFile = folder + "/ffmpeg.pid";
+    write(tools + "/ffmpeg",
+          ("#!/usr/bin/python3\nimport os,time\nopen('" + pidFile +
+           "','w').write(str(os.getpid()))\ntime.sleep(30)\n")
+              .toUtf8());
+    QVERIFY(QFile::setPermissions(tools + "/ffmpeg", QFile::ReadOwner |
+                                                         QFile::WriteOwner |
+                                                         QFile::ExeOwner));
+    auto env = QProcessEnvironment::systemEnvironment();
+    env.insert("PATH", tools + ':' + env.value("PATH"));
+    QProcess parent;
+    parent.setProcessEnvironment(env);
+    parent.start(QCoreApplication::applicationFilePath(),
+                 {"--thumbnail-worker", input, folder + "/cache"});
+    QVERIFY(parent.waitForStarted(5000));
+    const auto cleanup = qScopeGuard([&] {
+      parent.kill();
+      parent.waitForFinished(5000);
+    });
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(pidFile).size() > 0, 3000);
+    QFile pidInput(pidFile);
+    QVERIFY(pidInput.open(QIODevice::ReadOnly));
+    const auto pid = pidInput.readAll().toLongLong();
+    QVERIFY(pid > 1);
+    QVERIFY(::kill(pid, 0) == 0);
+    parent.kill();
+    QVERIFY(parent.waitForFinished(3000));
+    auto stopped = [pid] {
+      QFile status("/proc/" + QString::number(pid) + "/stat");
+      if (!status.open(QIODevice::ReadOnly))
+        return true;
+      const auto bytes = status.readAll();
+      // A killed orphan may wait briefly as a zombie for the container init.
+      return bytes.mid(bytes.lastIndexOf(')') + 2, 1) == "Z";
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(stopped(), 2000);
+  }
+  void oversizedSidecarRecoveryPreservesEveryByte() {
+    const auto final = folder + "/Recording-2026-10-05_12-30-00-abcdef.mp4";
+    const auto part = Recording::partPath(final);
+    const auto incomplete = final.left(final.size() - 4) + "-incomplete.mp4";
+    const QByteArray damaged(64 * 1024 + 1, 'x');
+    write(part, "screen");
+    write(part + "-webcam.mp4", "camera");
+    write(part + ".camera.json", damaged);
+    QVERIFY(Recording::publishPart(part, final, false).isEmpty());
+    QVERIFY(QFileInfo::exists(part));
+    old(part);
+    Recording::recoverParts(folder);
+    QVERIFY(!QFileInfo::exists(part));
+    QFile screen(incomplete), sidecar(incomplete + ".camera.json.damaged"),
+        camera(incomplete + "-webcam.mp4");
+    QVERIFY(screen.open(QIODevice::ReadOnly));
+    QCOMPARE(screen.readAll(), QByteArray("screen"));
+    QVERIFY(camera.open(QIODevice::ReadOnly));
+    QCOMPARE(camera.readAll(), QByteArray("camera"));
+    QVERIFY(sidecar.open(QIODevice::ReadOnly));
+    QCOMPARE(sidecar.readAll(), damaged);
+    QCOMPARE(scan().size(), 1);
   }
   void publicationAndCameraNames() {
     const auto final = folder + "/Recording-2026-10-05_12-30-00-abcdef.mp4";
@@ -491,5 +646,18 @@ private slots:
     qInfo() << "5000 file scan ms:" << timer.elapsed();
   }
 };
-QTEST_MAIN(HistoryTest)
+int main(int argc, char **argv) {
+  QGuiApplication app(argc, argv);
+  if (app.arguments().value(1) == "--thumbnail-worker") {
+    History::Entry e;
+    e.path = app.arguments().value(2);
+    e.kind = "Recording";
+    e.identity = History::identify(e.path);
+    History::thumbnail(e, app.arguments().value(3),
+                       std::make_shared<std::atomic_bool>(false));
+    return 0;
+  }
+  HistoryTest test;
+  return QTest::qExec(&test, argc, argv);
+}
 #include "history-test.moc"

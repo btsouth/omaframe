@@ -77,6 +77,49 @@ QString Recording::publishPart(const QString &part, const QString &final,
   const QString camera = part + "-webcam.mp4", sidecar = part + ".camera.json";
   const QString newCamera = destination + "-webcam.mp4",
                 newSidecar = destination + ".camera.json";
+  if (incomplete) {
+    // Recovery publishes the screen even when an auxiliary is damaged.
+    if (!renameFile(part, destination))
+      return {};
+    auto preserve = [](const QString &from, const QString &to) {
+      if (renameFile(from, to))
+        return to;
+      const auto separate =
+          to + ".damaged-" + QUuid::createUuid().toString(QUuid::Id128);
+      return renameFile(from, separate) ? separate : QString();
+    };
+    QString keptCamera;
+    if (QFileInfo::exists(camera))
+      keptCamera = preserve(camera, newCamera);
+    if (QFileInfo::exists(sidecar)) {
+      QFile input(sidecar);
+      QJsonDocument metadata;
+      if (!QFileInfo(sidecar).isSymLink() && input.open(QIODevice::ReadOnly) &&
+          input.size() <= 64 * 1024)
+        metadata = QJsonDocument::fromJson(input.readAll());
+      input.close();
+      if (!metadata.isObject() || metadata.object().value("version") != 1) {
+        preserve(sidecar, newSidecar + ".damaged");
+      } else {
+        auto doc = metadata.object();
+        if (!keptCamera.isEmpty())
+          doc.insert("file", QFileInfo(keptCamera).fileName());
+        // Keep the original until the rewritten sidecar is safely published.
+        QTemporaryFile output(
+            QFileInfo(final).dir().filePath(".omaframe-camera-XXXXXX"));
+        const auto bytes = QJsonDocument(doc).toJson(QJsonDocument::Compact);
+        if (output.open() &&
+            output.setPermissions(QFile::ReadOwner | QFile::WriteOwner) &&
+            output.write(bytes) == bytes.size() && output.flush() &&
+            renameFile(output.fileName(), newSidecar))
+          QFile::remove(sidecar);
+        else
+          preserve(sidecar, newSidecar + ".damaged");
+      }
+    }
+    QFile::remove(part + ".ts");
+    return destination;
+  }
   bool movedCamera = false, movedSidecar = false;
   auto rollback = [&] {
     if (movedCamera)

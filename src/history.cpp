@@ -12,8 +12,10 @@
 #include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QImageReader>
+#include <QImageWriter>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLocale>
 #include <QMimeData>
 #include <QProcess>
 #include <QRegularExpression>
@@ -23,6 +25,8 @@
 #include <QtConcurrent>
 #include <algorithm>
 #include <fcntl.h>
+#include <signal.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -97,6 +101,37 @@ bool History::unchanged(const Entry &e) {
     return false;
   return true;
 }
+QDateTime History::captureTime(const QString &name, qint64 modified) {
+  static const QRegularExpression shot(
+      "^Omaframe-([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{"
+      "3})-.+\\.png$");
+  static const QRegularExpression video(
+      "^Recording-([0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2})-.+\\."
+      "mp4$");
+  const auto match =
+      name.startsWith("Omaframe-") ? shot.match(name) : video.match(name);
+  if (match.hasMatch()) {
+    const auto time =
+        QDateTime::fromString(match.captured(1), name.startsWith("Omaframe-")
+                                                     ? "yyyy-MM-dd_HH-mm-ss-zzz"
+                                                     : "yyyy-MM-dd_HH-mm-ss");
+    if (time.isValid())
+      return time;
+  }
+  return QDateTime::fromMSecsSinceEpoch(modified);
+}
+QString History::dayLabel(const QDate &day, const QDate &today) {
+  const auto age = day.daysTo(today);
+  if (age == 0)
+    return "Today";
+  if (age == 1)
+    return "Yesterday";
+  const QLocale locale;
+  if (age > 1 && age < 7)
+    return locale.dayName(day.dayOfWeek(), QLocale::LongFormat);
+  return locale.toString(day, day.year() == today.year() ? "ddd, MMM d"
+                                                         : "ddd, MMM d, yyyy");
+}
 QString History::discoveredKind(const QString &name) {
   if (name.startsWith('.') || name.endsWith("-webcam.mp4") ||
       name.contains(".part") || name.contains(".cleaning"))
@@ -154,6 +189,7 @@ History::scan(const QStringList &folders, const QString &data,
       e.kind = kind;
       e.identity = id;
       e.modified = id.modified / 1000000;
+      e.captured = captureTime(e.name, e.modified).toMSecsSinceEpoch();
       e.incomplete = e.name.endsWith("-incomplete.mp4");
       result.append(e);
     }
@@ -185,6 +221,7 @@ History::scan(const QStringList &folders, const QString &data,
                                                           : "Video draft");
       e.kind = kind == "image" ? "Screenshot" : "Recording";
       e.modified = e.identity.modified / 1000000;
+      e.captured = e.modified;
       e.sourcePath = kind == "image"
                          ? dir.filePath(id + ".png")
                          : QUrl(doc.value("source").toString()).toLocalFile();
@@ -213,7 +250,7 @@ History::scan(const QStringList &folders, const QString &data,
     }
   }
   std::sort(result.begin(), result.end(), [](const Entry &a, const Entry &b) {
-    return a.modified == b.modified ? a.path < b.path : a.modified > b.modified;
+    return a.captured == b.captured ? a.path < b.path : a.captured > b.captured;
   });
   return result;
 }
@@ -221,9 +258,13 @@ QImage History::draftPreview(const Entry &e) {
   if (!e.draft || e.draftKind != "image" || !unchanged(e))
     return {};
   const auto doc = document(e.draftPath, e.draftIdentity);
+  if (doc.value("version") != 1 || !doc.value("edits").isArray() ||
+      !doc.value("name").isString() || !doc.value("style").isDouble() ||
+      !doc.value("padding").isDouble() || !doc.value("aspect").isDouble() ||
+      !doc.value("selected").isDouble() || !doc.value("savedPath").isString())
+    return {};
   const auto array = doc.value("edits").toArray();
-  if (doc.value("version").toInt() != 1 ||
-      array.size() > MarkDocument::MaxEdits)
+  if (array.size() > MarkDocument::MaxEdits)
     return {};
   QVector<Frame::Edit> edits;
   for (const auto &value : array) {
@@ -257,10 +298,11 @@ QImage History::draftPreview(const Entry &e) {
 QString History::thumbnailKey(const Entry &e) {
   const auto id = e.identity;
   const auto bytes =
-      e.path.toUtf8() + QByteArray::number(id.device) + ':' +
-      QByteArray::number(id.inode) + ':' + QByteArray::number(id.size) + ':' +
-      QByteArray::number(id.modified) + ':' + QByteArray::number(id.changed) +
-      ':' + QByteArray::number(e.sourceIdentity.modified) + ':' +
+      QByteArray("v2:") + e.path.toUtf8() + QByteArray::number(id.device) +
+      ':' + QByteArray::number(id.inode) + ':' + QByteArray::number(id.size) +
+      ':' + QByteArray::number(id.modified) + ':' +
+      QByteArray::number(id.changed) + ':' +
+      QByteArray::number(e.sourceIdentity.modified) + ':' +
       QByteArray::number(e.sourceIdentity.changed);
   return QString::fromLatin1(QCryptographicHash::hash(
                                  e.path.toUtf8(), QCryptographicHash::Sha256)
@@ -285,7 +327,10 @@ void History::trimCache(const QString &directory, qint64 cap) {
       bytes -= i->size();
 }
 QImage History::thumbnail(const Entry &e, const QString &cache,
-                          const std::shared_ptr<std::atomic_bool> &cancel) {
+                          const std::shared_ptr<std::atomic_bool> &cancel,
+                          qint64 *duration) {
+  if (duration)
+    *duration = -1;
   if (*cancel || !unchanged(e))
     return {};
   if (e.draft)
@@ -310,14 +355,25 @@ QImage History::thumbnail(const Entry &e, const QString &cache,
       const auto size = reader.size();
       QImage image = size.width() <= 320 && size.height() <= 200 ? reader.read()
                                                                  : QImage();
-      if (!image.isNull() && image.width() <= 320 && image.height() <= 200)
+      if (!image.isNull() && image.width() <= 320 && image.height() <= 200) {
+        bool ok = false;
+        const auto ms = image.text("Description").toLongLong(&ok);
+        if (duration && ok && ms >= 0)
+          *duration = ms;
         return image;
+      }
     }
   }
   QProcess ffmpeg;
+  const auto parent = ::getpid();
+  ffmpeg.setChildProcessModifier([parent] {
+    ::prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (::getppid() != parent)
+      ::kill(::getpid(), SIGKILL);
+  });
   ffmpeg.setProcessChannelMode(QProcess::SeparateChannels);
   ffmpeg.start("ffmpeg", {"-v",
-                          "error",
+                          "info",
                           "-nostdin",
                           "-threads",
                           "1",
@@ -336,14 +392,16 @@ QImage History::thumbnail(const Entry &e, const QString &cache,
                           "-vcodec",
                           "mjpeg",
                           "pipe:1"});
-  QByteArray bytes;
+  QByteArray bytes, diagnostics;
   QElapsedTimer timer;
   timer.start();
   while (ffmpeg.state() != QProcess::NotRunning && timer.elapsed() < 5000 &&
          !*cancel) {
     ffmpeg.waitForReadyRead(50);
     bytes += ffmpeg.readAllStandardOutput();
-    ffmpeg.readAllStandardError();
+    const auto output = ffmpeg.readAllStandardError();
+    if (diagnostics.size() < 64 * 1024)
+      diagnostics += output.left(64 * 1024 - diagnostics.size());
     if (bytes.size() > 1024 * 1024)
       break;
   }
@@ -356,6 +414,20 @@ QImage History::thumbnail(const Entry &e, const QString &cache,
   if (*cancel || ffmpeg.exitCode() != 0 || bytes.size() > 1024 * 1024 ||
       !unchanged(e))
     return {};
+  diagnostics += ffmpeg.readAllStandardError().left(
+      std::max(0, 64 * 1024 - int(diagnostics.size())));
+  static const QRegularExpression durationPattern(
+      "Duration: ([0-9]+):([0-9]{2}):([0-9]{2})\\.([0-9]{2})");
+  const auto match = durationPattern.match(QString::fromUtf8(diagnostics));
+  qint64 ms = -1;
+  if (match.hasMatch())
+    ms = ((match.captured(1).toLongLong() * 60 + match.captured(2).toInt()) *
+              60 +
+          match.captured(3).toInt()) *
+             1000 +
+         match.captured(4).toInt() * 10;
+  if (duration)
+    *duration = ms;
   auto image = QImage::fromData(bytes, "JPEG");
   if (image.isNull() || image.width() > 320 || image.height() > 200)
     return {};
@@ -373,9 +445,12 @@ QImage History::thumbnail(const Entry &e, const QString &cache,
     if (old.absoluteFilePath() != path)
       QFile::remove(old.absoluteFilePath());
   QSaveFile file(path);
-  if (file.open(QIODevice::WriteOnly) && file.setPermissions(privateFile) &&
-      file.write(bytes) == bytes.size())
-    file.commit();
+  if (file.open(QIODevice::WriteOnly) && file.setPermissions(privateFile)) {
+    QImageWriter writer(&file, "JPEG");
+    writer.setText("Description", QString::number(ms));
+    if (writer.write(image))
+      file.commit();
+  }
   trimCache(cache, 16 * 1024 * 1024);
   return image;
 }
@@ -406,26 +481,33 @@ int CaptureHistoryModel::rowCount(const QModelIndex &parent) const {
   return parent.isValid() ? 0 : m_rows.size();
 }
 QHash<int, QByteArray> CaptureHistoryModel::roleNames() const {
-  return {
-      {Name, "captureName"}, {Kind, "kind"},         {Day, "day"},
-      {When, "when"},        {Detail, "detail"},     {Incomplete, "incomplete"},
-      {Draft, "draft"},      {HasDraft, "hasDraft"}, {Thumbnail, "thumbnail"},
-      {FilePath, "filePath"}};
+  return {{Name, "captureName"},
+          {Kind, "kind"},
+          {Day, "day"},
+          {When, "when"},
+          {Detail, "detail"},
+          {Incomplete, "incomplete"},
+          {Draft, "draft"},
+          {HasDraft, "hasDraft"},
+          {Thumbnail, "thumbnail"},
+          {FilePath, "filePath"},
+          {CanEdit, "canEdit"},
+          {Duration, "duration"}};
 }
 QVariant CaptureHistoryModel::data(const QModelIndex &index, int role) const {
   if (!index.isValid() || index.row() >= m_rows.size())
     return {};
   const auto &e = m_rows[index.row()];
-  const auto date = QDateTime::fromMSecsSinceEpoch(e.modified);
+  const auto date = QDateTime::fromMSecsSinceEpoch(e.captured);
   switch (role) {
   case Name:
     return e.name;
   case Kind:
     return e.kind;
   case Day:
-    return date.toString("yyyy-MM-dd");
+    return History::dayLabel(date.date());
   case When:
-    return date.toString("MMM d, h:mm AP") + " · File modified";
+    return QLocale().toString(date.time(), QLocale::ShortFormat);
   case Detail:
     return e.draft ? "Editable draft"
                    : QString::number(e.identity.size / 1024) + " KiB";
@@ -437,6 +519,16 @@ QVariant CaptureHistoryModel::data(const QModelIndex &index, int role) const {
     return !e.draftId.isEmpty();
   case Thumbnail:
     return m_thumbnails.value(History::thumbnailKey(e));
+  case CanEdit:
+    return e.draft || !e.path.endsWith(".gif", Qt::CaseInsensitive);
+  case Duration: {
+    const auto ms = m_durations.value(History::thumbnailKey(e), -1);
+    if (ms < 0)
+      return QString();
+    const auto seconds = ms / 1000;
+    return QString::number(seconds / 60) + ':' +
+           QString::number(seconds % 60).rightJustified(2, '0');
+  }
   case FilePath:
     return e.path;
   }
@@ -453,6 +545,7 @@ void CaptureHistoryModel::rebuild() {
   beginResetModel();
   m_rows.clear();
   m_thumbnails.clear();
+  m_durations.clear();
   for (const auto &e : m_all) {
     if (!e.name.contains(m_search, Qt::CaseInsensitive))
       continue;
@@ -589,24 +682,28 @@ void CaptureHistoryModel::setVisibleRange(int first, int last) {
     const auto cancel = std::make_shared<std::atomic_bool>(false);
     m_requests.insert(key, cancel);
     const int generation = m_generation;
-    auto *watcher = new QFutureWatcher<QImage>(this);
+    auto *watcher = new QFutureWatcher<QPair<QImage, qint64>>(this);
     connect(
         watcher, &QFutureWatcherBase::finished, this,
         [this, watcher, cancel, key, generation, row = i] {
-          auto image = watcher->result();
+          auto result = watcher->result();
+          auto image = result.first;
           watcher->deleteLater();
           if (*cancel || generation != m_generation)
             return;
+          m_durations.insert(key, result.second);
           m_requests.remove(key);
           m_thumbnails.insert(key, image.isNull() ? QString()
                                                   : "image://history/" + key);
           if (!image.isNull())
             m_images->put(key, image);
           if (row < m_rows.size() && History::thumbnailKey(m_rows[row]) == key)
-            emit dataChanged(index(row), index(row), {Thumbnail});
+            emit dataChanged(index(row), index(row), {Thumbnail, Duration});
         });
     watcher->setFuture(QtConcurrent::run(&m_pool, [e, cache, cancel] {
-      return History::thumbnail(e, cache, cancel);
+      qint64 duration;
+      auto image = History::thumbnail(e, cache, cancel, &duration);
+      return qMakePair(image, duration);
     }));
   }
 }
@@ -622,6 +719,11 @@ QString CaptureHistoryModel::pathAt(int row) const {
 }
 bool CaptureHistoryModel::isDraftAt(int row) const {
   return row >= 0 && row < m_rows.size() && m_rows[row].draft;
+}
+bool CaptureHistoryModel::canEditAt(int row) const {
+  return row >= 0 && row < m_rows.size() &&
+         (m_rows[row].draft ||
+          !m_rows[row].path.endsWith(".gif", Qt::CaseInsensitive));
 }
 bool CaptureHistoryModel::hasDraftAt(int row) const {
   return row >= 0 && row < m_rows.size() && !m_rows[row].draftId.isEmpty();
@@ -650,7 +752,7 @@ bool CaptureHistoryModel::action(int row, const QString &action,
     ok = true;
   } else if (!e.draft) {
     const auto url = QUrl::fromLocalFile(e.path);
-    if (action == "edit") {
+    if (action == "edit" && canEditAt(row)) {
       emit navigate("open", url);
       ok = true;
     } else if (action == "external")
