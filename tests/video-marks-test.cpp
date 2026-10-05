@@ -1,6 +1,7 @@
 #include "marks.hpp"
 #include "video.hpp"
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -83,6 +84,40 @@ class VideoMarksTest : public QObject {
   }
 
 private slots:
+  void startupRemovesOnlyOldExportTemporaries() {
+    QTemporaryDir folder;
+    QVERIFY(folder.isValid());
+    const auto now = QDateTime::currentDateTimeUtc();
+    const QStringList oldExports{".Recording-2026-10-05-edited-a1b2c3.part.mp4",
+                                  ".clip-edited-2-abcdef.part.gif",
+                                  ".clip-edited-10-123abc.part.mp4"};
+    const QStringList unrelated{"clip-edited-abcdef.part.mp4", ".clip-abcdef.part.mp4",
+                                ".clip-edited-abcde.part.mp4", ".clip-edited-ABCDEF.part.mp4",
+                                ".clip-edited-1-abcdef.part.mp4", ".clip-edited-abcdef.part.mkv",
+                                ".clip-edited-abcdef.part.mp4.bak", ".clip-edited.mp4"};
+    const QString recent = ".clip-edited-112233.part.mp4";
+    const QString future = ".clip-edited-445566.part.gif";
+    for (const auto &name : oldExports + unrelated + QStringList{recent, future}) {
+      QFile file(folder.filePath(name));
+      QVERIFY(file.open(QIODevice::WriteOnly));
+      file.write("partial");
+      QVERIFY(file.flush());
+      QVERIFY(file.setFileTime(name == recent ? now.addSecs(-3590)
+                             : name == future ? now.addSecs(60) : now.addSecs(-3601),
+                              QFileDevice::FileModificationTime));
+    }
+    const QString link = folder.filePath(".link-edited-abcdef.part.mp4");
+    QVERIFY(QFile::link(folder.filePath(unrelated.first()), link));
+    const QString directory = folder.filePath(".folder-edited-abcdef.part.gif");
+    QVERIFY(QDir().mkpath(directory));
+    const QVariant previous = QSettings().value("videoDirectory");
+    const auto cleanup = qScopeGuard([&] { QSettings().setValue("videoDirectory", previous); });
+    QSettings().setValue("videoDirectory", folder.path());
+    Video video;
+    for (const auto &name : oldExports) QVERIFY(!QFileInfo::exists(folder.filePath(name)));
+    for (const auto &name : unrelated + QStringList{recent, future}) QVERIFY(QFileInfo::exists(folder.filePath(name)));
+    QVERIFY(QFileInfo(link).isSymLink());QVERIFY(QFileInfo(directory).isDir());
+  }
   void styledMarksMatchExportedVideo() {
     const auto cleanup = qScopeGuard([] { QSettings().remove("tools"); });
     QSettings().remove("tools");

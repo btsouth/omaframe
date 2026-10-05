@@ -202,6 +202,15 @@ Webcam::~Webcam() {
 }
 QVideoSink *Webcam::previewSink() const { return m_preview; }
 void Webcam::setPreviewSink(QVideoSink *sink) { m_preview = sink; }
+int CameraDevices::preferredIndex(const QVariantList &devices,
+                                  const QByteArray &preferred) {
+  if (preferred.isEmpty())
+    return devices.isEmpty() ? -1 : 0;
+  for (int i = 0; i < devices.size(); ++i)
+    if (devices[i].toMap().value("id").toByteArray() == preferred)
+      return i;
+  return -1;
+}
 void Webcam::refresh() {
   if (m_track.busy())
     return;
@@ -214,13 +223,12 @@ void Webcam::refresh() {
   const auto cameras = QMediaDevices::videoInputs();
   const QByteArray preferred =
       QSettings().value("record/cameraDevice").toByteArray();
-  m_device = cameras.isEmpty() ? -1 : 0;
   for (int i = 0; i < cameras.size(); ++i) {
     m_devices.append(QVariantMap{{"label", cameras[i].description()},
                                  {"id", cameras[i].id()}});
-    if (cameras[i].id() == preferred)
-      m_device = i;
   }
+  m_device = CameraDevices::preferredIndex(m_devices, preferred);
+  m_unavailable = !preferred.isEmpty() && m_device < 0;
   if (m_enabled)
     activate();
   emit changed();
@@ -245,6 +253,7 @@ void Webcam::setDevice(int index) {
       index == m_device)
     return;
   m_device = index;
+  m_unavailable = false;
   QSettings().setValue("record/cameraDevice",
                        m_devices[index].toMap().value("id"));
   if (m_enabled)
@@ -263,8 +272,17 @@ void Webcam::suspend() {
 void Webcam::activate() {
   suspend();
   const auto cameras = QMediaDevices::videoInputs();
-  if (m_device < 0 || m_device >= cameras.size()) {
-    m_status = "No camera found. Connect a camera or turn Camera off.";
+  const auto selected = m_devices.value(m_device).toMap().value("id").toByteArray();
+  const auto camera = std::find_if(cameras.begin(), cameras.end(),
+                                 [&selected](const QCameraDevice &device) {
+                                   return device.id() == selected;
+                                 });
+  if (camera == cameras.end()) {
+    m_unavailable = m_unavailable || !selected.isEmpty();
+    m_status = m_unavailable
+                   ? "The selected camera is not connected. "
+                     "Choose another camera or turn Camera off."
+                   : "No camera found. Connect a camera or turn Camera off.";
     emit changed();
     return;
   }
@@ -289,10 +307,10 @@ void Webcam::activate() {
             });
   }
   m_session->setCamera(nullptr);
-  m_camera = std::make_unique<QCamera>(cameras[m_device]);
+  m_camera = std::make_unique<QCamera>(*camera);
   // Prefer a modest, wide camera stream. The overlay does not need a 4K feed.
   QCameraFormat chosen;
-  for (const auto &format : cameras[m_device].videoFormats()) {
+  for (const auto &format : camera->videoFormats()) {
     if (format.resolution().width() > 1280 ||
         format.maxFrameRate() < CameraTrack::Fps)
       continue;
@@ -320,13 +338,18 @@ void Webcam::activate() {
   m_camera->start();
   emit changed();
 }
-void Webcam::startTrack(const QString &path, std::function<qint64()> clock) {
-  if (!m_enabled || !ready())
-    return;
+bool Webcam::startTrack(const QString &path, std::function<qint64()> clock) {
+  if (!m_enabled || !ready()) {
+    m_status = "Camera was unavailable when recording started. "
+               "The screen recording continues.";
+    emit changed();
+    return false;
+  }
   m_trackPath = path;
   m_clock = std::move(clock);
   m_track.begin(path);
   m_frameTick.start();
+  return true;
 }
 void Webcam::finishTrack() {
   m_frameTick.stop();
