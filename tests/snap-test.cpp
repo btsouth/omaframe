@@ -334,6 +334,148 @@ private slots:
     scene.marks.undo();
     QVERIFY(scene.marks.edits().isEmpty());
   }
+  void modifierOnlyHandleClick_data() {
+    QTest::addColumn<bool>("video");
+    QTest::addColumn<QString>("type");
+    QTest::addColumn<int>("handle");
+    QTest::addColumn<int>("movement");
+    for (bool video : {false, true})
+      for (QString type : {QString("arrow"), QString("box")})
+        for (int handle = 0; handle < (type == "arrow" ? 2 : 4); ++handle)
+          for (int movement : {0, 3}) {
+            const auto name = QString("%1-%2-%3-move%4")
+                                  .arg(video ? "video" : "screenshot", type)
+                                  .arg(handle).arg(movement).toUtf8();
+            QTest::newRow(name.constData()) << video << type << handle << movement;
+          }
+  }
+  void modifierOnlyHandleClick() {
+    QFETCH(bool, video);
+    QFETCH(QString, type);
+    QFETCH(int, handle);
+    QFETCH(int, movement);
+    Scene scene;
+    QTRY_VERIFY(scene.component.isReady());
+    QVERIFY(scene.open("select"));
+    if (video) {
+      scene.marks.setDuration(10);
+      scene.canvas->setProperty("time", 0);
+      scene.canvas->setProperty("duration", 10);
+    }
+    // Fractional corners also catch a click rounding the stored geometry.
+    const double offset = type == "box" ? .4 : 0;
+    scene.marks.edit(type, (100 + offset) / 640, (100 + offset) / 360,
+                     (240 + offset) / 640, (180 + offset) / 360);
+    const auto original = scene.marks.edits();
+    const QPoint press = type == "arrow"
+        ? (handle == 0 ? QPoint(100, 100) : QPoint(240, 180))
+        : QPoint(handle == 0 || handle == 3 ? 100 : 240,
+                 handle < 2 ? 100 : 180);
+    const QPoint release = press + QPoint(movement, 0);
+    QSignalSpy edited(&scene.marks, &MarkDocument::edited);
+    scene.press(press);
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QCOMPARE(scene.marks.edits(), original);
+    QVERIFY(!scene.canvas->property("constraintActive").toBool());
+    if (movement) {
+      QTest::mouseEvent(QTest::MouseMove, &scene.window, Qt::NoButton,
+                        Qt::ShiftModifier, release, 0);
+      QTest::qWait(60); // Exercise the preview timer below the drag threshold.
+      QCOMPARE(scene.marks.edits(), original);
+    }
+    scene.release(release, Qt::ShiftModifier);
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QCOMPARE(scene.marks.edits(), original);
+    QCOMPARE(edited.count(), 0);
+    QVERIFY(!scene.marks.transforming());
+    QVERIFY(!scene.canvas->property("constraintActive").toBool());
+    scene.marks.undo();
+    QVERIFY(scene.marks.edits().isEmpty());
+    QVERIFY(!scene.marks.canUndo());
+    scene.marks.redo();
+    QCOMPARE(scene.marks.edits(), original);
+  }
+  void pendingResizeReadout_data() {
+    QTest::addColumn<bool>("video");
+    QTest::addColumn<QString>("type");
+    for (bool video : {false, true})
+      for (QString type : {QString("arrow"), QString("box")}) {
+        const auto name = QString("%1-%2")
+                              .arg(video ? "video" : "screenshot", type).toUtf8();
+        QTest::newRow(name.constData()) << video << type;
+      }
+  }
+  void pendingResizeReadout() {
+    QFETCH(bool, video);
+    QFETCH(QString, type);
+    Scene scene;
+    QTRY_VERIFY(scene.component.isReady());
+    QVERIFY(scene.open("select"));
+    if (video) {
+      scene.marks.setDuration(10);
+      scene.canvas->setProperty("time", 0);
+      scene.canvas->setProperty("duration", 10);
+    }
+    scene.marks.edit(type, 100. / 640, 100. / 360, 240. / 640, 180. / 360);
+    const auto original = scene.marks.edits();
+    scene.press({240, 180});
+    scene.move({320, 200});
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    auto *readout = scene.canvas->findChild<QQuickItem *>("constraintReadout");
+    QVERIFY(readout);
+    QVERIFY(readout->isVisible());
+    const auto preview = scene.marks.edits();
+    const auto feedback = scene.canvas->property("constraintFeedback");
+    QTest::mouseEvent(QTest::MouseMove, &scene.window, Qt::NoButton,
+                      Qt::ShiftModifier, {400, 220}, 0);
+    // No wait: geometry is still the old preview and its readout must stay up.
+    QCOMPARE(scene.marks.edits(), preview);
+    QCOMPARE(scene.canvas->property("constraintFeedback"), feedback);
+    QVERIFY(scene.canvas->property("constraintActive").toBool());
+    QVERIFY(readout->isVisible());
+    QTRY_VERIFY(scene.marks.edits() != preview);
+    QVERIFY(readout->isVisible());
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QVERIFY(!readout->isVisible());
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QVERIFY(readout->isVisible());
+    // Once a drag has started, returning to the press point still resolves
+    // stationary Shift toggles immediately.
+    QTest::mouseEvent(QTest::MouseMove, &scene.window, Qt::NoButton,
+                      Qt::ShiftModifier, {240, 180}, 0);
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QCOMPARE(scene.marks.edits(), original);
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QVERIFY(readout->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(scene.canvas.get(), "cancelDrag"));
+    QVERIFY(!readout->isVisible());
+    scene.release({240, 180}, Qt::ShiftModifier);
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QCOMPARE(scene.marks.edits(), original);
+  }
+  void invalidResizeClearsReadout() {
+    Scene scene;
+    QTRY_VERIFY(scene.component.isReady());
+    QVERIFY(scene.open("select"));
+    scene.marks.edit("arrow", .1, .1, .5, .5);
+    auto edits = scene.marks.edits();
+    edits[0].from = {-.2, -.2};
+    scene.marks.restore(QImage(1920, 1080, QImage::Format_RGB32), edits, 0);
+    scene.marks.select(0);
+    scene.press({320, 180});
+    scene.move({400, 240});
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QVERIFY(scene.canvas->property("constraintActive").toBool());
+    const auto last = scene.marks.edits();
+    QTest::mouseEvent(QTest::MouseMove, &scene.window, Qt::NoButton,
+                      Qt::ShiftModifier, {-200, -200}, 0);
+    QTRY_VERIFY(!scene.canvas->property("constraintActive").toBool());
+    QCOMPARE(scene.marks.edits(), last);
+    QVERIFY(QMetaObject::invokeMethod(scene.canvas.get(), "cancelDrag"));
+    scene.release({-200, -200}, Qt::ShiftModifier);
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QCOMPARE(scene.marks.edits(), edits);
+  }
   void cornerSideAndFocusLoss() {
     Scene scene;
     QTRY_VERIFY(scene.component.isReady());

@@ -23,7 +23,8 @@ Item {
     // The owner supplies the visible part when this canvas is zoomed or scrolled.
     property rect feedbackViewport: Qt.rect(0, 0, width, height)
     property var constraintFeedback: ({})
-    readonly property bool constraintActive: drawArea.interaction !== "none" && drawArea.moved
+    readonly property bool constraintActive: drawArea.interaction !== "none"
+        && (drawArea.moved || (drawArea.interaction === "resize" && drawArea.resizeDragged))
         && !typing && constraintFeedback.valid === true && !!constraintFeedback.label
     readonly property string constraintLabel: constraintActive ? constraintFeedback.label : ""
     readonly property bool typing: textEditor.active
@@ -89,6 +90,7 @@ Item {
         property real rawX: 0
         property real rawY: 0
         property bool shiftHeld: false
+        property bool resizeDragged: false
         property string interaction: "none"
         property int handle: -1
         property int hoverHandle: -1
@@ -123,7 +125,9 @@ Item {
             const previousX = endX, previousY = endY;
             endX = Math.max(0, Math.min(width, rawX));
             endY = Math.max(0, Math.min(height, rawY));
-            editSurface.constraintFeedback = ({});
+            // Keep the last resize readout while its throttled preview is pending.
+            if (interaction !== "resize" || !resizeDragged || !shiftHeld)
+                editSurface.constraintFeedback = ({});
             if (interaction === "draw" && moved) {
                 const result = editSurface.doc.creationPreview(editSurface.tool,
                     startX / width, startY / height, rawX / width, rawY / height,
@@ -145,6 +149,7 @@ Item {
         function updatePointer(mouse) {
             rawX = mouse.x;
             rawY = mouse.y;
+            if (interaction === "resize" && moved) resizeDragged = true;
             shiftHeld = !!(mouse.modifiers & Qt.ShiftModifier);
             resolvePointer();
         }
@@ -185,7 +190,7 @@ Item {
             return Qt.rect(l, t, r-l, b-t);
         }
         function previewTransform() {
-            if (interaction === "resize" && initialMark.type !== "crop")
+            if (interaction === "resize" && resizeDragged && initialMark.type !== "crop")
                 editSurface.constraintFeedback = editSurface.doc.previewConstrainedTransform(
                     handle, rawX / width, rawY / height, width, height, shiftHeld);
             else if (interaction === "move")
@@ -215,6 +220,7 @@ Item {
             hoverHandle = -1;
             startX = endX = rawX = mouse.x;
             startY = endY = rawY = mouse.y;
+            resizeDragged = false;
             shiftHeld = !!(mouse.modifiers & Qt.ShiftModifier);
             editSurface.constraintFeedback = ({});
             const nx = mouse.x / width, ny = mouse.y / height;
