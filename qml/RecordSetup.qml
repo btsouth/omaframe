@@ -9,6 +9,8 @@ import QtMultimedia
 Window {
     id: setup
     visible: false
+    onVisibleChanged: audioLevels.setSurface("options", "options", visible)
+    Component.onDestruction: audioLevels.setSurface("options", "options", false)
     palette.window: theme.alpha(theme.background, 1)
     palette.windowText: theme.text
     palette.base: theme.well
@@ -131,6 +133,13 @@ Window {
                         currentIndex: recorder.microphone
                         onActivated: recorder.microphone = currentIndex
                         displayText: currentIndex < 0 ? (recorder.microphones.length ? "Choose a microphone" : "No microphone found") : currentText
+                    }
+                    AudioMeter { Layout.fillWidth: true; detailed: true; channel: audioLevels.microphone }
+                    AudioMeter { Layout.fillWidth: true; detailed: true; label: "Computer sound"; channel: audioLevels.sound }
+                    Text {
+                        visible: recorder.micAudio
+                        text: "Say a few words to check your microphone."
+                        color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12
                     }
                     Text {
                         visible: !recorder.desktopAudio && !recorder.micAudio

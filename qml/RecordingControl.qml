@@ -12,6 +12,8 @@ Window {
     // The lower 48 px are reserved for passive hints outside the video.
     height: 96
     visible: false
+    onVisibleChanged: audioLevels.setSurface("control", "control", visible)
+    Component.onDestruction: audioLevels.setSurface("control", "control", false)
     palette.window: theme.alpha(theme.background, 1)
     palette.windowText: theme.text
     palette.base: theme.well
@@ -131,7 +133,14 @@ Window {
             }
         }
     }
+    Column {
+        visible: control.visible && control.live && lowerHint.text.length === 0
+        x: 8; y: 52; width: parent.width - 16; spacing: 0
+        AudioMeter { width: parent.width; channel: audioLevels.microphone }
+        AudioMeter { width: parent.width; label: "Computer sound"; channel: audioLevels.sound }
+    }
     BarHint {
+        id: lowerHint
         anchors.horizontalCenter: parent.horizontalCenter
         y: 54
         maximumWidth: control.width

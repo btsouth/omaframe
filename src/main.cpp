@@ -149,6 +149,12 @@ int main(int argc, char **argv) {
   Navigation navigation;
   video.setImageStore(videoMarks);
   Recorder recorder;
+  AudioLevels audioLevels;
+  QObject::connect(&recorder, &Recorder::changed, &audioLevels, [&] {
+    audioLevels.configure(recorder.audioPreview(), recorder.audioSession(),
+                          recorder.pausePending() ? "pending" : recorder.state(),
+                          recorder.micAudio(), recorder.desktopAudio());
+  });
   ShortcutSetup shortcuts;
   // Setting up the recording shortcut also gives the recorder its stop key.
   QObject::connect(&shortcuts, &ShortcutSetup::changed, &recorder, [&] {
@@ -198,6 +204,7 @@ int main(int argc, char **argv) {
   engine.rootContext()->setContextProperty("video", &video);
   engine.rootContext()->setContextProperty("navigation", &navigation);
   engine.rootContext()->setContextProperty("recorder", &recorder);
+  engine.rootContext()->setContextProperty("audioLevels", &audioLevels);
   engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
   engine.rootContext()->setContextProperty("captureAtStartup", captureStartup);
   // The capture path only creates a selection surface. Load the chooser

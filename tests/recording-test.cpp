@@ -59,7 +59,7 @@ fi
 case "$1" in
 get-default-source) echo clean_desktop_microphone;;
 get-default-sink) if [ -z "$OMAFRAME_TEST_NO_SINK" ]; then echo speakers; fi;;
-*) echo '[{"name":"clean_desktop_microphone","description":"Clean microphone"}]';;
+*) if [ "$4" = sinks ]; then echo '[{"name":"speakers","description":"Speakers","monitor_source_name":"actual_monitor"}]'; else echo '[{"name":"clean_desktop_microphone","description":"Clean microphone"}]'; fi;;
 esac
 )");
    executable("pgrep","#!/bin/sh\nexit 1\n");

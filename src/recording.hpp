@@ -1,5 +1,6 @@
 #pragma once
 #include "webcam.hpp"
+#include "audio-levels.hpp"
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QLocalSocket>
@@ -43,6 +44,8 @@ Placement placeCountdown(const QList<Display> &displays,
 QStringList arguments(const QString &target, const QString &path,
                       const QString &desktopSource, const QString &micSource,
                       bool cursor);
+QStringList arguments(const QString &target, const QString &path,
+                      const AudioSnapshot &audio, bool cursor);
 /** The program and arguments that start GPU Screen Recorder. It runs with
  *  the plain name `gpu-screen-recorder` as its command, which is what the
  *  Omarchy bar's recording icon looks for. QProcess alone would start it as
@@ -84,6 +87,8 @@ class Recorder final : public QObject {
 public:
   explicit Recorder(QObject *parent = nullptr, int stopGraceMs = 15000);
   Webcam *camera() { return &m_webcam; }
+  AudioSnapshot audioPreview() const;
+  AudioSnapshot audioSession() const { return m_audioSession; }
   ~Recorder() override;
   QString state() const { return m_state; }
   QString status() const { return m_status; }
@@ -177,6 +182,8 @@ private:
   void freezeClock();
   void completeWhenCameraReady();
   Webcam m_webcam;
+  AudioSnapshot m_audioSession;
+  QString m_sinkLabel;
   bool m_screenReady = false;
   bool m_canForceStop = false, m_forcedStop = false;
   QString m_cameraWarning;

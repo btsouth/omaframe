@@ -31,6 +31,9 @@ Window {
     Shortcut {sequence: "F"; enabled: window.visible && !window.dragging && !studio.scrollSelection; onActivated: window.wholeDisplay()}
     Shortcut {sequence: "D"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
     Shortcut {sequence: "M"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
+    readonly property bool meterVisible: window.visible && bar.visible && studio.recordingSelection
+    onMeterVisibleChanged: audioLevels.setSurface("bar:" + monitorName, "bar", meterVisible)
+    Component.onDestruction: audioLevels.setSurface("bar:" + monitorName, "bar", false)
     property string monitorName: ""
     property real startX: 0
     property real startY: 0
@@ -450,6 +453,12 @@ Window {
                 hint: "Record what your computer plays · D"
                 onActivated: recorder.desktopAudio = !recorder.desktopAudio
             }
+            AudioMeter {
+                visible: studio.recordingSelection && recorder.desktopAudio
+                channel: audioLevels.sound; label: "Computer sound"; tiny: true
+                Layout.preferredWidth: window.width < 760 ? 42 : 64
+                Layout.preferredHeight: 30
+            }
             BarToggle {
                 visible: studio.recordingSelection
                 label: window.width < 760 ? "" : "Mic"
@@ -457,6 +466,12 @@ Window {
                 on: recorder.micAudio
                 hint: (recorder.micAudio && recorder.microphone >= 0 ? "Recording from " + recorder.microphones[recorder.microphone].label : "Record your microphone") + " · M"
                 onActivated: recorder.micAudio = !recorder.micAudio
+            }
+            AudioMeter {
+                visible: studio.recordingSelection && recorder.micAudio
+                channel: audioLevels.microphone; tiny: true
+                Layout.preferredWidth: window.width < 760 ? 42 : 64
+                Layout.preferredHeight: 30
             }
             BarToggle {
                 visible: studio.recordingSelection
