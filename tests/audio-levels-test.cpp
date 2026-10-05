@@ -28,7 +28,7 @@ private slots:
   }
   void smoothingHoldClipAndStale() {
     auto backend = std::make_unique<FakeLevels>(); auto *fake = backend.get();
-    AudioLevels levels(std::move(backend));
+    AudioLevels levels(std::move(backend), nullptr, false);
     levels.configure(preview, session, "setup", true, true);
     levels.setSurface("options", "options", true);
     QCOMPARE(levels.microphone()["state"].toString(), "Checking");
@@ -52,7 +52,7 @@ private slots:
   }
   void invalidIsNotSilenceAndGenerationIsDiscarded() {
     auto backend = std::make_unique<FakeLevels>(); auto *fake = backend.get();
-    AudioLevels levels(std::move(backend));
+    AudioLevels levels(std::move(backend), nullptr, false);
     levels.configure(preview, session, "setup", true, false);
     levels.setSurface("options", "options", true);
     fake->send(0, {std::numeric_limits<float>::quiet_NaN()}); levels.advance(40);
@@ -81,7 +81,7 @@ private slots:
   void lifecycle() {
     QFETCH(QString, state); QFETCH(QString, surface); QFETCH(bool, open);
     auto backend = std::make_unique<FakeLevels>(); auto *fake = backend.get();
-    AudioLevels levels(std::move(backend));
+    AudioLevels levels(std::move(backend), nullptr, false);
     levels.configure(preview, session, state, true, true);
     QCOMPARE(fake->opens, 0);
     levels.setSurface("first", surface, true);
@@ -104,7 +104,7 @@ private slots:
   }
   void stateTransitionsCloseAndFrozenNamesMatchArguments() {
     auto backend = std::make_unique<FakeLevels>(); auto *fake = backend.get();
-    AudioLevels levels(std::move(backend));
+    AudioLevels levels(std::move(backend), nullptr, false);
     levels.setSurface("bar", "bar", true); levels.setSurface("control", "control", true);
     levels.configure(preview, session, "setup", true, true);
     levels.configure(preview, session, "countdown", true, true);

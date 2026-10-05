@@ -3,8 +3,8 @@
 #include <cmath>
 
 AudioLevels::AudioLevels(QObject *parent) : AudioLevels(pulseAudioBackend(), parent) {}
-AudioLevels::AudioLevels(std::unique_ptr<AudioLevelBackend> backend, QObject *parent)
-    : QObject(parent), m_backend(std::move(backend)) {
+AudioLevels::AudioLevels(std::unique_ptr<AudioLevelBackend> backend, QObject *parent, bool automaticClock)
+    : QObject(parent), m_backend(std::move(backend)), m_automaticClock(automaticClock) {
   connect(m_backend.get(), &AudioLevelBackend::samples, this, &AudioLevels::receive);
   connect(m_backend.get(), &AudioLevelBackend::unavailable, this,
           [this](int i, quint64 generation) {
@@ -54,6 +54,7 @@ void AudioLevels::reconcile() {
   if (!needed || !m_micOn) wanted.mic.clear();
   if (!needed || !m_soundOn) wanted.sound.clear();
   // Labels can change without reopening a pinned stream.
+  if (m_automaticClock && !m_tick.isActive()) m_previous = m_now = m_clock.elapsed();
   const bool reopen = wanted.mic != m_open.mic || wanted.sound != m_open.sound;
   if (reopen) {
     ++m_generation;
@@ -76,13 +77,14 @@ void AudioLevels::reconcile() {
   }
   if (reopen && (!wanted.mic.isEmpty() || !wanted.sound.isEmpty()))
     m_backend->open(wanted, m_generation);
-  if (needed && (m_micOn || m_soundOn)) m_tick.start();
+  if (m_automaticClock && needed && (m_micOn || m_soundOn)) m_tick.start();
   else m_tick.stop();
   emit changed();
 }
 void AudioLevels::receive(int i, quint64 generation, const QList<float> &peaks) {
   if (generation != m_generation || i < 0 || i > 1 || m_channels[i].state == "Off") return;
   if (std::none_of(peaks.begin(), peaks.end(), [](float p) { return std::isfinite(p); })) return;
+  if (m_automaticClock) m_now = m_clock.elapsed();
   auto &c = m_channels[i];
   const double db = decibels(peaks);
   c.sampleAt = m_now;

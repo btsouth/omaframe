@@ -29,7 +29,7 @@ class AudioLevels final : public QObject {
   Q_PROPERTY(QVariantMap sound READ sound NOTIFY changed)
 public:
   explicit AudioLevels(QObject *parent = nullptr);
-  explicit AudioLevels(std::unique_ptr<AudioLevelBackend>, QObject *parent = nullptr);
+  explicit AudioLevels(std::unique_ptr<AudioLevelBackend>, QObject *parent = nullptr, bool automaticClock = true);
   ~AudioLevels() override;
   QVariantMap microphone() const { return value(0); }
   QVariantMap sound() const { return value(1); }
@@ -56,6 +56,7 @@ private:
   AudioSnapshot m_preview, m_session, m_open;
   QString m_state = "idle";
   bool m_micOn = false, m_soundOn = false;
+  const bool m_automaticClock;
   quint64 m_generation = 0;
   qint64 m_now = 0, m_previous = 0, m_openedAt = 0;
   QElapsedTimer m_clock;
