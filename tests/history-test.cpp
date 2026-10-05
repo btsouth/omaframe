@@ -406,8 +406,27 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(
         (log += app.readAllStandardError()).contains("history requested"),
         5000);
-    QVERIFY2(!log.contains("failed to load") && !log.contains("is not defined"),
+    QVERIFY2(!log.contains("failed to load") &&
+                 !log.contains("is not defined") &&
+                 !log.contains("is not a function"),
              log.constData());
+    env.insert("WAYLAND_DISPLAY", "history-cold-test");
+    QProcess cold;
+    cold.setProcessEnvironment(env);
+    cold.start(HISTORY_APP_PATH, {"--history"});
+    QVERIFY(cold.waitForStarted(5000));
+    const auto coldCleanup = qScopeGuard([&] {
+      cold.kill();
+      cold.waitForFinished(5000);
+    });
+    QByteArray coldLog;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (coldLog += cold.readAllStandardError()).contains("history requested"),
+        5000);
+    QVERIFY2(!coldLog.contains("failed to load") &&
+                 !coldLog.contains("is not defined") &&
+                 !coldLog.contains("is not a function"),
+             coldLog.constData());
   }
   void largeFolderBound() {
     for (int i = 0; i < 5000; ++i)

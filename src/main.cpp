@@ -873,8 +873,12 @@ int main(int argc, char **argv) {
   }
   if (command == "history") QTimer::singleShot(0, &app, [&] { requestNavigation("history"); });
   if (!captureStartup && command != "history") {
-    const auto folder = video.outputDirectory();
-    (void)QtConcurrent::run([folder] { Recording::recoverParts(folder); });
+    auto folders = History::previousFolders();
+    folders.append(video.outputDirectory());
+    folders.removeDuplicates();
+    (void)QtConcurrent::run([folders] {
+      for (const auto &folder : folders) Recording::recoverParts(folder);
+    });
   }
   if (!file.isEmpty())
     studio.open(QUrl::fromLocalFile(file));

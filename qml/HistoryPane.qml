@@ -20,12 +20,16 @@ ColumnLayout {
         list.forceActiveFocus();
     }
     function act(action) { history.action(list.currentIndex, action, history.keyAt(list.currentIndex)); }
-    function confirmDelete() {
-        if (list.currentIndex < 0) return;
-        confirmation.row = list.currentIndex;
-        confirmation.key = history.keyAt(list.currentIndex);
-        confirmation.isDraft = history.isDraftAt(list.currentIndex);
-        confirmation.message = (confirmation.isDraft ? "Delete this editable draft? Saved exports stay in place.\n" : "Move this one saved file to Trash? Drafts and camera files stay in place.\n") + history.pathAt(list.currentIndex);
+    function confirmDelete(row, key, path, draft) {
+        if (row === undefined) {
+            row = list.currentIndex; key = history.keyAt(row);
+            path = history.pathAt(row); draft = history.isDraftAt(row);
+        }
+        if (row < 0) return;
+        confirmation.row = row;
+        confirmation.key = key;
+        confirmation.isDraft = draft;
+        confirmation.message = (confirmation.isDraft ? "Delete this editable draft? Saved exports stay in place.\n" : "Move this one saved file to Trash? Drafts and camera files stay in place.\n") + path;
         confirmation.open();
     }
     Component.onCompleted: { history.refresh(); list.forceActiveFocus(); }
@@ -160,11 +164,12 @@ ColumnLayout {
         id: actions
         property int row: -1
         property string key: ""
+        property string path: ""
         property bool draft: false
         property bool hasDraft: false
         function showFor(index) {
             if (index < 0) return;
-            row = index; key = history.keyAt(index); draft = history.isDraftAt(index); hasDraft = history.hasDraftAt(index);
+            row = index; key = history.keyAt(index); path = history.pathAt(index); draft = history.isDraftAt(index); hasDraft = history.hasDraftAt(index);
             popup(pane, Math.max(0, pane.width - width - 20), 130);
         }
         function act(action) { history.action(row, action, key); }
@@ -173,7 +178,7 @@ ColumnLayout {
         MenuItem { text: "Copy again"; enabled: !actions.draft; onTriggered: actions.act("copy") }
         MenuItem { text: "Open externally"; enabled: !actions.draft; onTriggered: actions.act("external") }
         MenuItem { text: "Reveal in folder"; enabled: !actions.draft; onTriggered: actions.act("reveal") }
-        MenuItem { text: actions.draft ? "Delete draft…" : "Move to Trash…"; onTriggered: { list.currentIndex = actions.row; pane.confirmDelete(); } }
+        MenuItem { text: actions.draft ? "Delete draft…" : "Move to Trash…"; onTriggered: pane.confirmDelete(actions.row, actions.key, actions.path, actions.draft) }
         onClosed: list.forceActiveFocus()
     }
     ConfirmDialog {

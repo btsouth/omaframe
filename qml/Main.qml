@@ -624,7 +624,7 @@ ApplicationWindow {
                             required property string modelData
                             Layout.fillWidth: true
                             Text { Layout.fillWidth: true; text: root.home(modelData); color: theme.muted; font.pixelSize: 11; elide: Text.ElideMiddle }
-                            StudioButton { text: "Forget"; quiet: true; implicitHeight: 30; hint: "Stop scanning this previous folder. Files stay in place."; onClicked: history.removeFolder(modelData) }
+                            StudioButton { text: "Forget"; quiet: true; implicitHeight: 30; hint: "Forget this previous folder. Current save folders are still scanned. Files stay in place."; onClicked: history.removeFolder(modelData) }
                         }
                     }
                     RecordToggle {

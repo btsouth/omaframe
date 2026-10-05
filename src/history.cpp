@@ -590,21 +590,21 @@ void CaptureHistoryModel::setVisibleRange(int first, int last) {
     m_requests.insert(key, cancel);
     const int generation = m_generation;
     auto *watcher = new QFutureWatcher<QImage>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this,
-            [this, watcher, cancel, key, generation] {
-              auto image = watcher->result();
-              watcher->deleteLater();
-              if (*cancel || generation != m_generation)
-                return;
-              m_requests.remove(key);
-              m_thumbnails.insert(
-                  key, image.isNull() ? QString() : "image://history/" + key);
-              if (!image.isNull())
-                m_images->put(key, image);
-              for (int i = 0; i < m_rows.size(); ++i)
-                if (History::thumbnailKey(m_rows[i]) == key)
-                  emit dataChanged(index(i), index(i), {Thumbnail});
-            });
+    connect(
+        watcher, &QFutureWatcherBase::finished, this,
+        [this, watcher, cancel, key, generation, row = i] {
+          auto image = watcher->result();
+          watcher->deleteLater();
+          if (*cancel || generation != m_generation)
+            return;
+          m_requests.remove(key);
+          m_thumbnails.insert(key, image.isNull() ? QString()
+                                                  : "image://history/" + key);
+          if (!image.isNull())
+            m_images->put(key, image);
+          if (row < m_rows.size() && History::thumbnailKey(m_rows[row]) == key)
+            emit dataChanged(index(row), index(row), {Thumbnail});
+        });
     watcher->setFuture(QtConcurrent::run(&m_pool, [e, cache, cancel] {
       return History::thumbnail(e, cache, cancel);
     }));

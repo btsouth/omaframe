@@ -123,6 +123,10 @@ QString Recording::publishPart(const QString &part, const QString &final,
   return destination;
 }
 void Recording::recoverParts(const QString &folder, qint64 minimumAgeSeconds) {
+  const QFileInfo directory(folder);
+  if (directory.canonicalFilePath() !=
+      QDir::cleanPath(directory.absoluteFilePath()))
+    return;
   static const QRegularExpression pattern(
       "^\\.(Recording-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-"
       "9a-f]{6})\\.part\\.mp4$");
