@@ -10,14 +10,14 @@
 #include <QString>
 
 namespace Shortcuts {
-enum class Action { Screenshot, Record, Pause };
+enum class Action { Screenshot, Record, Pause, Delay };
 /** A readable key combination, e.g. "Alt+Print" or "Super+Shift+S". */
 QString keyLabel(const QJsonObject &bind);
 /** Whether `bind` runs Omaframe for `action`. */
 bool runsOmaframe(const QJsonObject &bind, Action action);
 /** The key that runs Omaframe for `action`, or empty when none does. */
 QString omaframeKey(const QJsonArray &binds, Action action);
-/** The default key for `action`: Print, Alt+Print, or Alt+Shift+Print. */
+/** The default key for `action`: Print, Alt+Print, Alt+Shift+Print, or Shift+Print. */
 QString defaultKey(Action action);
 /** What the default key does now: "omaframe", "stock" (Omarchy's own
  *  action, safe to replace), "none", or "custom". */
@@ -39,6 +39,8 @@ bool install(const QString &configDir, const QString &executable,
 /** Live shortcut state for onboarding, settings and recording setup. */
 class ShortcutSetup final : public QObject {
   Q_OBJECT
+  Q_PROPERTY(QString delayKey READ delayKey NOTIFY changed)
+  Q_PROPERTY(QString delayState READ delayState NOTIFY changed)
   Q_PROPERTY(QString screenshotKey READ screenshotKey NOTIFY changed)
   Q_PROPERTY(QString recordKey READ recordKey NOTIFY changed)
   Q_PROPERTY(QString pauseKey READ pauseKey NOTIFY changed)
@@ -52,6 +54,8 @@ class ShortcutSetup final : public QObject {
   Q_PROPERTY(QString message READ message NOTIFY changed)
 public:
   explicit ShortcutSetup(QObject *parent = nullptr);
+  QString delayKey() const { return m_delayKey; }
+  QString delayState() const { return m_delayState; }
   QString screenshotKey() const { return m_screenshotKey; }
   QString recordKey() const { return m_recordKey; }
   QString pauseKey() const { return m_pauseKey; }
@@ -70,6 +74,7 @@ public:
   Q_INVOKABLE void refresh();
   /** Binds every default key that is free or still Omarchy's stock action. */
   Q_INVOKABLE void setUp();
+  Q_INVOKABLE void setUpDelay();
   /** Binds free start/stop and pause keys, for recording setup. */
   Q_INVOKABLE void setUpRecording();
 signals:
@@ -77,6 +82,7 @@ signals:
 
 private:
   void run(const QList<Shortcuts::Action> &actions);
+  QString m_delayKey, m_delayState = "unknown";
   QString m_screenshotKey, m_recordKey, m_pauseKey,
       m_screenshotState = "unknown", m_recordState = "unknown",
       m_pauseState = "unknown", m_message;

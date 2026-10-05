@@ -15,7 +15,7 @@ public:
   bool pending() const { return !m_command.isEmpty(); }
   bool saving() const { return m_saving; }
   void setDirty(bool dirty);
-  Q_INVOKABLE void request(const QString &command, const QUrl &file = {});
+  Q_INVOKABLE void request(const QString &command, const QUrl &file = {}, int delaySeconds = -1);
   Q_INVOKABLE void cancel();
   Q_INVOKABLE void discard();
   Q_INVOKABLE void save();
@@ -25,11 +25,12 @@ signals:
   void changed();
   void confirmationRequested();
   void saveRequested();
-  void proceed(const QString &command, const QUrl &file);
+  void proceed(const QString &command, const QUrl &file, int delaySeconds);
 
 private:
   void continueRequest();
   bool m_dirty = false, m_saving = false;
   QString m_command;
   QUrl m_file;
+  int m_delaySeconds = -1;
 };

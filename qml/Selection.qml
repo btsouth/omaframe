@@ -31,6 +31,15 @@ Window {
     Shortcut {sequence: "F"; enabled: window.visible && !window.dragging && !studio.scrollSelection; onActivated: window.wholeDisplay()}
     Shortcut {sequence: "D"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
     Shortcut {sequence: "M"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
+    Shortcut {
+        objectName: "screenshotDelayKey"
+        sequence: "T"
+        autoRepeat: false
+        enabled: window.visible && !window.dragging && !delayMenu.opened &&
+                 !studio.recordingSelection && !studio.scrollSelection &&
+                 studio.quickState === "selecting"
+        onActivated: studio.delayCapture()
+    }
     property string monitorName: ""
     property real startX: 0
     property real startY: 0
@@ -355,7 +364,7 @@ Window {
         // Narrow or high-scale displays drop the key hints, then the prompt,
         // so the mode switch always fits on screen.
         readonly property bool showHints: window.width >= (studio.recordingSelection ? 1600 : 1200)
-        readonly property bool showPrompt: window.width >= (studio.recordingSelection ? 1240 : 720)
+        readonly property bool showPrompt: window.width >= (studio.recordingSelection ? 1240 : 920)
         height: 48
         radius: theme.radius
         color: theme.alpha(theme.background, 1)
@@ -441,6 +450,37 @@ Window {
                 checkable: false
                 hint: (studio.recordingSelection ? "Record" : "Capture") + " this entire display · F"
                 onActivated: studio.finishSelection(window.monitorName, 0, 0, 1, 1)
+            }
+            StudioButton {
+                id: delayButton
+                objectName: "screenshotDelay"
+                visible: !studio.recordingSelection && !studio.scrollSelection
+                text: window.width < 900 ? "" : "Delay " + studio.delaySeconds + " s"
+                glyph: "timer"
+                implicitHeight: 34
+                implicitWidth: window.width < 900 ? 34 : 116
+                padding: 5
+                hint: "Wait, then choose what to capture. T"
+                Accessible.name: "Screenshot delay"
+                onClicked: delayMenu.open()
+                Menu {
+                    id: delayMenu
+                    objectName: "screenshotDelayMenu"
+                    y: delayButton.height + 4
+                    Repeater {
+                        model: [3, 5, 10]
+                        MenuItem {
+                            required property int modelData
+                            text: modelData + " seconds"
+                            Accessible.name: text
+                            onTriggered: {
+                                delayMenu.close();
+                                studio.delaySeconds = modelData;
+                                studio.delayCapture();
+                            }
+                        }
+                    }
+                }
             }
             BarToggle {
                 visible: studio.recordingSelection

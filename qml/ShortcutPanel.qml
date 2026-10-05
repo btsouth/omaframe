@@ -11,7 +11,7 @@ ColumnLayout {
     Component.onCompleted: if (!shortcuts.available && !shortcuts.checking) shortcuts.refresh()
     function describe(key, state, action) {
         if (key.length)
-            return key === (action === "screenshot" ? "Print" : action === "pause" ? "Alt+Shift+Print" : "Alt+Print") ? "Ready" : "Ready on " + key;
+            return key === (action === "screenshot" ? "Print" : action === "delay" ? "Shift+Print" : action === "pause" ? "Alt+Shift+Print" : "Alt+Print") ? "Ready" : "Ready on " + key;
         if (state === "stock")
             return "Omarchy's own tool for now";
         if (state === "none")
@@ -94,6 +94,21 @@ ColumnLayout {
         label: "Pause or resume recording"
         ready: shortcuts.pauseKey.length > 0
         status: panel.describe(shortcuts.pauseKey, shortcuts.pauseState, "pause")
+    }
+    ShortcutRow {
+        key: shortcuts.delayKey || "Shift+Print"
+        label: "Delayed screenshot (optional)"
+        ready: shortcuts.delayKey.length > 0
+        status: panel.describe(shortcuts.delayKey, shortcuts.delayState, "delay")
+    }
+    StudioButton {
+        objectName: "setupScreenshotDelay"
+        visible: shortcuts.available && !shortcuts.delayKey.length &&
+                 (shortcuts.delayState === "stock" || shortcuts.delayState === "none")
+        text: "Use Shift+Print for delay"
+        glyph: "timer"
+        enabled: !shortcuts.checking
+        onClicked: shortcuts.setUpDelay()
     }
     Text {
         Layout.fillWidth: true

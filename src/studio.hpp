@@ -1,4 +1,6 @@
 #pragma once
+#include "delay-capture.hpp"
+#include "capture-session.hpp"
 #include "marks.hpp"
 #include "renderer.hpp"
 #include "scroll-capture.hpp"
@@ -76,6 +78,9 @@ class Studio final : public QObject {
   Q_PROPERTY(bool tallImage READ tallImage NOTIFY changed)
   /** True while the selector is set to scroll and stitch what it covers. */
   Q_PROPERTY(bool scrollSelection READ scrollSelection NOTIFY changed)
+  Q_PROPERTY(int delaySeconds READ delaySeconds WRITE setDelaySeconds NOTIFY changed)
+  Q_PROPERTY(int delayRemaining READ delayRemaining NOTIFY changed)
+  Q_PROPERTY(bool delayedCapture READ delayedCapture NOTIFY changed)
   Q_PROPERTY(bool captureBarHidden READ captureBarHidden WRITE setCaptureBarHidden NOTIFY changed)
   /** The scrolling capture, for the progress control. */
   Q_PROPERTY(ScrollCapture *scrollCapture READ scrollCapture CONSTANT)
@@ -255,6 +260,18 @@ public:
   /** The display quick-mode surfaces (chooser, recording setup) open on. */
   void setCaptureMonitor(const QString &monitor) { m_captureMonitor = monitor; }
   Q_INVOKABLE void capture(bool region, int monitor = 0);
+  int delaySeconds() const { return m_delaySeconds; }
+  int delayRemaining() const { return m_delay.remaining(); }
+  bool delayedCapture() const { return m_delay.active(); }
+  void setDelaySeconds(int seconds);
+  Q_INVOKABLE void delayCapture(int seconds = -1);
+  Q_INVOKABLE void cancelDelayedCapture() { m_delay.cancel(); }
+  void delayDesktopCleared(quint64 generation, bool success) {
+    m_delay.desktopCleared(generation, success);
+  }
+  void delayBadgeCleared(quint64 generation, bool success) {
+    m_delay.badgeCleared(generation, success);
+  }
   Q_INVOKABLE void repeatLastArea();
   Q_INVOKABLE void finishSelection(const QString &monitor, double x1, double y1,
                                    double x2, double y2);
@@ -293,6 +310,11 @@ public:
 signals:
   void changed();
   void hideStudio();
+  void delayHideRequested(quint64 generation);
+  void delayBadgeRequested();
+  void delayClearRequested(quint64 generation);
+  void delayCancelled();
+  void delayFailed();
   void showStudio();
   void selectionReady(const QStringList &monitors);
   void selectionDone();
@@ -315,13 +337,15 @@ signals:
   void recordOptionsRequested();
 
 private:
+  friend class DelayTest;
+  Capture::Grab m_captureGrab;
   void loadImage(QImage image, QString name, bool demo);
   void scheduleRender();
   void persistOptions();
   void refreshDrafts();
   void invalidateSaved();
   void finishQuick(int style, bool save);
-  void captureImpl(bool region, int monitor, bool repeat);
+  void captureImpl(bool region, int monitor, bool repeat, quint64 delayGeneration = 0);
   /** Starts reading the text in the current image in the background, and
    *  forgets what was read from the previous one. */
   void startReading();
@@ -355,6 +379,8 @@ private:
   bool m_busy = false, m_rendering = false, m_demo = true;
   bool m_quickMode = false, m_recordingSelection = false;
   bool m_captureBarHidden = false;
+  int m_delaySeconds = 3;
+  DelayCapture m_delay{this};
   bool m_scrollSelection = false, m_scrollReachedLimit = false,
        m_scrollReachedEnd = false;
   /** The scrolling capture and where its progress control goes. */

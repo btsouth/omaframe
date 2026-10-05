@@ -61,7 +61,7 @@ ApplicationWindow {
         else root.requestNavigation("image-draft", draft.id);
     }
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
-    function requestNavigation(command, file) {
+    function requestNavigation(command, file, delaySeconds) {
         if (studio.busy || video.busy || navigation.saving) return;
         studio.cancelTextCopy();
         studio.cancelPendingAccept();
@@ -81,7 +81,7 @@ ApplicationWindow {
             videoPane.syncDraft();
             video.saveDraftNow();
         } else studio.saveDraftNow();
-        navigation.request(command, file || "");
+        navigation.request(command, file || "", delaySeconds === undefined ? -1 : delaySeconds);
     }
     Binding { target: navigation; property: "dirty"; value: root.videoLoaded
         ? !root.videoUnchanged && !root.videoSavedCurrent && video.draftSignature !== videoPane.signature
