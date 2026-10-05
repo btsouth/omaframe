@@ -59,7 +59,7 @@ fi
 case "$1" in
 get-default-source) echo clean_desktop_microphone;;
 get-default-sink) if [ -z "$OMAFRAME_TEST_NO_SINK" ]; then echo speakers; fi;;
-*) if [ "$4" = sinks ]; then echo '[{"name":"speakers","description":"Speakers","monitor_source_name":"actual_monitor"}]'; else echo '[{"name":"clean_desktop_microphone","description":"Clean microphone"}]'; fi;;
+*) if [ "$4" = sinks ]; then printf '[{"name":"speakers","description":"Speakers","monitor_source_name":"%s"}]\n' "${OMAFRAME_TEST_MONITOR:-actual_monitor}"; else echo '[{"name":"clean_desktop_microphone","description":"Clean microphone"}]'; fi;;
 esac
 )");
    executable("pgrep","#!/bin/sh\nexit 1\n");
@@ -425,10 +425,15 @@ while True:
    Recorder r;QSignalSpy finished(&r,&Recorder::completed);
    r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
    QCOMPARE(r.microphone(),0);r.selectDisplay(0);QVERIFY(!r.safeStop());QCOMPARE(r.stopKey(),QString("Alt+Print"));
+   QCOMPARE(r.audioPreview().sound,QString("actual_monitor"));
+   qputenv("OMAFRAME_TEST_MONITOR","launch_monitor");
+   const auto monitorCleanup=qScopeGuard([]{qunsetenv("OMAFRAME_TEST_MONITOR");});
    r.setCountdown(0);r.setMicAudio(true);r.setDesktopAudio(true);r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
    QVERIFY(r.active());QVERIFY(finished.isEmpty());
-   QCOMPARE(r.audioSession().sound,QString("actual_monitor"));
+   QCOMPARE(r.audioSession().sound,QString("launch_monitor"));
+   qputenv("OMAFRAME_TEST_MONITOR","later_default");
+   QCOMPARE(r.audioSession().sound,QString("launch_monitor"));
    QCOMPARE(r.audioSession().mic,QString("clean_desktop_microphone"));
    QFile invocation(r.savedPath()+".args");QVERIFY(invocation.open(QIODevice::ReadOnly));
    const auto args=QJsonDocument::fromJson(invocation.readAll()).array().toVariantList();

@@ -2,6 +2,7 @@
 #include "omarchy-theme.hpp"
 #include "recording.hpp"
 #include "shortcuts.hpp"
+#include "video.hpp"
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -23,6 +24,7 @@ struct MeterScene {
   QTemporaryDir temp;
   OmarchyTheme theme{nullptr, temp.path(), temp.path(), false};
   Recorder recorder;
+  Video video;
   ShortcutSetup shortcuts;
   AudioLevels levels{std::make_unique<NoAudio>()};
   QQmlEngine engine;
@@ -33,6 +35,7 @@ struct MeterScene {
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("audioLevels", &levels);
     engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    engine.rootContext()->setContextProperty("video", &video);
     if (control) {
       mockComponent.setData(R"(import QtQml
 QtObject {

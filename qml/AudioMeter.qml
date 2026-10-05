@@ -57,7 +57,7 @@ Item {
                     x: Math.min(parent.width - 2, Math.max(1, (parent.width - 2) * (meter.channel.held + 60) / 60))
                     y: 1; width: 1; height: 6
                     color: meter.channel.clip ? theme.urgent : theme.text
-                    visible: meter.channel.state === "Level"
+                    visible: (meter.channel.state === "Level" || meter.channel.state === "Quiet") && meter.channel.held > -60
                 }
             }
             Text {
