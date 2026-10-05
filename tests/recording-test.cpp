@@ -72,6 +72,7 @@ if '--version' in sys.argv:
     print(os.environ.get('OMAFRAME_TEST_RECORDER_VERSION', '6.1.3'))
     sys.exit(0)
 path=sys.argv[sys.argv.index('-o')+1]
+open(path+'.args','w').write(json.dumps(sys.argv[1:]))
 if os.environ.get('OMAFRAME_TEST_HEADER_ONLY'):
     open(path,'wb').write(b'x'*88)
 else:
@@ -427,6 +428,11 @@ while True:
    r.setCountdown(0);r.setMicAudio(true);r.setDesktopAudio(true);r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
    QVERIFY(r.active());QVERIFY(finished.isEmpty());
+   QCOMPARE(r.audioSession().sound,QString("actual_monitor"));
+   QCOMPARE(r.audioSession().mic,QString("clean_desktop_microphone"));
+   QFile invocation(r.savedPath()+".args");QVERIFY(invocation.open(QIODevice::ReadOnly));
+   const auto args=QJsonDocument::fromJson(invocation.readAll()).array().toVariantList();
+   QCOMPARE(args.value(args.indexOf(QString("-a"))+1).toString(),r.audioSession().sound+"|"+r.audioSession().mic);
    r.stop();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
    QCOMPARE(r.state(),QString("saved"));QVERIFY(!r.active());
    QVERIFY(QFileInfo::exists(r.savedPath()));

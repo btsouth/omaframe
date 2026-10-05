@@ -23,10 +23,11 @@ public:
   PulseWorker() {
     timeout.setSingleShot(true);
     connect(&timeout, &QTimer::timeout, this, [this] {
-      for (auto &c : channels) if (!c.name.isEmpty() && !c.stream) report(c);
-      // A context which never became ready gets one bounded attempt.
+      // Metadata and stream state are shared with Pulse callbacks under this lock.
       if (context) {
         pa_threaded_mainloop_lock(loop);
+        for (const auto &c : channels)
+          if (!c.name.isEmpty() && !c.stream) report(c);
         const bool ready = pa_context_get_state(context) == PA_CONTEXT_READY;
         pa_threaded_mainloop_unlock(loop);
         if (!ready) shutdown();

@@ -12,10 +12,12 @@ Item {
         : channel.state === "Level" ? Math.round(channel.db) + " dB"
         : channel.state
     implicitWidth: tiny ? 64 : 210
-    implicitHeight: detailed ? 64 : 20
+    implicitHeight: detailed ? (channel.state === "Off" ? 36 : 64) : 20
+    readonly property bool clipRisk: channel.clip
+    onClipRiskChanged: if (clipRisk) Accessible.announce(label + " clip risk", Accessible.Polite)
     Accessible.role: Accessible.ProgressBar
     Accessible.name: label + " level" + (channel.device ? ", " + channel.device : "")
-    Accessible.description: status + (channel.state === "Quiet" && label === "Computer sound" ? ". No sound on this output" : "")
+    Accessible.description: status + (channel.clip ? ", " + Math.round(channel.db) + " dBFS" : "") + (channel.state === "Quiet" && label === "Computer sound" ? ". No sound on this output" : "")
     ColumnLayout {
         anchors.fill: parent
         spacing: 3
@@ -76,15 +78,16 @@ Item {
             color: meter.channel.clip ? theme.urgent : theme.muted
             font.family: theme.fontFamily; font.pixelSize: 9
         }
-        RowLayout {
-            visible: meter.detailed
+        Item {
+            visible: meter.detailed && meter.channel.state !== "Off"
             Layout.fillWidth: true
+            implicitHeight: 12
             Repeater {
-                model: ["-60", "-30", "-12", "0 dBFS"]
+                model: [-60, -30, -12, 0]
                 Text {
-                    required property string modelData
-                    Layout.fillWidth: true
-                    text: modelData
+                    required property int modelData
+                    x: Math.max(0, Math.min(parent.width - width, parent.width * (modelData + 60) / 60 - width / 2))
+                    text: modelData === 0 ? "0 dBFS" : modelData
                     color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 9
                 }
             }
