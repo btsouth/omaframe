@@ -41,6 +41,7 @@ Result resolve(const QString &type, QPointF anchor, QPointF pointer,
     v = {std::copysign(h * aspect, v.x()), std::copysign(h, v.y())};
     result.label = qFuzzyCompare(aspect, 1.) ? "1:1" : QString::number(aspect, 'g', 3) + ":1";
   }
+  if (!std::isfinite(v.x()) || !std::isfinite(v.y())) return result;
   // Intersect the feasible interval of a + t*v, with 0 <= t <= 1.
   double low = 0, high = 1;
   auto bound = [&](double origin, double delta, double extent) {

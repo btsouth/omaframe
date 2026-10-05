@@ -120,6 +120,7 @@ Item {
                     (point.id % 2 === 0 ? r-l >= 32 : b-t >= 16)));
         }
         function resolvePointer() {
+            const previousX = endX, previousY = endY;
             endX = Math.max(0, Math.min(width, rawX));
             endY = Math.max(0, Math.min(height, rawY));
             editSurface.constraintFeedback = ({});
@@ -131,6 +132,9 @@ Item {
                     endX = result.x2 * width;
                     endY = result.y2 * height;
                     editSurface.constraintFeedback = result;
+                } else {
+                    endX = previousX;
+                    endY = previousY;
                 }
             }
             if ((interaction === "move" || interaction === "cropMove") && shiftHeld) {

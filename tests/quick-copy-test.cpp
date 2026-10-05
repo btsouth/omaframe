@@ -264,6 +264,7 @@ private slots:
     prepare(studio);
     auto *marks=studio.marks();
     QVERIFY(marks->cropCurrentView(.137,.219,.837,.891));
+    QTRY_COMPARE(studio.workingSize(), Frame::cropPixels(captureImage().size(),marks->edits()).size());
     const QSize canvas=studio.workingSize();
     for (const auto &type : {QString("arrow"),QString("box")}) {
       const auto result=marks->creationPreview(type,.1,.1,.6,.5,canvas.width(),canvas.height(),true);

@@ -76,7 +76,7 @@ private slots:
   void boundsAndDegenerate() {
     auto result = MarkConstraints::resolve("line", {.8, .7}, {2, 3}, {1920, 1080}, true);
     QVERIFY(result.valid);
-    QVERIFY(near(result.point.x(), 1));
+    QVERIFY(near(result.point.y(), 1));
     QVERIFY(near((result.point.x()-.8)*1920, (result.point.y()-.7)*1080));
     result = MarkConstraints::resolve("box", {.9, .7}, {4, 2}, {1920, 1080}, true);
     QVERIFY(result.valid);
@@ -230,7 +230,9 @@ private slots:
     scene.marks.undo();
     scene.press({320,144}); scene.move({400,240});
     QTest::keyPress(&scene.window,Qt::Key_Shift);
-    scene.window.contentItem()->forceActiveFocus();
+    QQuickItem other(scene.window.contentItem());
+    other.forceActiveFocus();
+    QTRY_COMPARE(scene.window.activeFocusItem(), &other);
     QTRY_VERIFY(!scene.marks.transforming());
     QVERIFY(!scene.canvas->property("constraintActive").toBool());
     scene.release({400,240}); QTest::keyRelease(&scene.window,Qt::Key_Shift);
