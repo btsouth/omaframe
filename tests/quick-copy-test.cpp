@@ -128,8 +128,13 @@ private slots:
     studio.setStyle(8);
     QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
     QCOMPARE(contents(clipboard() + ".calls"), QByteArray("copy\n"));
-    QCOMPARE(QImage(clipboard()).convertToFormat(QImage::Format_ARGB32_Premultiplied),
-             Frame::applyEdits(captureImage(), studio.marks()->edits()));
+    QCOMPARE(studio.style(), 8);
+    const QImage copied(clipboard());
+    const QImage expected = Frame::applyEdits(captureImage(), studio.marks()->edits());
+    QCOMPARE(copied.size(), expected.size());
+    for (int y = 0; y < copied.height(); ++y)
+      for (int x = 0; x < copied.width(); ++x)
+        QCOMPARE(copied.pixelColor(x, y), expected.pixelColor(x, y));
   }
   void pendingAcceptCanBeCancelled_data() {
     QTest::addColumn<QString>("action");
@@ -286,27 +291,51 @@ private slots:
     QVERIFY(marks->edits().last().stepOrder > marks->edits()[1].stepOrder);
   }
   void oldStepDraftsUseArrayOrderAndExplicitNumbers() {
-    MarkDocument marks;
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
     Frame::Edit first{"step", {.2, .3}, {.2, .3}};
     Frame::Edit second{"step", {.7, .7}, {.7, .7}};
     second.number = 42;
-    marks.restore(captureImage(), {first, second}, 1);
+    studio.marks()->restore(captureImage(), {first, second}, 1);
+    studio.setStyle(studio.style() == 8 ? 0 : 8);
+    QVERIFY(studio.saveDraftNow());
+    const QString id = studio.drafts().first().toMap().value("id").toString();
+    const QString path = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/drafts/" + id + ".json";
+    auto document = QJsonDocument::fromJson(contents(path)).object();
+    QJsonArray edits;
+    for (const auto &value : document.value("edits").toArray()) {
+      auto edit = value.toObject();
+      edit.remove("stepOrder");
+      edits.append(edit);
+    }
+    document.insert("edits", edits);
+    QFile metadata(path);
+    QVERIFY(metadata.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QVERIFY(metadata.write(QJsonDocument(document).toJson()) > 0);
+    metadata.close();
+    studio.closeImage();
+    studio.resumeDraft(id);
+    auto *marks = studio.marks();
     const QImage expected = Frame::applyEdits(captureImage(), {first, second});
-    QCOMPARE(Frame::applyEdits(captureImage(), marks.edits()), expected);
-    QCOMPARE(marks.edits()[0].stepOrder, 1);
-    QCOMPARE(marks.edits()[1].stepOrder, 2);
-    marks.moveSelectedLayer(-1);
-    QCOMPARE(Frame::applyEdits(captureImage(), marks.edits()), expected);
+    QCOMPARE(Frame::applyEdits(captureImage(), marks->edits()), expected);
+    QCOMPARE(marks->edits()[0].stepOrder, 1);
+    QCOMPARE(marks->edits()[1].stepOrder, 2);
+    marks->moveSelectedLayer(-1);
+    QCOMPARE(Frame::applyEdits(captureImage(), marks->edits()), expected);
   }
   void partialRedactionsAndBlurLeaveSecretsUncovered_data() {
     QTest::addColumn<QString>("type");
     QTest::addColumn<double>("right");
     QTest::addColumn<bool>("hidden");
-    QTest::newRow("ninety-percent") << QString("redact") << .66 << false;
-    QTest::newRow("ninety-five-percent") << QString("redact") << .69 << false;
+    // OCR halves the fixture's coordinates, then grows the 50x10 secret
+    // by 4.5 pixels: its horizontal span is .5 through 59.5 source pixels.
+    QTest::newRow("ninety-percent") << QString("redact") << .335 << false;
+    QTest::newRow("ninety-five-percent") << QString("redact") << .3534375 << false;
     QTest::newRow("full-blur") << QString("blur") << 1. << false;
     QTest::newRow("opaque-cover") << QString("redact") << 1. << true;
-    QTest::newRow("subpixel-rounding") << QString("redact") << .721875 << true;
+    QTest::newRow("subpixel-rounding") << QString("redact") << .36875 << true;
   }
   void partialRedactionsAndBlurLeaveSecretsUncovered() {
     QFETCH(QString, type);
@@ -351,6 +380,8 @@ private slots:
     QVERIFY(studio.hasImage());
     QCOMPARE(studio.quickState(), QString("failed"));
     QCOMPARE(studio.recoveryAction(), QString("Retry editable draft"));
+    studio.dismissQuick(); // Cancelling the dialog cannot bypass draft recovery.
+    QCOMPARE(dismissed.count(), 0);
     QVERIFY(QFileInfo::exists(studio.savedPath()));
     QCOMPARE(contents(clipboard()), contents(studio.savedPath()));
     if (discard) {
@@ -460,6 +491,9 @@ private slots:
     QTest::newRow("retry") << QString("retry");
     QTest::newRow("discard") << QString("discard");
     QTest::newRow("cancel") << QString("cancel");
+    QTest::newRow("export-retry") << QString("export-retry");
+    QTest::newRow("export-discard") << QString("export-discard");
+    QTest::newRow("export-cancel") << QString("export-cancel");
   }
   void failedDraftNavigation() {
     QFETCH(QString, action);
@@ -484,7 +518,9 @@ private slots:
     engine.rootContext()->setContextProperty("captureAtStartup", false);
     const QString input = temp.filePath("navigation.png");
     QVERIFY(captureImage().save(input));
-    studio.open(QUrl::fromLocalFile(input));
+    const bool exported = action.startsWith("export-");
+    if (exported) prepare(studio);
+    else studio.open(QUrl::fromLocalFile(input));
     QTRY_VERIFY_WITH_TIMEOUT(!studio.busy() && !studio.rendering(), 5000);
     studio.marks()->edit("redact", .1, .1, .4, .4);
     const QString folder = QStandardPaths::writableLocation(
@@ -499,12 +535,20 @@ private slots:
     std::unique_ptr<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
     QVERIFY2(window, qPrintable(component.errorString()));
     QSignalSpy proceed(&navigation, &Navigation::proceed);
-    QVERIFY(QMetaObject::invokeMethod(window.get(), "requestNavigation",
-        Q_ARG(QVariant, "quit"), Q_ARG(QVariant, QUrl())));
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    if (exported) {
+      studio.accept();
+      QTRY_VERIFY_WITH_TIMEOUT(navigation.pending(), 15000);
+      QCOMPARE(dismissed.count(), 0);
+      QVERIFY(QFileInfo::exists(studio.savedPath()));
+    } else {
+      QVERIFY(QMetaObject::invokeMethod(window.get(), "requestNavigation",
+          Q_ARG(QVariant, "quit"), Q_ARG(QVariant, QUrl())));
+    }
     QVERIFY(navigation.pending());
     QVERIFY(proceed.isEmpty());
     QVERIFY(studio.hasImage() && studio.draftDirty());
-    if (action == "retry") {
+    if (action.endsWith("retry")) {
       navigation.save();
       QVERIFY(navigation.pending());
       QVERIFY(!navigation.saving());
@@ -514,7 +558,7 @@ private slots:
       QCOMPARE(proceed.count(), 1);
       QVERIFY(!studio.draftDirty());
       QCOMPARE(studio.drafts().size(), 1);
-    } else if (action == "discard") {
+    } else if (action.endsWith("discard")) {
       // Exercise the dialog's real button handler, including the explicit discard.
       QQuickItem *button = nullptr;
       std::function<void(QQuickItem *)> visit = [&](QQuickItem *item) {
@@ -532,6 +576,10 @@ private slots:
       QVERIFY(proceed.isEmpty());
       QVERIFY(studio.draftDirty());
       QVERIFY(studio.hasImage());
+    }
+    if (exported) {
+      QCOMPARE(dismissed.count(), action.endsWith("cancel") ? 0 : 1);
+      QCOMPARE(contents(clipboard() + ".calls"), QByteArray("copy\n"));
     }
   }
   void editorClipboardKeysKeepTheScreenshotOpen_data() {

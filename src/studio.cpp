@@ -730,7 +730,7 @@ void Studio::resumeDraft(const QString &id) {
   if (!QFileInfo::exists(m_savedPath))
     m_savedPath.clear();
   m_backupPath.clear();
-  m_copyPending = m_backupPending = false;
+  m_copyPending = m_backupPending = m_failedDraftExport = false;
   m_draftId = id;
   m_draftDirty = false;
   m_draftTimer.stop();
@@ -843,6 +843,7 @@ static QString exportStatus(const ExportResult &r) {
     problems << "Clipboard copy failed: " + r.copyError;
   if (!r.backupSaved)
     problems << "Private original backup failed: " + r.backupError;
+  if (!r.renderError.isEmpty()) problems << r.renderError;
   return "Finished PNG saved. " + problems.join(" ");
 }
 void Studio::accept() {
@@ -1517,6 +1518,10 @@ void Studio::dismissQuick() {
   cancelPendingAccept();
   if (m_busy)
     return;
+  if (m_failedDraftExport && draftDirty()) {
+    emit draftSaveFailed();
+    return;
+  }
   cancelTextCopy();
   m_quickState = "cancelled";
   emit changed();

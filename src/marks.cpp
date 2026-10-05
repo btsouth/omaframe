@@ -374,8 +374,9 @@ void MarkDocument::edit(const QString &type, double x1, double y1,
     edit.textAlign = style.value("textAlign").toString();
     edit.size = Frame::textSizeForPixels(style.value("fontPx").toInt(), m_base);
     const QRectF room = cropBounds();
-    edit.textBox.setWidth(std::min(room.width() * .85,
-                                  Frame::annotationBounds(edit, m_base).width()));
+    if (hasCrop())
+      edit.textBox.setWidth(std::min(room.width() * .85,
+                                    Frame::annotationBounds(edit, m_base).width()));
     fitTextToImage(edit, m_base, room);
   } else applyToolDefaults(edit);
   timeNewMark(edit);

@@ -157,7 +157,7 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
                   bool applyCrop, QString *error) {
   if (error) error->clear();
   QImage img = source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-  if (img.isNull()) {
+  if (img.isNull() || !img.bits()) {
     if (error) *error = "Could not allocate the edited image. Try again with a smaller image.";
     return {};
   }

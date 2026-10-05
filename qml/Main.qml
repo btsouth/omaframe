@@ -132,6 +132,7 @@ ApplicationWindow {
     // Escape peels one layer at a time: typing, a drag, the selection, the
     // tool, then Edit itself.
     function escapeEditor() {
+        studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
         else if (markCanvas.dragging) markCanvas.cancelDrag();
         else if (studio.marks.selectedAnnotation.type !== undefined) studio.marks.clearSelection();
