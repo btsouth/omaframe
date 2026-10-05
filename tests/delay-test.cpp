@@ -234,6 +234,7 @@ private slots:
   void staleWorkerResultIsDiscardedAndFreshPixelsSelected() {
     ImageStore store;
     Studio s(&store, false);
+    const auto originStatus = s.status();
     qint64 now = 0;
     s.m_delay.m_clock = [&] { return now; };
     QSemaphore entered, release;
@@ -253,6 +254,7 @@ private slots:
     s.delayBadgeCleared(gen, true);
     QTRY_VERIFY(entered.available() > 0);
     s.cancelDelayedCapture();
+    QCOMPARE(s.status(), originStatus);
     release.release();
     QTRY_VERIFY(QThreadPool::globalInstance()->activeThreadCount() == 0);
     QCoreApplication::processEvents();

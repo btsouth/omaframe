@@ -199,6 +199,7 @@ Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
             captureImpl(true, 0, false, generation);
           });
   connect(&m_delay, &DelayCapture::cancelled, this, [this] {
+    m_status = m_delayStatus;
     m_busy = false;
     m_quickState = "cancelled";
     emit changed();
@@ -1058,6 +1059,7 @@ void Studio::delayCapture(int seconds) {
           return w->isVisible() && w->title() == "Omaframe";
         });
   }
+  m_delayStatus = m_status;
   for (const auto &name : m_frozen.keys())
     m_store->put("capture/" + name, {});
   m_frozen.clear();

@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
     visible.save(folder + "/visible.png");
     CaptureDismissal::clear(&badge, &app, [&](bool gone) {
       QImage captured;
+      CaptureDismissal::restoreAnimations();
       if (!gone || !captureOutputSurface(monitor, captured, error)) {
         app.exit(4);
         return;

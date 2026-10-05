@@ -235,6 +235,7 @@ int main(int argc, char **argv) {
   QQuickWindow *scrollControl = nullptr;
   QQuickWindow *captureCountdown = nullptr;
   bool quickRecordingReview = false, reviewReturnsToStudio = false;
+  bool delayedEditorOrigin = false;
   QObject::connect(&video, &Video::opening, &app,
                    [&] { quickRecordingReview = false; });
   auto ensureWindow = [&]() -> bool {
@@ -672,6 +673,9 @@ int main(int argc, char **argv) {
                    [&](QScreen *) { recorder.layoutChanged(); });
   QObject::connect(
       &studio, &Studio::delayHideRequested, &app, [&](quint64 generation) {
+        delayedEditorOrigin = true;
+        if (!shortcuts.checking())
+          shortcuts.refresh();
         QString error;
         if (!CaptureDismissal::prepare(error)) {
           studio.delayDesktopCleared(generation, false);
@@ -696,7 +700,7 @@ int main(int argc, char **argv) {
                     studio.delayDesktopCleared(generation, success);
                   });
             });
-  });
+      });
   QObject::connect(&studio, &Studio::delayBadgeRequested, &app, [&] {
     if (!studio.delayedCapture())
       return;
@@ -757,6 +761,7 @@ int main(int argc, char **argv) {
             [&, generation] { return studio.currentDelay(generation); });
       });
   QObject::connect(&studio, &Studio::delayCancelled, &app, [&] {
+    delayedEditorOrigin = false;
     if (captureCountdown) {
       captureCountdown->hide();
       captureCountdown->destroy();
@@ -800,6 +805,7 @@ int main(int argc, char **argv) {
       adjustWindow(window, studio.quickMode());
   });
   QObject::connect(&studio, &Studio::dismissRequested, &app, [&] {
+    delayedEditorOrigin = false;
     // Read it before returning to the studio clears the quick state.
     const Studio::Notice notice = studio.finishNotice();
     const auto notifyScreenshot = [&] {
@@ -826,6 +832,14 @@ int main(int argc, char **argv) {
   });
   QObject::connect(
       &studio, &Studio::selectionReady, &app, [&](const QStringList &names) {
+        if (delayedEditorOrigin) {
+          delayedEditorOrigin = false;
+          quickRecordingReview = false;
+          if (window) {
+            window->setProperty("videoMode", false);
+            window->setProperty("recordingReview", false);
+          }
+        }
         mark("capture pixels ready");
         for (const auto &name : names) {
           auto *screen = screenFor(name);

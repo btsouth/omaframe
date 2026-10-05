@@ -385,6 +385,7 @@ private:
   bool m_quickMode = false, m_recordingSelection = false;
   bool m_captureBarHidden = false;
   int m_delaySeconds = 3;
+  QString m_delayStatus;
   DelayCapture m_delay{this};
   bool m_scrollSelection = false, m_scrollReachedLimit = false,
        m_scrollReachedEnd = false;
