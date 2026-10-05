@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -76,7 +77,7 @@ if os.environ.get('OMAFRAME_TEST_HEADER_ONLY'):
 else:
     shutil.copyfile(os.environ['OMAFRAME_TEST_FIXTURE'],path)
     open(path+'.ts','w').write('monotonic_microsec\trealtime_microsec\n123456\t123456\n')
-signal.signal(signal.SIGINT,lambda *_:sys.exit(0))
+signal.signal(signal.SIGINT,signal.SIG_IGN if os.environ.get('OMAFRAME_TEST_STALL_STOP') else lambda *_:sys.exit(0))
 mode=os.environ.get('OMAFRAME_TEST_PAUSE_REPLY', 'ok')
 default_mode=mode
 server=socket.socket(socket.AF_UNIX)
@@ -361,6 +362,63 @@ while True:
    QTRY_COMPARE(r.state(),QString("setup"));
    QCOMPARE(r.status(),QString("Choose what to record."));
    QVERIFY(!r.canStart());
+ }
+ void stalledStopOffersForceStopAndKeepsPartialFile_data() {
+   QTest::addColumn<bool>("headerOnly");
+   QTest::newRow("readable-fixture")<<false;
+   QTest::newRow("small-partial")<<true;
+ }
+ void stalledStopOffersForceStopAndKeepsPartialFile() {
+   QFETCH(bool,headerOnly);
+   qputenv("OMAFRAME_TEST_STALL_STOP","1");
+   if(headerOnly)qputenv("OMAFRAME_TEST_HEADER_ONLY","1");
+   const auto cleanup=qScopeGuard([]{qunsetenv("OMAFRAME_TEST_STALL_STOP");qunsetenv("OMAFRAME_TEST_HEADER_ONLY");});
+   Recorder r(nullptr,100);QSignalSpy finished(&r,&Recorder::completed),setup(&r,&Recorder::setupRequested);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   if(headerOnly)QTRY_VERIFY_WITH_TIMEOUT(!r.savedPath().isEmpty()&&QFileInfo(r.savedPath()).size()==88,5000);
+   else QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   const QString path=r.savedPath();const qint64 size=QFileInfo(path).size();
+   const int before=setup.count();
+   r.stop();QCOMPARE(r.state(),QString("stopping"));QVERIFY(!r.canForceStop());
+   r.stop();QCOMPARE(r.state(),QString("stopping"));QVERIFY(r.active());
+   QTRY_VERIFY(r.canForceStop());QCOMPARE(setup.count(),before+1);
+   QVERIFY(r.status().contains("Still finishing"));QVERIFY(r.status().contains("may be incomplete"));
+   r.stop();QTRY_COMPARE(r.state(),QString("idle"));
+   QVERIFY(!r.active());QVERIFY(!r.canForceStop());QVERIFY(finished.isEmpty());
+   QVERIFY(r.status().contains("partial file was kept"));QVERIFY(r.status().contains("has not been checked"));
+   QVERIFY(r.status().contains(path));QCOMPARE(QFileInfo(path).size(),size);
+ }
+ void cameraUnavailableAtLaunchIsReportedThroughCompletion() {
+   QSettings().setValue("record/cameraDevice",QByteArray("missing-camera"));
+   const auto cleanup=qScopeGuard([]{QSettings().remove("record/cameraDevice");});
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(1);r.start();QCOMPARE(r.state(),QString("countdown"));
+   // An enabled camera with no live frame at launch must not disappear silently.
+   r.camera()->setEnabled(true);QVERIFY(!r.camera()->ready());
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   QVERIFY(r.status().contains("camera unavailable"));
+   QVERIFY(r.status().contains("screen-only"));
+   r.stop();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
+   QCOMPARE(r.state(),QString("saved"));QVERIFY(r.status().contains("camera was not recorded"));
+   QFile sidecar(r.savedPath()+".camera.json");QVERIFY(sidecar.open(QIODevice::ReadOnly));
+   QVERIFY(QJsonDocument::fromJson(sidecar.readAll()).object().value("missing").toBool());
+ }
+ void preferredCameraNeverFallsBackToAnotherDevice() {
+   const QVariantList devices{QVariantMap{{"id",QByteArray("other")}},QVariantMap{{"id",QByteArray("preferred")}}};
+   QCOMPARE(CameraDevices::preferredIndex(devices,{}),0);
+   QCOMPARE(CameraDevices::preferredIndex({},{}),-1);
+   QCOMPARE(CameraDevices::preferredIndex(devices,"preferred"),1);
+   QCOMPARE(CameraDevices::preferredIndex(devices,"disconnected"),-1);
+   QSettings().setValue("record/cameraDevice",QByteArray("disconnected"));
+   const auto cleanup=qScopeGuard([]{QSettings().remove("record/cameraDevice");});
+   Webcam camera;camera.refresh();camera.setEnabled(true);
+   QCOMPARE(camera.device(),-1);QVERIFY(camera.unavailable());QVERIFY(!camera.ready());
+   QVERIFY(camera.status().contains("selected camera is not connected"));
+   QVERIFY(!camera.startTrack(temp.filePath("not-recorded.mp4"),[]{return qint64(0);}));
+   QVERIFY(camera.status().contains("screen recording continues"));
+   QVERIFY(!camera.finishing());QVERIFY(!QFileInfo::exists(temp.filePath("not-recorded.mp4")));
  }
  void ownProcessStopsThenHandsOffValidClip() {
    Recorder r;QSignalSpy finished(&r,&Recorder::completed);

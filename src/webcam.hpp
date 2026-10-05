@@ -10,6 +10,10 @@
 #include <functional>
 #include <memory>
 
+namespace CameraDevices {
+int preferredIndex(const QVariantList &devices, const QByteArray &preferred);
+}
+
 class QCamera;
 class QMediaCaptureSession;
 class QMediaDevices;
@@ -46,6 +50,7 @@ class Webcam : public QObject {
   Q_PROPERTY(QVariantList devices READ devices NOTIFY changed)
   Q_PROPERTY(int device READ device WRITE setDevice NOTIFY changed)
   Q_PROPERTY(bool ready READ ready NOTIFY changed)
+  Q_PROPERTY(bool unavailable READ unavailable NOTIFY changed)
   Q_PROPERTY(QString status READ status NOTIFY changed)
   Q_PROPERTY(QVideoSink *previewSink READ previewSink WRITE setPreviewSink
                  NOTIFY changed)
@@ -57,6 +62,7 @@ public:
     return !m_enabled || (!m_latest.isNull() && m_frameAge.isValid() &&
                           m_frameAge.elapsed() < 1000);
   }
+  bool unavailable() const { return m_unavailable; }
   QVariantList devices() const { return m_devices; }
   int device() const { return m_device; }
   QString status() const { return m_status; }
@@ -66,7 +72,7 @@ public:
   void setDevice(int index);
   Q_INVOKABLE void refresh();
   void suspend();
-  void startTrack(const QString &path, std::function<qint64()> clock);
+  bool startTrack(const QString &path, std::function<qint64()> clock);
   void finishTrack();
   bool finishing() const { return m_track.busy(); }
 signals:
@@ -89,6 +95,6 @@ private:
   QString m_status = "Camera is off.", m_trackPath;
   std::function<qint64()> m_clock;
   int m_device = -1;
-  bool m_enabled = false;
+  bool m_enabled = false, m_unavailable = false;
   bool m_capturing = false;
 };

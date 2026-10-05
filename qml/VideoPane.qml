@@ -627,6 +627,15 @@ Item {
                     Text { Layout.fillWidth: true; text: "Saved " + video.savedName + (video.savedSummary.length ? " · " + video.savedSummary : ""); color: theme.selectedText; font.pixelSize: 11; elide: Text.ElideMiddle }
                 }
             }
+            Text {
+                objectName: "cameraWarning"
+                visible: video.cameraWarning.length > 0
+                text: video.cameraWarning
+                Layout.maximumWidth: pane.width * 0.45
+                font.pixelSize: 11
+                color: theme.urgent
+                wrapMode: Text.Wrap
+            }
             StudioButton {
                 id: cameraMenuButton
                 visible: video.cameraSource.toString().length > 0

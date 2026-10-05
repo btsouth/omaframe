@@ -17,6 +17,7 @@
 #include <QQuickWindow>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QScopeGuard>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
@@ -114,6 +115,54 @@ private slots:
     QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
         .removeRecursively();
     QSettings().clear();
+  }
+  void missingCameraDraftWarnsAndKeepsScreenEdits() {
+    QString id;
+    {
+      Video seed;
+      QSignalSpy loaded(&seed, &Video::loaded);
+      seed.open(QUrl::fromLocalFile(cameraClip));
+      QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+      seed.setEditState(restoredState());
+      QVERIFY(seed.saveDraftNow());
+      id = seed.drafts().first().toMap().value("id").toString();
+    }
+    const QString moved = camera + ".missing";
+    QVERIFY(QFile::rename(camera, moved));
+    const auto cleanup = qScopeGuard([&] { QFile::rename(moved, camera); });
+    PaneScene scene(temp);
+    QTRY_VERIFY2(scene.component.isReady(), qPrintable(scene.component.errorString()));
+    QVERIFY2(scene.create(), qPrintable(scene.component.errorString()));
+    QSignalSpy loaded(&scene.video, &Video::loaded);
+    scene.video.resumeDraft(id);
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+    QVERIFY(scene.video.cameraSource().isEmpty());
+    QVERIFY(scene.video.status().contains("camera recording is missing"));
+    QVERIFY(scene.video.status().contains("screen-only"));
+    QCOMPARE(scene.pane->property("clipStart").toDouble(), 0.5);
+    QCOMPARE(scene.pane->property("clipEnd").toDouble(), 3.5);
+    QVERIFY(scene.pane->property("muted").toBool());
+    QCOMPARE(value(scene.pane.get(), "cuts").toList(), removedParts());
+    auto *warning = scene.pane->findChild<QQuickItem *>("cameraWarning");
+    QVERIFY(warning);QVERIFY(warning->isVisible());
+    QCOMPARE(warning->property("text").toString(), scene.video.cameraWarning());
+  }
+  void unavailableCameraRecordingWarnsInReview() {
+    const QString clip = temp.filePath("camera-unavailable.mp4");
+    QVERIFY(QFile::copy(plain, clip));
+    QFile sidecar(clip + ".camera.json");
+    QVERIFY(sidecar.open(QIODevice::WriteOnly));
+    sidecar.write(QJsonDocument(QJsonObject{{"version", 1}, {"missing", true}}).toJson());
+    sidecar.close();
+    Video video;QSignalSpy loaded(&video, &Video::loaded);
+    video.open(QUrl::fromLocalFile(clip));
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+    QVERIFY(video.cameraSource().isEmpty());
+    QVERIFY(video.status().contains("camera was not recorded"));
+    QVERIFY(video.cameraWarning().contains("screen-only"));
+    video.open(QUrl::fromLocalFile(plain));
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 2, 12000);
+    QVERIFY(video.cameraWarning().isEmpty());
   }
   void cameraDraftRestoresThroughRealPane_data() {
     QTest::addColumn<QString>("previous");

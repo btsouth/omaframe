@@ -162,7 +162,7 @@ Recording::recorderCommand(const QStringList &arguments) {
                       "omaframe-recorder"} +
               arguments};
 }
-Recorder::Recorder(QObject *parent) : QObject(parent) {
+Recorder::Recorder(QObject *parent, int stopGraceMs) : QObject(parent) {
   connect(&m_webcam, &Webcam::changed, this, &Recorder::changed);
   connect(
       &m_webcam, &Webcam::trackFinished, this,
@@ -198,6 +198,18 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
   // If Omaframe itself dies, ask the recorder to finish its file instead of
   // leaving an orphaned capture with an unwritten MP4 index.
   m_process.setChildProcessModifier([] { ::prctl(PR_SET_PDEATHSIG, SIGINT); });
+  m_stopTimeout.setSingleShot(true);
+  m_stopTimeout.setInterval(std::max(1, stopGraceMs));
+  connect(&m_stopTimeout, &QTimer::timeout, this, [this] {
+    if (m_state != "stopping" || m_process.state() == QProcess::NotRunning)
+      return;
+    m_canForceStop = true;
+    m_status = "Still finishing. Stop again to force-stop. "
+               "The file may be incomplete.";
+    emit changed();
+    if (!hasControl())
+      emit setupRequested();
+  });
   m_tick.setInterval(500);
   connect(&m_tick, &QTimer::timeout, this, &Recorder::changed);
   m_pauseTimeout.setSingleShot(true);
@@ -285,11 +297,24 @@ Recorder::Recorder(QObject *parent) : QObject(parent) {
           (now.tv_sec * 1000000LL + now.tv_nsec / 1000 - firstFrameUs) / 1000;
       m_recordedMs = lag >= 0 && lag < 1000 ? lag : 0;
       m_clock.restart();
-      if (m_webcam.enabled())
-        m_webcam.startTrack(m_path + "-webcam.mp4", [this] {
-          return m_state == "recording" ? m_recordedMs + m_clock.elapsed()
-                                        : qint64(-1);
-        });
+      if (m_webcam.enabled() &&
+          !m_webcam.startTrack(m_path + "-webcam.mp4", [this] {
+            return m_state == "recording" ? m_recordedMs + m_clock.elapsed()
+                                          : qint64(-1);
+          })) {
+        m_cameraWarning = "The camera was unavailable when recording started. "
+                          "The camera was not recorded; the video is screen-only.";
+        m_status = "Recording · camera unavailable. " + m_cameraWarning;
+        QSaveFile metadata(m_path + ".camera.json");
+        const auto bytes = QJsonDocument(QJsonObject{{"version", 1},
+                                                    {"missing", true}})
+                               .toJson(QJsonDocument::Compact);
+        if (metadata.open(QIODevice::WriteOnly) &&
+            metadata.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) {
+          if (metadata.write(bytes) == bytes.size())
+            metadata.commit();
+        }
+      }
       m_tick.start();
       m_startupCheck.stop();
       refreshBar();
@@ -726,6 +751,7 @@ void Recorder::launch() {
     return;
   m_screenReady = false;
   m_cameraWarning.clear();
+  m_canForceStop = m_forcedStop = false;
   m_state = "starting";
   m_status = "Starting recorder…";
   // The countdown sits on the recorded display. Take it down before capture.
@@ -910,6 +936,16 @@ void Recorder::finishPause(bool success, const QString &error, bool uncertain) {
   emit pauseFinished(success);
 }
 void Recorder::stop() {
+  if (m_state == "stopping") {
+    if (m_canForceStop && m_process.state() != QProcess::NotRunning) {
+      m_canForceStop = false;
+      m_forcedStop = true;
+      m_status = "Force-stopping. The file may be incomplete.";
+      m_process.kill();
+      emit changed();
+    }
+    return;
+  }
   if (m_state == "countdown" ||
       (m_state == "starting" && m_process.state() == QProcess::NotRunning)) {
     // Nothing was captured yet. Cancel and go back to what the user was doing.
@@ -932,10 +968,11 @@ void Recorder::stop() {
   m_startupCheck.stop();
   m_tick.stop();
   emit changed();
-  // Stop only our child, and let it finish writing the container. Never pkill
-  // other recorders or force-kill a recording after an arbitrary deadline.
-  if (m_process.processId() > 0)
+  // Let our child finish the container before offering a manual force-stop.
+  if (m_process.processId() > 0) {
     ::kill(static_cast<pid_t>(m_process.processId()), SIGINT);
+    m_stopTimeout.start();
+  }
 }
 /** Removes a recording that holds no usable video, so a failed start does
  *  not leave an unplayable file behind. */
@@ -944,6 +981,8 @@ static bool discardEmpty(const QString &path) {
   return info.exists() && info.size() < 64 * 1024 && QFile::remove(path);
 }
 void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
+  m_stopTimeout.stop();
+  m_canForceStop = false;
   m_webcam.finishTrack();
   finishPause(false);
   freezeClock();
@@ -953,6 +992,17 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
   QFile::remove(m_path + ".ts");
   refreshBar();
   emit hideRequested();
+  if (m_forcedStop) {
+    m_screenReady = false;
+    m_state = "idle";
+    m_status = "Recording force-stopped. The file may be incomplete "
+               "and has not been checked.";
+    m_status += QFileInfo::exists(m_path) ? " The partial file was kept at " + m_path
+                                         : " No recording file was created.";
+    emit changed();
+    emit setupRequested();
+    return;
+  }
   if (code != 0 || exitStatus != QProcess::NormalExit) {
     const bool discarded = discardEmpty(m_path);
     fail("Recording failed. " + m_error.simplified().right(500) +
