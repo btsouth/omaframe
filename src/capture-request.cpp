@@ -57,3 +57,19 @@ CaptureRequest::Handling CaptureRequest::handle(const QString &command,
                : Handling::Busy;
   return busy ? Handling::Busy : Handling::Proceed;
 }
+
+bool CaptureRequest::dispatchControl(const QString &command,
+                                     bool recordingActive,
+                                     std::function<void(const QString &)> pause,
+                                     std::function<void()> stop) {
+  if (command == "pause-recording" || command == "resume-recording" ||
+      command == "toggle-recording-pause") {
+    pause(command);
+    return true;
+  }
+  if (command == "stop-recording" || (command == "record" && recordingActive)) {
+    stop();
+    return true;
+  }
+  return false;
+}

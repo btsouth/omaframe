@@ -264,10 +264,12 @@ public:
   int delaySeconds() const { return m_delaySeconds; }
   int delayRemaining() const { return m_delay.remaining(); }
   bool delayedCapture() const { return m_delay.active(); }
+  quint64 delayGeneration() const { return m_delay.generation(); }
   bool currentDelay(quint64 generation) const {
     return m_delay.current(generation);
   }
   void setDelaySeconds(int seconds);
+  void reportDelayFailure();
   Q_INVOKABLE void delayCapture(int seconds = -1);
   Q_INVOKABLE void cancelDelayedCapture() { m_delay.cancel(); }
   void delayDesktopCleared(quint64 generation, bool success) {

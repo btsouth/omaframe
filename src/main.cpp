@@ -291,7 +291,7 @@ int main(int argc, char **argv) {
         p.start("hyprctl", args);
         if (!p.waitForFinished(800)) {
           p.kill();
-          p.waitForFinished();
+          p.waitForFinished(100);
           return QByteArray();
         }
         return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
@@ -671,79 +671,56 @@ int main(int argc, char **argv) {
       });
   QObject::connect(&app, &QGuiApplication::screenRemoved, &recorder,
                    [&](QScreen *) { recorder.layoutChanged(); });
+  CaptureDismissal::Boundary dismissal(&app);
+  dismissal.recover([&](bool success) {
+    if (!success)
+      notify("Screenshot delay unavailable",
+             "Could not restore Omaframe's dismissal animations.", {});
+  });
   QObject::connect(
       &studio, &Studio::delayHideRequested, &app, [&](quint64 generation) {
         delayedEditorOrigin = true;
         if (!shortcuts.checking())
           shortcuts.refresh();
-        QString error;
-        if (!CaptureDismissal::prepare(error)) {
-          studio.delayDesktopCleared(generation, false);
-          return;
-        }
-        // Allow the compositor to apply the dismissal rules before unmapping.
-        QTimer::singleShot(
-            CaptureDismissal::frameWait(QGuiApplication::primaryScreen()),
-            &studio, [&, generation] {
-              if (!studio.currentDelay(generation))
-                return;
+        dismissal.begin(
+            generation, QGuiApplication::primaryScreen(),
+            [&] {
               hideCaptureSurfaces();
               if (window)
                 window->destroy();
               if (chooser)
                 chooser->destroy();
-              CaptureDismissal::clearDesktop(
-                  &studio, QGuiApplication::primaryScreen(),
-                  [&, generation](bool success) {
-                    if (studio.currentDelay(generation))
-                      CaptureDismissal::restoreAnimations();
-                    studio.delayDesktopCleared(generation, success);
-                  });
+            },
+            [&, generation](bool success) {
+              studio.delayDesktopCleared(generation, success);
             });
       });
   QObject::connect(&studio, &Studio::delayBadgeRequested, &app, [&] {
-    if (!studio.delayedCapture())
-      return;
-    if (!captureCountdown) {
-      QQmlComponent component(&engine, QUrl("qrc:/qml/CaptureCountdown.qml"));
-      captureCountdown = qobject_cast<QQuickWindow *>(component.create());
+    const auto generation = studio.delayGeneration();
+    dismissal.placeBadge(generation, [&, generation](QScreen *screen) {
+      if (!studio.currentDelay(generation))
+        return;
       if (!captureCountdown) {
+        QQmlComponent component(&engine, QUrl("qrc:/qml/CaptureCountdown.qml"));
+        captureCountdown = qobject_cast<QQuickWindow *>(component.create());
+      }
+      if (!captureCountdown || !screen) {
         studio.cancelDelayedCapture();
         return;
       }
-    }
-    QScreen *screen = nullptr;
-    QProcess cursor;
-    cursor.start("hyprctl", {"-j", "cursorpos"});
-    if (cursor.waitForFinished(500)) {
-      const auto at =
-          QJsonDocument::fromJson(cursor.readAllStandardOutput()).object();
-      const QPoint point(at.value("x").toInt(), at.value("y").toInt());
-      for (auto *candidate : QGuiApplication::screens())
-        if (candidate->geometry().contains(point))
-          screen = candidate;
-    } else {
-      cursor.kill();
-      cursor.waitForFinished();
-    }
-    if (!screen)
-      screen = QGuiApplication::primaryScreen();
-    if (!screen) {
-      studio.cancelDelayedCapture();
-      return;
-    }
-    auto *layer = LayerShellQt::Window::get(captureCountdown);
-    layer->setScope(CaptureDismissal::scope);
-    layer->setLayer(LayerShellQt::Window::LayerOverlay);
-    layer->setExclusiveZone(-1);
-    layer->setAnchors(LayerShellQt::Window::AnchorTop);
-    layer->setKeyboardInteractivity(
-        LayerShellQt::Window::KeyboardInteractivityNone);
-    layer->setMargins(QMargins(0, 64, 0, 0));
-    captureCountdown->setScreen(screen);
-    layer->setScreen(screen);
-    captureCountdown->setMask(QRegion(270, 16, 60, 32));
-    captureCountdown->show();
+      auto *layer = LayerShellQt::Window::get(captureCountdown);
+      layer->setScope(CaptureDismissal::scope);
+      layer->setLayer(LayerShellQt::Window::LayerOverlay);
+      layer->setExclusiveZone(-1);
+      layer->setAnchors(LayerShellQt::Window::AnchorTop);
+      layer->setKeyboardInteractivity(
+          LayerShellQt::Window::KeyboardInteractivityNone);
+      layer->setMargins(QMargins(0, 64, 0, 0));
+      captureCountdown->setScreen(screen);
+      layer->setScreen(screen);
+      captureCountdown->setMask(QRegion(270, 16, 60, 32));
+      captureCountdown->show();
+    });
   });
   QObject::connect(
       &studio, &Studio::delayClearRequested, &app, [&](quint64 generation) {
@@ -751,14 +728,10 @@ int main(int argc, char **argv) {
           studio.delayBadgeCleared(generation, false);
           return;
         }
-        CaptureDismissal::clear(
-            captureCountdown, &studio,
-            [&, generation](bool success) {
-              if (studio.currentDelay(generation))
-                CaptureDismissal::restoreAnimations();
-              studio.delayBadgeCleared(generation, success);
-            },
-            [&, generation] { return studio.currentDelay(generation); });
+        dismissal.clear(generation, captureCountdown,
+                        [&, generation](bool success) {
+                          studio.delayBadgeCleared(generation, success);
+                        });
       });
   QObject::connect(&studio, &Studio::delayCancelled, &app, [&] {
     delayedEditorOrigin = false;
@@ -766,22 +739,34 @@ int main(int argc, char **argv) {
       captureCountdown->hide();
       captureCountdown->destroy();
     }
-    CaptureDismissal::restoreAnimations();
     hideCaptureSurfaces();
     const bool returning = studio.takeReturnToStudio();
     studio.leaveQuickMode();
+    const bool quitting = !returning && pendingReview.isEmpty() && !recorder.active();
+    dismissal.cancel([&, quitting](bool restored) {
+      if (!restored) {
+        studio.reportDelayFailure();
+        notify("Screenshot cancelled",
+               "Could not restore Omaframe's dismissal animations.", {});
+        showStudioWindow();
+      }
+      if (quitting && !studio.busy() && !video.busy() && !studio.quickMode() &&
+          !studio.delayedCapture() && !recorder.active() &&
+          !(window && window->isVisible()))
+        QTimer::singleShot(0, &app, &QCoreApplication::quit);
+    });
     if (!pendingReview.isEmpty() && !recorder.active()) {
       const QUrl review = pendingReview;
       pendingReview.clear();
       requestReview(review, returning);
     } else if (returning)
       showStudioWindow();
-    else if (!recorder.active())
-      QTimer::singleShot(0, &app, &QCoreApplication::quit);
   });
   QObject::connect(&studio, &Studio::delayFailed, &app, [&] {
     notify("Screenshot cancelled",
-           "Could not clear the countdown surface safely.", {});
+           "Could not clear the screenshot surfaces or restore their animations safely.", {});
+    // Keep the failure visible even when desktop notifications are disabled.
+    showStudioWindow();
   });
   QObject::connect(&studio, &Studio::hideStudio, &app, hideCaptureSurfaces);
   QObject::connect(&studio, &Studio::selectionDone, &app, clearSelections);
@@ -942,32 +927,29 @@ int main(int argc, char **argv) {
           client->disconnectFromServer();
           return;
         }
-        if (cmd == "pause-recording" || cmd == "resume-recording" ||
-            cmd == "toggle-recording-pause") {
-          QObject::connect(&recorder, &Recorder::pauseFinished, client,
-                           [client](bool success) {
-                             client->write(success ? "ok\n" : "unhandled\n");
-                             client->disconnectFromServer();
-                           });
-          const bool paused =
-              cmd == "pause-recording" ||
-              (cmd == "toggle-recording-pause" && recorder.state() != "paused");
-          if (!recorder.setPaused(paused)) {
-            client->write("unhandled\n");
-            client->disconnectFromServer();
-          }
+        if (CaptureRequest::dispatchControl(
+                cmd, recorder.active(),
+                [&](const QString &control) {
+                  QObject::connect(&recorder, &Recorder::pauseFinished, client,
+                                   [client](bool success) {
+                                     client->write(success ? "ok\n" : "unhandled\n");
+                                     client->disconnectFromServer();
+                                   });
+                  const bool paused = control == "pause-recording" ||
+                      (control == "toggle-recording-pause" && recorder.state() != "paused");
+                  if (!recorder.setPaused(paused)) {
+                    client->write("unhandled\n");
+                    client->disconnectFromServer();
+                  }
+                },
+                [&] {
+                  const bool handled = recorder.active();
+                  client->write(handled ? "ok\n" : "unhandled\n");
+                  client->disconnectFromServer();
+                  if (handled)
+                    recorder.stop();
+                }))
           return;
-        }
-        const bool stopping =
-            cmd == "stop-recording" || (cmd == "record" && recorder.active());
-        if (stopping) {
-          const bool handled = recorder.active();
-          client->write(handled ? "ok\n" : "unhandled\n");
-          client->disconnectFromServer();
-          if (handled)
-            recorder.stop();
-          return;
-        }
         const auto handling = CaptureRequest::handle(
             cmd, studio.delayedCapture(), studio.busy() || video.busy());
         if (handling != CaptureRequest::Handling::Proceed) {

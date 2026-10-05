@@ -205,7 +205,10 @@ Studio::Studio(ImageStore *store, bool withDemo) : m_store(store) {
     emit changed();
     emit delayCancelled();
   });
-  connect(&m_delay, &DelayCapture::failed, this, &Studio::delayFailed);
+  connect(&m_delay, &DelayCapture::failed, this, [this] {
+    reportDelayFailure();
+    emit delayFailed();
+  });
   QSettings settings;
   const int delay = settings.value("screenshot/delaySeconds", 3).toInt();
   m_delaySeconds = delay == 5 || delay == 10 ? delay : 3;
@@ -1037,6 +1040,11 @@ void Studio::setDelaySeconds(int seconds) {
     return;
   m_delaySeconds = seconds;
   QSettings().setValue("screenshot/delaySeconds", seconds);
+  emit changed();
+}
+void Studio::reportDelayFailure() {
+  m_status = "Screenshot cancelled: could not clear the screenshot surfaces "
+             "or restore Omaframe's animations safely.";
   emit changed();
 }
 void Studio::delayCapture(int seconds) {

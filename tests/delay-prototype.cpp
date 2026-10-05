@@ -11,10 +11,7 @@ int main(int argc, char **argv) {
   QGuiApplication app(argc, argv);
   app.setQuitOnLastWindowClosed(false);
   QString error;
-  if (!CaptureDismissal::prepare(error)) {
-    fprintf(stderr, "%s\n", qPrintable(error));
-    return 1;
-  }
+  CaptureDismissal::Boundary dismissal(&app);
   QQuickWindow badge;
   badge.setFlags(Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus);
   badge.setColor(QColor("#ff00ff"));
@@ -35,34 +32,39 @@ int main(int argc, char **argv) {
   MonitorInfo monitor;
   monitor.name = screen->name();
   QImage reference;
-  if (!captureOutputSurface(monitor, reference, error))
-    return 2;
-  reference.save(folder + "/reference.png");
-  badge.show();
-  QTimer::singleShot(1000, &app, [&] {
-    QImage visible;
-    if (!captureOutputSurface(monitor, visible, error)) {
-      app.exit(3);
-      return;
-    }
-    visible.save(folder + "/visible.png");
-    CaptureDismissal::clear(&badge, &app, [&](bool gone) {
-      QImage captured;
-      CaptureDismissal::restoreAnimations();
-      if (!gone || !captureOutputSurface(monitor, captured, error)) {
-        app.exit(4);
-        return;
-      }
-      captured.save(folder + "/captured.png");
-      const QRect region((screen->size().width() - 360) / 2, 64, 360, 64);
-      const bool equal = reference.copy(region) == captured.copy(region);
-      const bool shown = visible.copy(region) != reference.copy(region);
-      fprintf(stderr,
-              "badge shown=%d; post-dismissal badge region identical=%d; "
-              "refresh=%.2f\n",
-              shown, equal, screen->refreshRate());
-      app.exit(equal && shown ? 0 : 5);
-    });
-  });
+  dismissal.begin(
+      1, screen, [] {},
+      [&](bool prepared) {
+        if (!prepared || !captureOutputSurface(monitor, reference, error)) {
+          app.exit(2);
+          return;
+        }
+        reference.save(folder + "/reference.png");
+        badge.show();
+        QTimer::singleShot(1000, &app, [&] {
+          QImage visible;
+          if (!captureOutputSurface(monitor, visible, error)) {
+            app.exit(3);
+            return;
+          }
+          visible.save(folder + "/visible.png");
+          dismissal.clear(1, &badge, [&](bool gone) {
+            QImage captured;
+            if (!gone || !captureOutputSurface(monitor, captured, error)) {
+              app.exit(4);
+              return;
+            }
+            captured.save(folder + "/captured.png");
+            const QRect region((screen->size().width() - 360) / 2, 64, 360, 64);
+            const bool equal = reference.copy(region) == captured.copy(region);
+            const bool shown = visible.copy(region) != reference.copy(region);
+            fprintf(stderr,
+                    "badge shown=%d; post-dismissal badge region identical=%d; "
+                    "refresh=%.2f\n",
+                    shown, equal, screen->refreshRate());
+            app.exit(equal && shown ? 0 : 5);
+          });
+        });
+      });
   return app.exec();
 }

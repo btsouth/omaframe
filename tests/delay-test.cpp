@@ -1,3 +1,4 @@
+#include "capture-dismissal.hpp"
 #include "capture-request.hpp"
 #include "delay-capture.hpp"
 #include "navigation.hpp"
@@ -7,6 +8,7 @@
 #include "studio.hpp"
 #include <QCommandLineParser>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
 #include <QQmlComponent>
@@ -18,6 +20,27 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QUuid>
+
+struct FakeCompositor {
+  using Reply = CaptureDismissal::Boundary::Reply;
+  struct Call {
+    QStringList args;
+    std::function<void(Reply)> done;
+    bool stopped = false;
+  };
+  QList<std::shared_ptr<Call>> calls;
+  CaptureDismissal::Boundary::Transport transport() {
+    return [this](const QStringList &args, auto done) {
+      auto call = std::make_shared<Call>(Call{args, done});
+      calls.append(call);
+      return [call] { call->stopped = true; };
+    };
+  }
+  void reply(int index, bool success = true, QByteArray output = "ok") {
+    calls.at(index)->done({success, output});
+  }
+};
 
 class DelayTest : public QObject {
   Q_OBJECT
@@ -89,14 +112,332 @@ private slots:
       QCOMPARE(handle(request, true, true), Handling::Busy);
     QCOMPARE(handle("capture", false, true), Handling::Busy);
     QCOMPARE(handle("capture", false, false), Handling::Proceed);
-    // Recording controls are dispatched before the delay gate in main.cpp.
-    QFile main(QFINDTESTDATA("../src/main.cpp"));
-    QVERIFY(main.open(QIODevice::ReadOnly));
-    const auto code = main.readAll();
-    QVERIFY(code.indexOf("const bool stopping") <
-            code.indexOf("CaptureRequest::handle"));
-    QVERIFY(code.indexOf("Recorder::pauseFinished, client") <
-            code.indexOf("CaptureRequest::handle"));
+  }
+  void recordingPriorityDispatch_data() {
+    QTest::addColumn<QString>("command");
+    QTest::addColumn<bool>("active");
+    QTest::addColumn<QString>("expected");
+    for (bool active : {false, true})
+      for (const auto *cmd :
+           {"pause-recording", "resume-recording", "toggle-recording-pause",
+            "stop-recording", "record", "capture", "scroll"}) {
+        const QString expected =
+            QString(cmd).contains("pause") || QString(cmd) == "resume-recording"
+                ? "pause"
+            : QString(cmd) == "stop-recording" ||
+                    (QString(cmd) == "record" && active)
+                ? "stop"
+                : (QString(cmd) == "capture" ? "cancel" : "busy");
+        QTest::newRow(qPrintable(QString(cmd) + (active ? "-active" : "-idle")))
+            << QString(cmd) << active << expected;
+      }
+  }
+  void recordingPriorityDispatch() {
+    QFETCH(QString, command);
+    QFETCH(bool, active);
+    QFETCH(QString, expected);
+    QStringList calls;
+    // Same production dispatch boundary; controls must bypass delay and busy.
+    if (!CaptureRequest::dispatchControl(
+            command, active,
+            [&](const QString &c) {
+              QCOMPARE(c, command);
+              calls << "pause";
+            },
+            [&] { calls << "stop"; })) {
+      const auto result = CaptureRequest::handle(command, true, true);
+      calls << (result == CaptureRequest::Handling::Cancel ? "cancel" : "busy");
+    }
+    QCOMPARE(calls, QStringList{expected});
+  }
+  void productionDesktopDismissalAndPlacement() {
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    int hidden = 0, completed = 0, placed = 0;
+    bool success = false;
+    boundary.begin(
+        7, nullptr, [&] { ++hidden; },
+        [&](bool ok) {
+          ++completed;
+          success = ok;
+        });
+    QCOMPARE(fake.calls.size(), 1); // Recover before installing any rules.
+    fake.reply(0);
+    QCOMPARE(fake.calls.size(), 2);
+    QVERIFY(fake.calls[1]->args[1].contains("^omaframe-(selection|finishes)$"));
+    fake.reply(1);
+    QCOMPARE(hidden, 0); // Wait for rule application, never hide synchronously.
+    QTRY_COMPARE(hidden, 1);
+    QTRY_COMPARE(fake.calls.size(), 3);
+    QCOMPARE(fake.calls[2]->args, (QStringList{"-j", "layers"}));
+    fake.reply(2, true, "{}");
+    QCOMPARE(fake.calls[3]->args, (QStringList{"-j", "clients"}));
+    fake.reply(3, true, "[]");
+    QCOMPARE(completed, 0);
+    QTRY_COMPARE(fake.calls.size(), 5);
+    fake.reply(4);
+    QCOMPARE(completed, 1);
+    QVERIFY(success);
+    boundary.placeBadge(7, [&](QScreen *screen) {
+      QVERIFY(screen);
+      ++placed;
+    });
+    QCOMPARE(placed, 0);
+    fake.reply(5, true, R"({"x":0,"y":0})");
+    QCOMPARE(placed, 1);
+  }
+  void productionBadgeDismissalRequiresRestore() {
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    boundary.begin(1, nullptr, [] {}, [](bool) {});
+    boundary.cancel([](bool) {});
+    // Cancelled recovery is stopped; a new timer must restore first.
+    boundary.begin(2, nullptr, [] {}, [](bool) {});
+    fake.reply(1);
+    fake.reply(2);
+    fake.reply(3);
+    QTRY_COMPARE(fake.calls.size(), 5);
+    fake.reply(4, true, "{}");
+    fake.reply(5, true, "[]");
+    QTRY_COMPARE(fake.calls.size(), 7);
+    fake.reply(6);
+    QQuickWindow badge;
+    badge.show();
+    int done = 0;
+    bool success = true;
+    boundary.clear(2, &badge, [&](bool ok) {
+      ++done;
+      success = ok;
+    });
+    QCOMPARE(fake.calls.size(), 8);
+    QVERIFY(badge.isVisible());
+    fake.reply(7);
+    QTRY_VERIFY(!badge.isVisible());
+    QTRY_COMPARE(fake.calls.size(), 9);
+    fake.reply(8, true, "{}");
+    QCOMPARE(done, 0);
+    QTRY_COMPARE(fake.calls.size(), 10);
+    fake.reply(9, true, "error restoring rule");
+    QCOMPARE(done, 1);
+    QVERIFY(!success); // Production boundary cannot signal acquisition.
+  }
+  void productionFailures_data() {
+    QTest::addColumn<int>("stage");
+    QTest::addColumn<bool>("exitOk");
+    QTest::addColumn<QByteArray>("output");
+    QTest::newRow("startup-restore-exit") << 0 << false << QByteArray("ok");
+    QTest::newRow("startup-restore-output") << 0 << true << QByteArray("error");
+    QTest::newRow("prepare-exit") << 1 << false << QByteArray("ok");
+    QTest::newRow("prepare-output") << 1 << true << QByteArray("error");
+    QTest::newRow("layer-query-invalid") << 2 << true << QByteArray("broken");
+    const QByteArray layer =
+        QJsonDocument(
+            QJsonObject{
+                {"monitor",
+                 QJsonObject{
+                     {"levels",
+                      QJsonObject{
+                          {"3",
+                           QJsonArray{QJsonObject{
+                               {"pid", QCoreApplication::applicationPid()},
+                               {"namespace", CaptureDismissal::scope}}}}}}}}})
+            .toJson();
+    QTest::newRow("layer-still-present") << 2 << true << layer;
+    QTest::newRow("clients-invalid") << 3 << true << QByteArray("{}");
+    QTest::newRow("final-restore-exit") << 4 << false << QByteArray("ok");
+  }
+  void productionFailures() {
+    QFETCH(int, stage);
+    QFETCH(bool, exitOk);
+    QFETCH(QByteArray, output);
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    int done = 0;
+    bool success = true;
+    boundary.begin(
+        1, nullptr, [] {},
+        [&](bool ok) {
+          ++done;
+          success = ok;
+        });
+    for (int i = 0; i <= stage; ++i) {
+      QTRY_VERIFY(fake.calls.size() > i);
+      fake.reply(i, i == stage ? exitOk : true,
+                 i == stage ? output
+                 : i == 2   ? "{}"
+                 : i == 3   ? "[]"
+                            : "ok");
+    }
+    if (stage > 0 && stage < 4) {
+      QTRY_VERIFY(fake.calls.size() > stage + 1);
+      fake.reply(stage + 1);
+    }
+    QTRY_COMPARE(done, 1);
+    QVERIFY(!success);
+  }
+  void productionTimeouts_data() {
+    QTest::addColumn<QString>("stage");
+    for (const auto *stage :
+         {"recover", "prepare", "layers", "restore", "cursor"})
+      QTest::newRow(stage) << QString(stage);
+  }
+  void productionTimeouts() {
+    QFETCH(QString, stage);
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    int completed = 0;
+    bool success = true;
+    boundary.begin(
+        1, nullptr, [] {},
+        [&](bool ok) {
+          ++completed;
+          success = ok;
+        });
+    int timed = 0;
+    if (stage != "recover") {
+      fake.reply(0);
+      timed = 1;
+    }
+    if (stage == "layers" || stage == "restore" || stage == "cursor") {
+      fake.reply(1);
+      QTRY_COMPARE(fake.calls.size(), 3);
+      timed = 2;
+    }
+    if (stage == "restore" || stage == "cursor") {
+      fake.reply(2, true, "{}");
+      fake.reply(3, true, "[]");
+      QTRY_COMPARE(fake.calls.size(), 5);
+      timed = 4;
+    }
+    if (stage == "cursor") {
+      fake.reply(4);
+      boundary.placeBadge(1, [&](QScreen *screen) {
+        QVERIFY(screen);
+        ++completed;
+      });
+      timed = 5;
+    }
+    // The event loop keeps dispatching Cancel/IPC/control work while waiting.
+    int heartbeat = 0;
+    QTimer pulse;
+    connect(&pulse, &QTimer::timeout, [&] { ++heartbeat; });
+    pulse.start(10);
+    QTRY_VERIFY_WITH_TIMEOUT(fake.calls[timed]->stopped, 1500);
+    QVERIFY(heartbeat > 10);
+    if (stage == "prepare" || stage == "layers")
+      fake.reply(timed + 1); // Checked cleanup follows failed command.
+    QCOMPARE(completed, stage == "cursor" ? 2 : 1);
+    if (stage != "cursor")
+      QVERIFY(!success);
+    const int before = completed;
+    fake.reply(timed); // Timeout's late success cannot run a continuation.
+    QCOMPARE(completed, before);
+  }
+  void productionCancelMidPrepareAndLateReplies() {
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    int hidden = 0, ready = 0, cancelled = 0;
+    boundary.begin(1, nullptr, [&] { ++hidden; }, [&](bool) { ++ready; });
+    fake.reply(0);
+    QCOMPARE(fake.calls.size(), 2);
+    boundary.cancel([&](bool ok) {
+      QVERIFY(ok);
+      ++cancelled;
+    });
+    QVERIFY(fake.calls[1]->stopped);
+    QCOMPARE(fake.calls.size(), 3);
+    QVERIFY(fake.calls[2]->args[1].contains("enabled = false"));
+    fake.reply(1); // Delayed prepare reply after Cancel cannot hide the editor.
+    fake.reply(2);
+    QCOMPARE(cancelled, 1);
+    QTest::qWait(80);
+    QCOMPARE(hidden, 0);
+    QCOMPARE(ready, 0);
+    QCOMPARE(fake.calls.size(), 3);
+  }
+  void productionCancelDuringPlacementAndRestore() {
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    boundary.begin(1, nullptr, [] {}, [](bool) {});
+    fake.reply(0);
+    fake.reply(1);
+    QTRY_COMPARE(fake.calls.size(), 3);
+    fake.reply(2, true, "{}");
+    fake.reply(3, true, "[]");
+    QTRY_COMPARE(fake.calls.size(), 5);
+    fake.reply(4);
+    int mapped = 0, cancelled = 0;
+    boundary.placeBadge(1, [&](QScreen *) { ++mapped; });
+    boundary.cancel([&](bool ok) {
+      QVERIFY(!ok);
+      ++cancelled;
+    });
+    QVERIFY(fake.calls[5]->stopped);
+    fake.reply(5, true, R"({"x":0,"y":0})");
+    boundary.placeBadge(1, [&](QScreen *) { ++mapped; });
+    fake.reply(6, false);
+    QCOMPARE(mapped, 0);
+    QCOMPARE(cancelled, 1); // Cancel restoration errors are reported.
+  }
+  void productionStartupCleanupOwnsOnlySavedRules() {
+    FakeCompositor fake;
+    CaptureDismissal::Boundary boundary(nullptr, fake.transport());
+    int recovered = 0;
+    boundary.recover([&](bool ok) {
+      QVERIFY(ok);
+      ++recovered;
+    });
+    const auto uuid =
+        QSettings().value("screenshot/dismissalRuleId").toString();
+    QVERIFY(!QUuid(uuid).isNull());
+    const auto cleanup = fake.calls[0]->args[1];
+    QVERIFY(cleanup.contains("omaframe-delay-" + uuid + "-window"));
+    QVERIFY(cleanup.contains("omaframe-delay-" + uuid + "-selection"));
+    QVERIFY(!cleanup.contains("countdown"));
+    QVERIFY(!cleanup.contains("omaframe-capture-dismissal\""));
+    fake.reply(0);
+    QCOMPARE(recovered, 1);
+    // Recreated after a crash: same UUID, same idempotent disable operation.
+    FakeCompositor restarted;
+    CaptureDismissal::Boundary next(nullptr, restarted.transport());
+    next.recover([&](bool ok) {
+      QVERIFY(ok);
+      ++recovered;
+    });
+    QCOMPARE(restarted.calls[0]->args[1], cleanup);
+    restarted.reply(0);
+    QCOMPARE(recovered, 2);
+  }
+  void customDelayBindings_data() {
+    QTest::addColumn<QString>("arg");
+    QTest::addColumn<bool>("recognized");
+    for (const auto *arg :
+         {"omaframe --capture --delay 5", "omaframe --delay 5",
+          "omaframe --delay 5 --capture", "omaframe --delay=10 --capture",
+          "omaframe --capture --delayed-capture", "/opt/bin/omaframe --delay 3",
+          "exec /opt/bin/omaframe --delay 3",
+          "env TEST=1 omaframe --delay 5 --capture",
+          "\"/opt/bin/omaframe\" --capture --delay 5",
+          "'/opt/bin/omaframe' --delay 3"})
+      QTest::newRow(arg) << QString(arg) << true;
+    for (const auto *arg :
+         {"omaframe --delay 31", "omaframe --delay -1", "omaframe --delay 1.5",
+          "omaframe --screen --delay 5", "omaframe --record --delay 5",
+          "omaframe --delay 5 photo.png", "omaframe --delay",
+          "omaframe --capture", "other --delay 5", "echo omaframe --delay 5"})
+      QTest::newRow(arg) << QString(arg) << false;
+  }
+  void customDelayBindings() {
+    QFETCH(QString, arg);
+    QFETCH(bool, recognized);
+    QJsonObject bind{{"key", "s"},
+                     {"modmask", 64 | 4},
+                     {"dispatcher", "exec"},
+                     {"arg", arg}};
+    QCOMPARE(Shortcuts::runsOmaframe(bind, Shortcuts::Action::Delay),
+             recognized);
+    QCOMPARE(Shortcuts::omaframeKey({bind}, Shortcuts::Action::Delay),
+             recognized ? QString("Super+Ctrl+S") : QString());
   }
   void navigationKeepsRequestLocalDelay() {
     Navigation nav;
@@ -237,6 +578,16 @@ private slots:
     QSettings().setValue("screenshot/delaySeconds", 30);
     Studio invalid(&store, false);
     QCOMPARE(invalid.delaySeconds(), 3);
+  }
+  void restorationFailureHasVisibleStudioStatus() {
+    ImageStore store;
+    Studio studio(&store, false);
+    QSettings().setValue("notifications", false);
+    studio.delayCapture(3);
+    studio.delayDesktopCleared(studio.delayGeneration(), false);
+    QVERIFY(!studio.delayedCapture());
+    QVERIFY(studio.status().contains("Screenshot cancelled"));
+    QVERIFY(studio.status().contains("restore Omaframe's animations"));
   }
   void staleWorkerResultIsDiscardedAndFreshPixelsSelected() {
     ImageStore store;

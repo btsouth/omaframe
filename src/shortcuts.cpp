@@ -51,7 +51,7 @@ QByteArray hyprctl(const QStringList &args, int timeout = 2500) {
   p.start("hyprctl", args);
   if (!p.waitForFinished(timeout)) {
     p.kill();
-    p.waitForFinished();
+    p.waitForFinished(100);
     return {};
   }
   return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
@@ -128,14 +128,64 @@ bool Shortcuts::runsOmaframe(const QJsonObject &bind, Action action) {
       R"((?:^|[\s/'"])omaframe['"]?\s+--(?:record|stop-recording)(?:['"\s;&|]|$))");
   static const QRegularExpression screenshot(
       R"((?:^|[\s/'"])omaframe['"]?(?:\s+--(?:capture|screen|repeat))?\s*(?:['";&|]|$))");
-  static const QRegularExpression delay(
-      R"((?:^|[\s/'"])omaframe['"]?\s+--(?:delayed-capture|delay\s+[0-9]+)(?:['"\s;&|]|$))");
+  // Parse the supported capture invocation rather than assuming option order.
+  // Split shell command segments, then use Qt's quote-aware argument splitter.
+  if (action == Action::Delay) {
+    const auto commands = bind.value("arg").toString().split(
+        QRegularExpression("[;&|]+"), Qt::SkipEmptyParts);
+    for (const auto &command : commands) {
+      auto args = QProcess::splitCommand(command.trimmed());
+      if (!args.isEmpty() && args.first() == "exec")
+        args.removeFirst();
+      if (!args.isEmpty() && args.first() == "env")
+        args.removeFirst();
+      while (!args.isEmpty() && QRegularExpression("^[A-Za-z_][A-Za-z0-9_]*=")
+                                    .match(args.first())
+                                    .hasMatch())
+        args.removeFirst();
+      if (args.isEmpty())
+        continue;
+      QString executable = args.takeFirst();
+      if (executable.startsWith('\'') && executable.endsWith('\''))
+        executable = executable.mid(1, executable.size() - 2);
+      if (QFileInfo(executable).fileName() != "omaframe")
+        continue;
+      bool delayed = false, valid = true;
+      for (int i = 0; i < args.size(); ++i) {
+        const auto arg = args[i];
+        if (arg == "--capture")
+          continue;
+        if (arg == "--delayed-capture") {
+          if (delayed)
+            valid = false;
+          delayed = true;
+          continue;
+        }
+        QString seconds;
+        if (arg == "--delay" && i + 1 < args.size())
+          seconds = args[++i];
+        else if (arg.startsWith("--delay="))
+          seconds = arg.mid(8);
+        else {
+          valid = false;
+          continue;
+        }
+        bool ok;
+        const int n = seconds.toInt(&ok);
+        valid &= !delayed && ok && n >= 0 && n <= 30 &&
+                 QRegularExpression("^[0-9]+$").match(seconds).hasMatch();
+        delayed = true;
+      }
+      if (delayed && valid)
+        return true;
+    }
+    return false;
+  }
   static const QRegularExpression pause(
       R"((?:^|[\s/'"])omaframe['"]?\s+--(?:toggle-recording-pause|pause-recording|resume-recording)(?:['"\s;&|]|$))");
-  return (action == Action::Delay    ? delay
-          : action == Action::Record ? record
-          : action == Action::Pause  ? pause
-                                     : screenshot)
+  return (action == Action::Record  ? record
+          : action == Action::Pause ? pause
+                                    : screenshot)
       .match(bind.value("arg").toString())
       .hasMatch();
 }
