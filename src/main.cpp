@@ -3,6 +3,7 @@
 #include "recording.hpp"
 #include "shortcuts.hpp"
 #include "studio.hpp"
+#include "history.hpp"
 #include "video.hpp"
 #include <LayerShellQt/Window>
 #include <QCommandLineParser>
@@ -74,6 +75,7 @@ int main(int argc, char **argv) {
       {"resume-recording", "Resume the current Omaframe recording."});
   parser.addOption({"toggle-recording-pause",
                     "Pause or resume the current Omaframe recording."});
+  parser.addOption({"history", "Open saved captures and editable drafts."});
   parser.addOption({"studio", "Open the Omaframe window."});
   parser.addOption({"capture", "Capture a region immediately."});
   parser.addOption({"repeat", "Capture the last selected screen area again."});
@@ -84,7 +86,7 @@ int main(int argc, char **argv) {
   parser.addPositionalArgument("file", "Image or video to open.", "[file]");
   parser.process(app);
   const bool captureStartup =
-      parser.positionalArguments().isEmpty() && !parser.isSet("studio");
+      parser.positionalArguments().isEmpty() && !parser.isSet("studio") && !parser.isSet("history");
   const QString file =
       parser.positionalArguments().isEmpty()
           ? QString()
@@ -96,6 +98,7 @@ int main(int argc, char **argv) {
       : parser.isSet("toggle-recording-pause") ? "toggle-recording-pause"
       : parser.isSet("record")                 ? "record"
       : !file.isEmpty()                        ? "open"
+      : parser.isSet("history")                ? "history"
       : parser.isSet("studio")                 ? "studio"
       : parser.isSet("repeat")                 ? "repeat"
       : parser.isSet("screen")                 ? "screen"
@@ -147,6 +150,14 @@ int main(int argc, char **argv) {
   auto *videoMarks = new ImageStore;
   Video video;
   Navigation navigation;
+  auto *historyImages = new HistoryImages;
+  CaptureHistoryModel history(historyImages);
+  QObject::connect(&studio, &Studio::changed, &history, &CaptureHistoryModel::foldersChanged);
+  QObject::connect(&video, &Video::changed, &history, &CaptureHistoryModel::foldersChanged);
+  QObject::connect(&history, &CaptureHistoryModel::deleteDraft, &app, [&](const QString &kind, const QString &id) {
+    if (kind == "video") video.deleteDraft(id);
+    else studio.deleteDraft(id);
+  });
   video.setImageStore(videoMarks);
   Recorder recorder;
   AudioLevels audioLevels;
@@ -198,6 +209,8 @@ int main(int argc, char **argv) {
   QObject::connect(&theme, &OmarchyTheme::changed, &app, applyPalette);
   QQmlApplicationEngine engine;
   engine.addImageProvider("frames", store);
+  engine.addImageProvider("history", historyImages);
+  engine.rootContext()->setContextProperty("history", &history);
   engine.addImageProvider("videomarks", videoMarks);
   engine.rootContext()->setContextProperty("theme", &theme);
   engine.rootContext()->setContextProperty("studio", &studio);
@@ -730,9 +743,11 @@ int main(int argc, char **argv) {
                      if (studio.quickState() == "selecting")
                        studio.cancelSelection();
                    });
+  QObject::connect(&history, &CaptureHistoryModel::navigate, &app, requestNavigation);
   QObject::connect(&navigation, &Navigation::proceed, &app,
                    [&](const QString &cmd, const QUrl &path) {
                      if (window) {
+                       if (cmd != "open") window->setProperty("historyMode", false);
                        // Keep the current editor alive while an open is
                        // checked. A failed open must retain its edit state.
                        if (cmd != "open" && cmd != "review" &&
@@ -745,6 +760,11 @@ int main(int argc, char **argv) {
                        if (window)
                          window->setProperty("closingApproved", true);
                        QTimer::singleShot(0, &app, &QCoreApplication::quit);
+                     } else if (cmd == "history") {
+                       mark("history requested");
+                       studio.closeImage();
+                       showStudioWindow();
+                       if (window) window->setProperty("historyMode", true);
                      } else if (cmd == "home") {
                        studio.closeImage();
                        if (window)
@@ -846,7 +866,7 @@ int main(int argc, char **argv) {
           requestNavigation(
               cmd, QUrl::fromLocalFile(request.value("file").toString()));
         else if (cmd == "record" || cmd == "repeat" || cmd == "capture" ||
-                 cmd == "screen" || cmd == "scroll")
+                 cmd == "screen" || cmd == "scroll" || cmd == "history")
           requestNavigation(cmd);
         else
           showStudioWindow();
@@ -857,6 +877,15 @@ int main(int argc, char **argv) {
     if (!ensureWindow())
       return 1;
     adjustWindow(window, false);
+  }
+  if (command == "history") QTimer::singleShot(0, &app, [&] { requestNavigation("history"); });
+  if (!captureStartup && command != "history") {
+    auto folders = History::previousFolders();
+    folders.append(video.outputDirectory());
+    folders.removeDuplicates();
+    (void)QtConcurrent::run([folders] {
+      for (const auto &folder : folders) Recording::recoverParts(folder);
+    });
   }
   if (!file.isEmpty())
     studio.open(QUrl::fromLocalFile(file));

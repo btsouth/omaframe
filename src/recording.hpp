@@ -41,6 +41,9 @@ Placement placeStop(const QList<Display> &displays,
 Placement placeCountdown(const QList<Display> &displays,
                          const QString &capturedDisplay,
                          QSize size = {420, 48});
+QString partPath(const QString &final);
+QString publishPart(const QString &part, const QString &final, bool incomplete);
+void recoverParts(const QString &folder, qint64 minimumAgeSeconds = 3600);
 QStringList arguments(const QString &target, const QString &path,
                       const QString &desktopSource, const QString &micSource,
                       bool cursor);
@@ -184,7 +187,8 @@ private:
   Webcam m_webcam;
   AudioSnapshot m_audioSession;
   QString m_sinkLabel;
-  bool m_screenReady = false;
+  bool m_screenReady = false, m_incompleteReady = false;
+  QString m_finalPath;
   bool m_canForceStop = false, m_forcedStop = false;
   QString m_cameraWarning;
   QString m_state = "idle", m_status, m_screen, m_target, m_path, m_error,

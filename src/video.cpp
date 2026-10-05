@@ -1,3 +1,4 @@
+#include "history.hpp"
 #include "video.hpp"
 #include "studio.hpp"
 #include <QDataStream>
@@ -981,6 +982,7 @@ void Video::revealGif() {
 void Video::setOutputDirectory(const QUrl &url) {
   if (m_busy || !url.isLocalFile())
     return;
+  if (m_directory != url.toLocalFile()) History::rememberFolder(m_directory);
   m_directory = url.toLocalFile();
   QSettings().setValue("videoDirectory", m_directory);
   emit changed();

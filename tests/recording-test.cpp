@@ -389,7 +389,8 @@ while True:
    r.stop();QTRY_COMPARE(r.state(),QString("idle"));
    QVERIFY(!r.active());QVERIFY(!r.canForceStop());QVERIFY(finished.isEmpty());
    QVERIFY(r.status().contains("partial file was kept"));QVERIFY(r.status().contains("has not been checked"));
-   QVERIFY(r.status().contains(path));QCOMPARE(QFileInfo(path).size(),size);
+   QVERIFY(r.savedPath().endsWith("-incomplete.mp4"));
+   QVERIFY(!QFileInfo::exists(path));QCOMPARE(QFileInfo(r.savedPath()).size(),size);
  }
  void cameraUnavailableAtLaunchIsReportedThroughCompletion() {
    QSettings().setValue("record/cameraDevice",QByteArray("missing-camera"));
@@ -452,6 +453,9 @@ while True:
    r.setCountdown(0);r.setMicAudio(true);r.setDesktopAudio(true);r.start();
    QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
    QVERIFY(r.active());QVERIFY(finished.isEmpty());
+   const auto hidden = r.savedPath();
+   QVERIFY(QFileInfo(hidden).fileName().startsWith('.'));
+   QVERIFY(hidden.endsWith(".part.mp4"));
    QCOMPARE(r.audioSession().sound,QString("launch_monitor"));
    qputenv("OMAFRAME_TEST_MONITOR","later_default");
    QCOMPARE(r.audioSession().sound,QString("launch_monitor"));
@@ -459,9 +463,15 @@ while True:
    QFile invocation(r.savedPath()+".args");QVERIFY(invocation.open(QIODevice::ReadOnly));
    const auto args=QJsonDocument::fromJson(invocation.readAll()).array().toVariantList();
    QCOMPARE(args.value(args.indexOf(QString("-a"))+1).toString(),r.audioSession().sound+"|"+r.audioSession().mic);
+   QCOMPARE(args.value(args.indexOf(QString("-o"))+1).toString(),hidden);
    r.stop();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
    QCOMPARE(r.state(),QString("saved"));QVERIFY(!r.active());
+   QCOMPARE(r.audioSession().sound,QString("launch_monitor"));
+   QCOMPARE(r.audioSession().mic,QString("clean_desktop_microphone"));
    QVERIFY(QFileInfo::exists(r.savedPath()));
+   QVERIFY(!QFileInfo::exists(hidden));
+   QVERIFY(QFileInfo(r.savedPath()).fileName().startsWith("Recording-"));
+   QVERIFY(!r.savedPath().contains(".part"));
    QVERIFY(!QFileInfo::exists(r.savedPath()+".ts"));
    QVERIFY(!QFileInfo::exists(r.savedPath()+".cleaning.mp4"));
    QProcess audio;audio.start("ffmpeg",{"-v","error","-i",r.savedPath(),"-vn","-ac","1","-ar","8000","-f","f32le","pipe:1"});
