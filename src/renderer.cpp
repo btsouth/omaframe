@@ -154,10 +154,20 @@ QImage cropImage(const QImage &image, const QVector<Edit> &edits) {
 }
 
 QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
-                  bool applyCrop) {
+                  bool applyCrop, QString *error) {
+  if (error) error->clear();
   QImage img = source.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+  if (img.isNull()) {
+    if (error) *error = "Could not allocate the edited image. Try again with a smaller image.";
+    return {};
+  }
   img.setDevicePixelRatio(1);
-  int step = 0;
+  QVector<const Edit *> steps;
+  for (const Edit &edit : edits)
+    if (edit.type == "step") steps.append(&edit);
+  std::stable_sort(steps.begin(), steps.end(), [](const Edit *a, const Edit *b) {
+    return a->stepOrder < b->stepOrder;
+  });
   for (const Edit &edit : edits) {
     if (edit.type == "crop")
       continue;
@@ -167,6 +177,13 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
       const int radius = blurRadius(edit, img.size());
       QImage horizontal(region.size(), region.format());
       QImage softened(region.size(), region.format());
+      if (region.isNull() || horizontal.isNull() || softened.isNull()) {
+        QPainter fallback(&img);
+        fallback.setCompositionMode(QPainter::CompositionMode_Source);
+        fallback.fillRect(r, QColor("#151a20"));
+        if (error) *error = "Could not allocate blur buffers. The area was redacted instead. Try again with a smaller image.";
+        continue;
+      }
       for (int y = 0; y < region.height(); ++y) {
         const QRgb *src = reinterpret_cast<const QRgb *>(region.constScanLine(y));
         QRgb *dst = reinterpret_cast<QRgb *>(horizontal.scanLine(y));
@@ -282,7 +299,7 @@ QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
       if (filled) path.closeSubpath();
       stroke(path, filled);
     } else if (edit.type == "step") {
-      ++step;
+      const int step = steps.indexOf(&edit) + 1;
       p.setPen(QPen(Qt::white, unit * 0.7));
       p.setBrush(edit.color);
       p.drawEllipse(a, unit * 5 * markSize, unit * 5 * markSize);

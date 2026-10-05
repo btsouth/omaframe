@@ -9,6 +9,9 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -107,6 +110,263 @@ private slots:
     qunsetenv("COPY_TEST_SECRET");
     qunsetenv("COPY_TEST_TEXT");
     qunsetenv("COPY_TEST_FIRST_READ_FAIL");
+  }
+  void acceptWaitsForCommittedLabelOnce() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.openEditor();
+    studio.marks()->edit("text", .1, .1, .1, .1, "Before");
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    studio.marks()->beginTextEdit();
+    studio.marks()->endTextEdit("After", true);
+    QVERIFY(studio.rendering());
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    studio.accept();
+    studio.accept();
+    // Superseding the preview must keep the single queued request.
+    studio.setStyle(8);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    QCOMPARE(contents(clipboard() + ".calls"), QByteArray("copy\n"));
+    QCOMPARE(QImage(clipboard()).convertToFormat(QImage::Format_ARGB32_Premultiplied),
+             Frame::applyEdits(captureImage(), studio.marks()->edits()));
+  }
+  void pendingAcceptCanBeCancelled_data() {
+    QTest::addColumn<QString>("action");
+    for (const auto *action : {"dismiss", "finishes", "close", "navigation"})
+      QTest::newRow(action) << QString(action);
+  }
+  void pendingAcceptCanBeCancelled() {
+    QFETCH(QString, action);
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.marks()->edit("redact", .1, .1, .4, .4);
+    QVERIFY(studio.rendering());
+    studio.accept();
+    if (action == "dismiss") studio.dismissQuick();
+    else if (action == "finishes") studio.showFinishes();
+    else if (action == "close") studio.closeImage();
+    else studio.cancelPendingAccept();
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    QVERIFY(!studio.busy());
+    QVERIFY(!QFileInfo::exists(clipboard()));
+    QVERIFY(!QDir(temp.filePath("output")).exists());
+  }
+  void copiedMarksStayWithinCrop() {
+    MarkDocument marks;
+    const QImage image = captureImage();
+    marks.reset(image);
+    QVERIFY(marks.cropCurrentView(.4, .4, .6, .7));
+    marks.edit("box", .1, .1, .6, .6);
+    const QRectF room = marks.cropBounds();
+    marks.duplicateSelected();
+    QVERIFY(room.contains(Frame::annotationBounds(marks.edits().last(), image)));
+    QVERIFY(marks.copySelected());
+    for (int i = 0; i < 5; ++i) {
+      marks.paste();
+      QVERIFY(room.contains(Frame::annotationBounds(marks.edits().last(), image)));
+    }
+    // A mark wider than the crop stays on its source when it cannot fit.
+    marks.reset(image);
+    marks.edit("box", .1, .1, .9, .9);
+    QVERIFY(marks.copySelected());
+    QVERIFY(marks.cropCurrentView(.4, .4, .6, .6));
+    marks.paste();
+    QCOMPARE(marks.edits().last().from, QPointF(.1, .1));
+    QCOMPARE(marks.edits().last().to, QPointF(.9, .9));
+  }
+  void newLabelsFitTheCrop() {
+    QImage image(1000, 800, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    MarkDocument marks;
+    marks.reset(image);
+    QVERIFY(marks.cropCurrentView(.4, .3, .7, .7));
+    marks.setLabelStyle({{"fontPx", 24}, {"textAlign", "left"}});
+    marks.edit("text", .9, .9, .9, .9,
+               "A label with enough words to wrap within the cropped editor view");
+    const auto &label = marks.edits().last();
+    QCOMPARE(label.textAlign, QString("left"));
+    QVERIFY(label.textBox.width() > 0);
+    QVERIFY(label.textBox.width() <= marks.cropBounds().width() * .85);
+    QVERIFY(marks.cropBounds().contains(Frame::annotationBounds(label, image)));
+    marks.updateSelectedText(QString(200, 'W'));
+    QVERIFY(marks.cropBounds().contains(Frame::annotationBounds(marks.edits().last(), image)));
+  }
+  void typingLabelsUsesRememberedAlignment_data() {
+    QTest::addColumn<QString>("alignment");
+    QTest::addColumn<int>("expected");
+    QTest::newRow("left") << QString("left") << int(Qt::AlignLeft);
+    QTest::newRow("center") << QString("center") << int(Qt::AlignHCenter);
+    QTest::newRow("right") << QString("right") << int(Qt::AlignRight);
+  }
+  void typingLabelsUsesRememberedAlignment() {
+    QFETCH(QString, alignment);
+    QFETCH(int, expected);
+    QImage image(1000, 800, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    MarkDocument marks;
+    marks.reset(image);
+    QVERIFY(marks.cropCurrentView(.4, .3, .7, .7));
+    marks.setLabelStyle({{"fontPx", 24}, {"textAlign", alignment}});
+    QQmlEngine engine;
+    OmarchyTheme theme(nullptr, temp.filePath("theme"), temp.filePath("theme-config"), false);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/MarkCanvas.qml")));
+    QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QQuickWindow window;
+    window.resize(300, 320);
+    std::unique_ptr<QQuickItem> canvas(qobject_cast<QQuickItem *>(
+        component.createWithInitialProperties({{"doc", QVariant::fromValue(&marks)},
+            {"workingSize", QSize(300, 320)}, {"sourceSize", image.size()},
+            {"width", 300}, {"height", 320}, {"tool", "text"}})));
+    QVERIFY2(canvas, qPrintable(component.errorString()));
+    canvas->setParentItem(window.contentItem());
+    window.show();
+    window.requestActivate();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, QPoint(150, 160));
+    QTRY_VERIFY(canvas->property("typing").toBool());
+    auto *field = window.activeFocusItem();
+    QVERIFY(field);
+    QCOMPARE(field->property("horizontalAlignment").toInt(), expected);
+    field->setProperty("text", "A label with enough words to wrap within the cropped editor view");
+    QTRY_VERIFY(field->width() > 200);
+    const double typingWidth = field->width();
+    QVERIFY(QMetaObject::invokeMethod(canvas.get(), "commitText"));
+    const auto &label = marks.edits().last();
+    QCOMPARE(label.textAlign, alignment);
+    QVERIFY(std::abs(Frame::annotationBounds(label, image).width() * image.width() - typingWidth) < 2);
+    QVERIFY(marks.cropBounds().contains(Frame::annotationBounds(label, image)));
+  }
+  void longStrokeKeepsBothEnds() {
+    MarkDocument marks;
+    marks.reset(captureImage());
+    QVERIFY(marks.cropCurrentView(.2, .2, .8, .8));
+    QVariantList points;
+    for (int i = 0; i < 5000; ++i)
+      points.append(QVariantMap{{"x", double(i) / 4999}, {"y", double(i) / 4999}});
+    marks.addStroke(points);
+    const auto &stroke = marks.edits().last();
+    QCOMPARE(stroke.points.size(), 2048);
+    QCOMPARE(stroke.points.first(), marks.cropBounds().topLeft());
+    QCOMPARE(stroke.points.last(), marks.cropBounds().bottomRight());
+    QCOMPARE(stroke.to, marks.cropBounds().bottomRight());
+  }
+  void stepNumbersSurviveLayerMovesAndDrafts() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    auto *marks = studio.marks();
+    marks->edit("step", .2, .3, .2, .3);
+    marks->edit("step", .7, .7, .7, .7);
+    const QImage expected = Frame::applyEdits(captureImage(), marks->edits());
+    marks->moveSelectedLayer(-1);
+    QCOMPARE(Frame::applyEdits(captureImage(), marks->edits()), expected);
+    QVERIFY(studio.saveDraftNow());
+    const QString id = studio.drafts().first().toMap().value("id").toString();
+    studio.closeImage();
+    studio.resumeDraft(id);
+    QCOMPARE(Frame::applyEdits(captureImage(), marks->edits()), expected);
+    QCOMPARE(marks->edits()[0].stepOrder, 2);
+    QCOMPARE(marks->edits()[1].stepOrder, 1);
+    // Removing the first-created step renumbers the surviving second step.
+    marks->select(1);
+    marks->deleteSelected();
+    Frame::Edit only = marks->edits().first();
+    only.number = 1;
+    QCOMPARE(Frame::applyEdits(captureImage(), marks->edits()),
+             Frame::applyEdits(captureImage(), {only}));
+    marks->duplicateSelected(); // No selection after deletion.
+    marks->select(0);
+    marks->duplicateSelected();
+    QVERIFY(marks->edits().last().stepOrder > marks->edits().first().stepOrder);
+    QVERIFY(marks->copySelected());
+    marks->paste();
+    QVERIFY(marks->edits().last().stepOrder > marks->edits()[1].stepOrder);
+  }
+  void oldStepDraftsUseArrayOrderAndExplicitNumbers() {
+    MarkDocument marks;
+    Frame::Edit first{"step", {.2, .3}, {.2, .3}};
+    Frame::Edit second{"step", {.7, .7}, {.7, .7}};
+    second.number = 42;
+    marks.restore(captureImage(), {first, second}, 1);
+    const QImage expected = Frame::applyEdits(captureImage(), {first, second});
+    QCOMPARE(Frame::applyEdits(captureImage(), marks.edits()), expected);
+    QCOMPARE(marks.edits()[0].stepOrder, 1);
+    QCOMPARE(marks.edits()[1].stepOrder, 2);
+    marks.moveSelectedLayer(-1);
+    QCOMPARE(Frame::applyEdits(captureImage(), marks.edits()), expected);
+  }
+  void partialRedactionsAndBlurLeaveSecretsUncovered_data() {
+    QTest::addColumn<QString>("type");
+    QTest::addColumn<double>("right");
+    QTest::addColumn<bool>("hidden");
+    QTest::newRow("ninety-percent") << QString("redact") << .66 << false;
+    QTest::newRow("ninety-five-percent") << QString("redact") << .69 << false;
+    QTest::newRow("full-blur") << QString("blur") << 1. << false;
+    QTest::newRow("opaque-cover") << QString("redact") << 1. << true;
+    QTest::newRow("subpixel-rounding") << QString("redact") << .721875 << true;
+  }
+  void partialRedactionsAndBlurLeaveSecretsUncovered() {
+    QFETCH(QString, type);
+    QFETCH(double, right);
+    QFETCH(bool, hidden);
+    qputenv("COPY_TEST_SECRET", "1");
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    QTRY_COMPARE_WITH_TIMEOUT(studio.secretCount(), 1, 5000);
+    studio.marks()->edit(type, 0, 0, right, 1);
+    QCOMPARE(studio.secretCount(), hidden ? 0 : 1);
+    studio.hideSecrets();
+    QCOMPARE(studio.secretCount(), 0);
+    QCOMPARE(studio.marks()->edits().size(), hidden ? 1 : 2);
+    if (!hidden) QCOMPARE(studio.marks()->edits().last().type, QString("redact"));
+  }
+  void successfulExportKeepsFailedDraftOpen_data() {
+    QTest::addColumn<bool>("discard");
+    QTest::newRow("retry") << false;
+    QTest::newRow("discard") << true;
+  }
+  void successfulExportKeepsFailedDraftOpen() {
+    QFETCH(bool, discard);
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.openEditor();
+    studio.marks()->edit("redact", .1, .1, .4, .4);
+    const QString folder = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation) + "/drafts";
+    QVERIFY(QDir().mkpath(QFileInfo(folder).absolutePath()));
+    QFile blocker(folder);
+    QVERIFY(blocker.open(QIODevice::WriteOnly));
+    blocker.close();
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    QSignalSpy failed(&studio, &Studio::draftSaveFailed);
+    studio.accept();
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 15000);
+    QCOMPARE(dismissed.count(), 0);
+    QVERIFY(studio.draftDirty());
+    QVERIFY(studio.hasImage());
+    QCOMPARE(studio.quickState(), QString("failed"));
+    QCOMPARE(studio.recoveryAction(), QString("Retry editable draft"));
+    QVERIFY(QFileInfo::exists(studio.savedPath()));
+    QCOMPARE(contents(clipboard()), contents(studio.savedPath()));
+    if (discard) {
+      studio.discardUnsavedDraft();
+      studio.finishDraftRecovery();
+    } else {
+      studio.retryOutput();
+      QCOMPARE(dismissed.count(), 0);
+      QVERIFY(blocker.remove());
+      studio.retryOutput();
+      QCOMPARE(studio.drafts().size(), 1);
+    }
+    QCOMPARE(dismissed.count(), 1);
+    QCOMPARE(contents(clipboard() + ".calls"), QByteArray("copy\n"));
+    QVERIFY(!studio.draftDirty());
+    QVERIFY(studio.recoveryAction().isEmpty());
   }
   void automaticSavingDefaultsOnAndPersists() {
     // An existing config with no new key keeps its current behavior.

@@ -403,7 +403,8 @@ Item {
         readonly property color ink: creating ? (defaults.color || "#ffffff") : (mark.color || "#ffffff")
         readonly property color fill: creating ? (defaults.background || "#151a20") : (mark.background || "#151a20")
         readonly property real fillOpacity: creating ? (defaults.backgroundOpacity ?? 1) : (mark.backgroundOpacity ?? 1)
-        readonly property real maxLine: Math.max(1, Math.min(editSurface.width, !creating && mark.textBoxWidth > 0 ? mark.textBoxWidth * editSurface.width : editSurface.sourceSize.width * 0.85 * viewScale) - inset * 2)
+        readonly property string textAlign: creating ? (defaults.textAlign || "center") : (mark.textAlign || "center")
+        readonly property real maxLine: Math.max(1, Math.min(editSurface.width, !creating && mark.textBoxWidth > 0 ? mark.textBoxWidth * editSurface.width : editSurface.width * 0.85) - inset * 2)
         visible: active
         z: 30
         x: Math.max(0, Math.min(anchorX * editSurface.width, editSurface.width - width))
@@ -498,7 +499,7 @@ Item {
                     selectedTextColor: textEditor.ink
                     verticalAlignment: TextEdit.AlignVCenter
                     wrapMode: TextEdit.Wrap
-                    horizontalAlignment: textEditor.creating || textEditor.mark.textAlign === "center" || !textEditor.mark.textAlign ? TextEdit.AlignHCenter : textEditor.mark.textAlign === "right" ? TextEdit.AlignRight : TextEdit.AlignLeft
+                    horizontalAlignment: textEditor.textAlign === "center" || !textEditor.textAlign ? TextEdit.AlignHCenter : textEditor.textAlign === "right" ? TextEdit.AlignRight : TextEdit.AlignLeft
                     selectByMouse: true
                     Accessible.name: "Label text"
                     onTextChanged: if (length > 240) remove(240, length)
