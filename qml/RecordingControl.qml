@@ -134,6 +134,7 @@ Window {
         }
     }
     Column {
+        objectName: "meterRows"
         visible: control.visible && control.live && lowerHint.text.length === 0
         x: 8; y: 52; width: parent.width - 16; spacing: 0
         AudioMeter { width: parent.width; channel: audioLevels.microphone }
@@ -141,6 +142,7 @@ Window {
     }
     BarHint {
         id: lowerHint
+        objectName: "lowerHint"
         anchors.horizontalCenter: parent.horizontalCenter
         y: 54
         maximumWidth: control.width

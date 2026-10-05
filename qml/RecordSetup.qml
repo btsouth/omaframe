@@ -9,7 +9,6 @@ import QtMultimedia
 Window {
     id: setup
     visible: false
-    onVisibleChanged: audioLevels.setSurface("options", "options", visible)
     Component.onDestruction: audioLevels.setSurface("options", "options", false)
     palette.window: theme.alpha(theme.background, 1)
     palette.windowText: theme.text
@@ -29,7 +28,10 @@ Window {
     title: "Omaframe recording"
     readonly property int wantedHeight: content.implicitHeight + recordFooter.implicitHeight + 72
     onWantedHeightChanged: if (visible) height = Math.min(wantedHeight, screen ? screen.height : wantedHeight)
-    onVisibleChanged: if (visible) keys.forceActiveFocus()
+    onVisibleChanged: {
+        audioLevels.setSurface("options", "options", visible)
+        if (visible) keys.forceActiveFocus()
+    }
     onClosing: function(event) { if (visible) { event.accepted = false; recorder.cancel() } }
     Item {
         id: keys

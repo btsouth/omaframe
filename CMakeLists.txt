@@ -52,6 +52,11 @@ target_compile_definitions(omaframe PRIVATE OMAFRAME_VERSION="${PROJECT_VERSION}
 target_link_libraries(omaframe PRIVATE studio-core theme-core navigation-core Qt6::Network Qt6::QuickControls2 Qt6::Multimedia LayerShellQt::Interface)
 qt_add_resources(omaframe ui PREFIX / FILES qml/Main.qml qml/AudioMeter.qml qml/RecordToggle.qml qml/RecordSetup.qml qml/RecordingControl.qml qml/ScrollControl.qml qml/FinishChooser.qml qml/Selection.qml qml/StudioButton.qml qml/BarHint.qml qml/ColorChoice.qml qml/ToolStyleButton.qml qml/Glyph.qml qml/VideoPane.qml qml/Choice.qml qml/ThemedSlider.qml qml/NumberField.qml qml/ConfirmDialog.qml qml/ShortcutPanel.qml qml/MarkCanvas.qml)
 if(BUILD_TESTING)
+  qt_add_executable(audio-meter-ui-tests tests/audio-meter-ui-test.cpp)
+  target_link_libraries(audio-meter-ui-tests PRIVATE studio-core theme-core Qt6::QuickControls2 Qt6::Test)
+  add_test(NAME audio-meter-ui COMMAND audio-meter-ui-tests)
+  set_tests_properties(audio-meter-ui PROPERTIES TIMEOUT 20 LABELS "headless"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
   qt_add_executable(audio-levels-tests tests/audio-levels-test.cpp)
   target_link_libraries(audio-levels-tests PRIVATE studio-core Qt6::Test)
   add_test(NAME audio-levels COMMAND audio-levels-tests)
