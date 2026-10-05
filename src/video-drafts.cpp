@@ -1,4 +1,5 @@
 #include "edit-json.hpp"
+#include "mark-constraints.hpp"
 #include "video.hpp"
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -36,22 +37,7 @@ QString idFor(const QUrl &source) {
 } // namespace
 
 QRect Video::cropPixels() const {
-  if (m_frameSize.isEmpty())
-    return {};
-  if (m_frameSize.width() < 2 || m_frameSize.height() < 2)
-    return {QPoint(0, 0), m_frameSize};
-  const QRectF bounds = m_marks.cropBounds();
-  const int left = std::clamp(int(bounds.x() * m_frameSize.width()) / 2 * 2, 0,
-                              std::max(0, m_frameSize.width() - 2));
-  const int top = std::clamp(int(bounds.y() * m_frameSize.height()) / 2 * 2, 0,
-                             std::max(0, m_frameSize.height() - 2));
-  const int right =
-      std::clamp(int(bounds.right() * m_frameSize.width()) / 2 * 2, left + 2,
-                 m_frameSize.width());
-  const int bottom =
-      std::clamp(int(bounds.bottom() * m_frameSize.height()) / 2 * 2, top + 2,
-                 m_frameSize.height());
-  return {left, top, right - left, bottom - top};
+  return MarkConstraints::videoCropPixels(m_frameSize, Frame::cropBounds(m_marks.edits()));
 }
 QRectF Video::cropBounds() const {
   const auto pixels = cropPixels();
