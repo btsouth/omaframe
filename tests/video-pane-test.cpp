@@ -320,6 +320,59 @@ private slots:
     QCOMPARE(scene.video.marks()->edits().size(), 1);
     QCOMPARE(undoSteps(), before);
   }
+  void clickInsideABoxSelectsItWithADrawingTool() {
+    PaneScene scene(temp);
+    QTRY_VERIFY2(scene.component.isReady(),
+                 qPrintable(scene.component.errorString()));
+    QVERIFY2(scene.create(), qPrintable(scene.component.errorString()));
+    scene.window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&scene.window));
+    QSignalSpy loaded(&scene.video, &Video::loaded);
+    scene.video.open(QUrl::fromLocalFile(plain));
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+    auto *player = scene.pane->findChild<QObject *>("videoPlayer");
+    QVERIFY(player);
+    QTRY_VERIFY_WITH_TIMEOUT(player->property("mediaStatus").toInt() ==
+                                     QMediaPlayer::LoadedMedia ||
+                                 player->property("mediaStatus").toInt() ==
+                                     QMediaPlayer::BufferedMedia,
+                             12000);
+    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "seek",
+                                      Q_ARG(QVariant, 1.5)));
+    QTRY_COMPARE(scene.pane->property("head").toDouble(), 1.5);
+    scene.video.marks()->edit("box", 0.2, 0.2, 0.7, 0.7);
+    scene.video.marks()->clearSelection();
+    QVERIFY(!scene.video.marks()->selectedAnnotation().contains("index"));
+    QVERIFY(scene.pane->setProperty("tool", "box"));
+    auto *canvas = scene.pane->findChild<QQuickItem *>("videoMarkCanvas");
+    QVERIFY(canvas);
+    QTRY_VERIFY(canvas->isVisible() && canvas->width() > 100);
+    const auto at = [&](double x, double y) {
+      return canvas->mapToScene(QPointF(canvas->width() * x, canvas->height() * y))
+          .toPoint();
+    };
+    // A click well inside the box, away from its border, selects it.
+    QTest::mouseClick(&scene.window, Qt::LeftButton, Qt::NoModifier, at(0.45, 0.45));
+    QTest::qWait(100);
+    // An empty selection reads as index 0, so check the selection exists.
+    QVERIFY(scene.video.marks()->selectedAnnotation().contains("index"));
+    QCOMPARE(scene.video.marks()->selectedAnnotation().value("index").toInt(), 0);
+    QCOMPARE(scene.video.marks()->edits().size(), 1);
+    // A drag inside it still draws a new box.
+    scene.video.marks()->clearSelection();
+    QTest::mousePress(&scene.window, Qt::LeftButton, Qt::NoModifier, at(0.35, 0.35));
+    QTest::mouseMove(&scene.window, at(0.45, 0.45));
+    QTest::mouseMove(&scene.window, at(0.55, 0.55));
+    QTest::mouseRelease(&scene.window, Qt::LeftButton, Qt::NoModifier, at(0.55, 0.55));
+    QTRY_COMPARE(scene.video.marks()->edits().size(), 2);
+    QCOMPARE(scene.video.marks()->edits()[1].type, QString("box"));
+    // Step places a number with a click, so a click inside a box still places one.
+    scene.video.marks()->clearSelection();
+    QVERIFY(scene.pane->setProperty("tool", "step"));
+    QTest::mouseClick(&scene.window, Qt::LeftButton, Qt::NoModifier, at(0.3, 0.6));
+    QTRY_COMPARE(scene.video.marks()->edits().size(), 3);
+    QCOMPARE(scene.video.marks()->edits()[2].type, QString("step"));
+  }
   void timingDrag_data() {
     QTest::addColumn<bool>("start");
     QTest::addColumn<QString>("finish");

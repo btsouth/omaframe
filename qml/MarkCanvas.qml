@@ -86,6 +86,8 @@ Item {
         property string pressedType: ""
         property var strokePoints: []
         property bool pressedEmpty: false
+        // A filled mark under a drawing tool's press: a click selects it, a drag draws.
+        property int pressedInside: -1
         property bool pressedWithSelection: false
         readonly property bool moved: Math.hypot(endX - startX, endY - startY) > 3
         property var initialMark: ({})
@@ -196,6 +198,8 @@ Item {
                 guide.requestPaint();
                 return;
             }
+            const inside = editSurface.doc.hitAt(nx, ny, false);
+            pressedInside = inside.index !== undefined ? inside.index : -1;
             editSurface.doc.clearSelection();
             if (editSurface.tool === "select") {
                 interaction = "none";
@@ -252,6 +256,9 @@ Item {
                 strokePoints = [];
             } else if (interaction === "newText")
                 textEditor.create(startX / width, startY / height);
+            // Step places its number with a click, so it never selects instead.
+            else if (interaction === "draw" && pressedInside >= 0 && !moved && editSurface.tool !== "step")
+                editSurface.doc.select(pressedInside);
             else if (interaction === "draw") {
                 if (editSurface.tool === "crop" && editSurface.cropCurrentView) {
                     if (editSurface.doc.cropCurrentView(startX / width, startY / height, endX / width, endY / height))
@@ -261,6 +268,7 @@ Item {
             else if (pressedEmpty && !moved)
                 editSurface.emptyClicked(pressedWithSelection);
             pressedEmpty = false;
+            pressedInside = -1;
             interaction = "none";
             hoverMark = ({});
             hoverHandle = handleAt(endX, endY);

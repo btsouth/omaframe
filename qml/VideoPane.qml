@@ -782,6 +782,7 @@ Item {
                 }
                 MarkCanvas {
                     id: markCanvas
+                    objectName: "videoMarkCanvas"
                     parent: viewport
                     anchors.fill: parent
                     visible: pane.editable && !pane.playing
