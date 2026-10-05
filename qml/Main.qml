@@ -208,6 +208,10 @@ ApplicationWindow {
             root.editing = false;
             root.videoMode = false;
             root.tool = "select";
+            if (root.historyMode && studio.hasImage) {
+                root.historyMode = false;
+                root.editing = true;
+            }
         }
     }
     Connections {
@@ -791,6 +795,7 @@ ApplicationWindow {
             Layout.margins: 24
             visible: active
             active: root.historyMode
+            enabled: !root.working
             readonly property bool popupOpen: item ? item.popupOpen : false
             sourceComponent: Component {
                 HistoryPane { onHomeRequested: root.requestNavigation("home") }

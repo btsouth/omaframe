@@ -9,9 +9,13 @@ ColumnLayout {
     signal homeRequested()
     function visibleRows() {
         if (!visible || list.count === 0) { history.setVisibleRange(0, -1); return; }
-        const first = Math.max(0, list.indexAt(8, list.contentY + 2));
-        let last = list.indexAt(8, list.contentY + list.height - 2);
-        if (last < 0) last = Math.min(list.count - 1, first + Math.ceil(list.height / 106));
+        let first = -1, last = -1;
+        // Headers and row gaps have no index. Probe the viewport itself so
+        // landing on a day heading never starts thumbnails at row zero.
+        for (let y = list.contentY + 1; y < list.contentY + list.height; y += 4) {
+            const index = list.indexAt(8, y);
+            if (index >= 0) { if (first < 0) first = index; last = index; }
+        }
         history.setVisibleRange(first, last);
     }
     function select(index) {
@@ -62,6 +66,7 @@ ColumnLayout {
         Item { Layout.fillWidth: true }
         TextField {
             Layout.preferredWidth: Math.max(120, Math.min(280, pane.width / 3))
+            text: history.search
             placeholderText: "Search filenames"
             Accessible.name: "Search History filenames"
             onTextChanged: history.search = text

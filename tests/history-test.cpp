@@ -1,6 +1,8 @@
 #include "edit-json.hpp"
 #include "history.hpp"
 #include "recording.hpp"
+#include "studio.hpp"
+#include "video.hpp"
 #include <QClipboard>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -113,6 +115,37 @@ private slots:
     model.removeFolder(folder);
     QTRY_VERIFY(!model.busy());
     QCOMPARE(model.rowCount(), 0);
+  }
+  void folderChangesRememberPreviousLocationsWithoutScanning() {
+    QSettings().setValue("outputDirectory", folder);
+    QSettings().setValue("videoDirectory", folder + "/old-videos");
+    ImageStore store;
+    Studio studio(&store, false);
+    Video video;
+    HistoryImages images;
+    CaptureHistoryModel model(&images);
+    studio.setOutputDirectory(QUrl::fromLocalFile(folder + "/new-pictures"));
+    video.setOutputDirectory(QUrl::fromLocalFile(folder + "/new-videos"));
+    QVERIFY(History::previousFolders().contains(folder));
+    QVERIFY(History::previousFolders().contains(folder + "/old-videos"));
+    QVERIFY(!model.busy());
+    QCOMPARE(model.rowCount(), 0);
+  }
+  void privateFoldersNeverBecomeHistory() {
+    const auto privateData =
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    QVERIFY(QDir().mkpath(privateData));
+    QTemporaryDir originals(privateData + "/private-test-XXXXXX");
+    QVERIFY(originals.isValid());
+    write(originals.filePath("Omaframe-private.png"));
+    QCOMPARE(History::scan({originals.path()}, data, cancel).size(), 0);
+    const auto runtime =
+        QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    QTemporaryDir copies(runtime + "/private-test-XXXXXX");
+    QVERIFY(copies.isValid());
+    write(copies.filePath("Omaframe-private.png"));
+    write(copies.filePath("copied.png"));
+    QCOMPARE(History::scan({copies.path()}, data, cancel).size(), 0);
   }
   void actionsRefuseChangedFiles_data() {
     QTest::addColumn<QString>("change");

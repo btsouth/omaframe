@@ -740,7 +740,7 @@ int main(int argc, char **argv) {
   QObject::connect(&navigation, &Navigation::proceed, &app,
                    [&](const QString &cmd, const QUrl &path) {
                      if (window) {
-                       window->setProperty("historyMode", false);
+                       if (cmd != "open") window->setProperty("historyMode", false);
                        // Keep the current editor alive while an open is
                        // checked. A failed open must retain its edit state.
                        if (cmd != "open" && cmd != "review" &&
