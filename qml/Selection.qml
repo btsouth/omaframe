@@ -31,6 +31,9 @@ Window {
     Shortcut {sequence: "F"; enabled: window.visible && !window.dragging && !studio.scrollSelection; onActivated: window.wholeDisplay()}
     Shortcut {sequence: "D"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.desktopAudio = !recorder.desktopAudio}
     Shortcut {sequence: "M"; enabled: window.visible && !window.dragging && studio.recordingSelection; onActivated: recorder.micAudio = !recorder.micAudio}
+    readonly property bool meterVisible: window.visible && bar.visible && studio.recordingSelection
+    onMeterVisibleChanged: audioLevels.setSurface("bar:" + monitorName, "bar", meterVisible)
+    Component.onDestruction: audioLevels.setSurface("bar:" + monitorName, "bar", false)
     property string monitorName: ""
     property real startX: 0
     property real startY: 0
@@ -246,7 +249,7 @@ Window {
         property string label
         property string glyph
         property bool chosen
-        property bool compact: window.width < 560
+        property bool compact: window.width < (studio.recordingSelection ? 760 : 560)
         readonly property string hint: compact ? label : ""
         property color markColor: theme.selectedText
         signal activated()
@@ -296,6 +299,8 @@ Window {
         property bool on: false
         property bool checkable: true
         property string hint
+        property var audioChannel: null
+        readonly property string meterDescription: audioChannel ? level.Accessible.name + ". " + level.Accessible.description : ""
         signal activated()
         Layout.fillHeight: true
         implicitWidth: toggleRow.implicitWidth + 18
@@ -306,6 +311,7 @@ Window {
         Accessible.role: checkable ? Accessible.CheckBox : Accessible.Button
         Accessible.name: label.length ? label : hint
         Accessible.checked: on
+        Accessible.description: hint
         Accessible.onPressAction: activated()
         RowLayout {
             id: toggleRow
@@ -313,6 +319,24 @@ Window {
             spacing: 6
             Glyph { name: toggle.glyph; ink: toggle.on ? theme.selectedText : theme.muted; Layout.preferredWidth: 15; Layout.preferredHeight: 15 }
             Text { visible: toggle.label.length > 0; text: toggle.label; color: toggle.on ? theme.text : theme.muted; font.family: theme.fontFamily; font.pixelSize: 12 }
+            Text {
+                objectName: "meterBadge"
+                visible: toggle.on && toggle.audioChannel !== null && (toggle.audioChannel.state === "Checking" || toggle.audioChannel.state === "Unavailable")
+                text: toggle.audioChannel && toggle.audioChannel.state === "Checking" ? "…" : "!"
+                color: toggle.on ? theme.selectedText : theme.muted
+                font.family: theme.fontFamily; font.pixelSize: 13; font.bold: true
+                Accessible.ignored: true
+            }
+        }
+        AudioMeter {
+            id: level
+            objectName: "toggleMeter"
+            visible: toggle.on && toggle.audioChannel !== null
+            channel: toggle.audioChannel || ({state: "Off", device: "", db: -60, held: -60, clip: false})
+            label: toggle.glyph === "mic" ? "Microphone" : "Computer sound"
+            railOnly: true
+            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.leftMargin: 5; anchors.rightMargin: 5; anchors.bottomMargin: 2
         }
         MouseArea {
             id: toggleMouse
@@ -346,6 +370,7 @@ Window {
     // a drag starts recording straight away.
     Rectangle {
         id: bar
+        objectName: "captureBar"
         visible: !studio.captureBarHidden
         property bool positioned: false
         x: (window.width - width) / 2
@@ -375,6 +400,7 @@ Window {
         MouseArea {anchors.fill: parent}
         RowLayout {
             id: barRow
+            objectName: "captureBarRow"
             anchors.fill: parent
             anchors.margins: 7
             spacing: 6
@@ -443,19 +469,25 @@ Window {
                 onActivated: studio.finishSelection(window.monitorName, 0, 0, 1, 1)
             }
             BarToggle {
+                id: soundToggle
+                objectName: "soundToggle"
+                audioChannel: audioLevels.sound
                 visible: studio.recordingSelection
                 label: window.width < 760 ? "" : "Sound"
                 glyph: recorder.desktopAudio ? "volume" : "mute"
                 on: recorder.desktopAudio
-                hint: "Record what your computer plays · D"
+                hint: "Record what your computer plays · D. " + meterDescription
                 onActivated: recorder.desktopAudio = !recorder.desktopAudio
             }
             BarToggle {
+                id: micToggle
+                objectName: "micToggle"
+                audioChannel: audioLevels.microphone
                 visible: studio.recordingSelection
                 label: window.width < 760 ? "" : "Mic"
                 glyph: "mic"
                 on: recorder.micAudio
-                hint: (recorder.micAudio && recorder.microphone >= 0 ? "Recording from " + recorder.microphones[recorder.microphone].label : "Record your microphone") + " · M"
+                hint: (recorder.micAudio && recorder.microphone >= 0 ? "Recording from " + recorder.microphones[recorder.microphone].label : "Record your microphone") + " · M. " + meterDescription
                 onActivated: recorder.micAudio = !recorder.micAudio
             }
             BarToggle {
