@@ -722,6 +722,8 @@ void Recorder::start() {
   m_error.clear();
   m_frameTimedOut = false;
   m_path.clear();
+  m_finalPath.clear();
+  m_incompleteReady = false;
   m_recordedMs = 0;
   m_clock.invalidate();
   QSettings s;
@@ -791,10 +793,11 @@ void Recorder::launch() {
           fail("Could not create the recording folder.");
           return;
         }
-        m_path = dir + "/Recording-" +
+        m_finalPath = dir + "/Recording-" +
                  QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") +
                  "-" + QUuid::createUuid().toString(QUuid::Id128).left(6) +
                  ".mp4";
+        m_path = Recording::partPath(m_finalPath);
         const QString mic =
             m_microphone ? m_mics.value(m_mic).toMap().value("id").toString()
                          : QString();
@@ -999,6 +1002,8 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
                "and has not been checked.";
     m_status += QFileInfo::exists(m_path) ? " The partial file was kept at " + m_path
                                          : " No recording file was created.";
+    m_incompleteReady = true;
+    completeWhenCameraReady();
     emit changed();
     emit setupRequested();
     return;
@@ -1096,9 +1101,26 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
 }
 
 void Recorder::completeWhenCameraReady() {
-  if (!m_screenReady || m_webcam.finishing())
+  if ((!m_screenReady && !m_incompleteReady) || m_webcam.finishing())
     return;
-  m_screenReady = false;
+  const bool incomplete = m_incompleteReady;
+  m_screenReady = m_incompleteReady = false;
+  const auto published = Recording::publishPart(m_path, m_finalPath, incomplete);
+  if (published.isEmpty()) {
+    if (!incomplete) {
+      m_state = "failed";
+      m_status = "Could not publish the recording. The hidden part was retained at " + m_path;
+      emit setupRequested();
+    }
+    emit changed();
+    return;
+  }
+  m_path = published;
+  if (incomplete) {
+    m_status += " Incomplete recording kept at " + m_path;
+    emit changed();
+    return;
+  }
   m_state = "saved";
   m_status = m_cameraWarning.isEmpty() ? "Recording saved."
                                        : "Recording saved. " + m_cameraWarning;
@@ -1115,6 +1137,10 @@ void Recorder::fail(const QString &message) {
   m_pending = {};
   m_state = "failed";
   m_status = message;
+  if (!m_finalPath.isEmpty() && QFileInfo::exists(m_path)) {
+    m_incompleteReady = true;
+    completeWhenCameraReady();
+  }
   emit hideRequested();
   emit changed();
   emit setupRequested();
