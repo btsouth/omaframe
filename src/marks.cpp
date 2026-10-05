@@ -1,4 +1,5 @@
 #include "marks.hpp"
+#include "mark-constraints.hpp"
 #include <QBuffer>
 #include <QLineF>
 #include <QPainter>
@@ -488,11 +489,11 @@ void MarkDocument::saveHistory() {
   m_redoStates.clear();
 }
 QRectF MarkDocument::cropBounds() const {
-  // Video keeps normalized frame geometry; screenshots must map gestures
-  // against the exact pixels shown after the renderer rounds crop edges.
-  if (m_duration > 0 || m_base.isNull())
-    return Frame::cropBounds(m_edits);
-  const QRect pixels = Frame::cropPixels(m_base.size(), m_edits);
+  if (m_base.isNull()) return Frame::cropBounds(m_edits);
+  // Match the actual screenshot pixels or even-pixel video viewport.
+  const QRect pixels = m_duration > 0
+      ? MarkConstraints::videoCropPixels(m_base.size(), Frame::cropBounds(m_edits))
+      : Frame::cropPixels(m_base.size(), m_edits);
   return {double(pixels.x()) / m_base.width(),
           double(pixels.y()) / m_base.height(),
           double(pixels.width()) / m_base.width(),
@@ -697,6 +698,45 @@ void MarkDocument::previewTransform(int handle, double x, double y) {
   if (m_edits == m_transform->edits && previous != m_edits)
     commit(false);
   m_previewing = false;
+}
+namespace {
+QVariantMap feedback(const MarkConstraints::Result &result) {
+  return {{"valid", result.valid}, {"label", result.valid ? result.label : QString{}},
+          {"x1", result.anchor.x()}, {"y1", result.anchor.y()},
+          {"x2", result.point.x()}, {"y2", result.point.y()}};
+}
+}
+QVariantMap MarkDocument::creationPreview(const QString &type, double x1, double y1,
+                                         double x2, double y2, double width,
+                                         double height, bool constrain) const {
+  return feedback(MarkConstraints::resolve(type, {x1, y1}, {x2, y2},
+                                          {width, height}, constrain));
+}
+QVariantMap MarkDocument::previewConstrainedTransform(int handle, double x, double y,
+                                                      double width, double height,
+                                                      bool constrain) {
+  if (!m_transform || locked() || m_selected != m_transform->selected) return {};
+  const auto &original = m_transform->edits[m_selected];
+  const bool vector = original.type == "line" || original.type == "arrow";
+  if (!constrain || handle < 0 || (vector ? handle > 1 :
+      !MarkConstraints::shape(original.type) || handle > 3)) {
+    previewTransform(handle, x, y);
+    return {};
+  }
+  const QRectF crop = cropBounds();
+  auto view = [crop](QPointF p) {
+    return QPointF((p.x() - crop.x()) / crop.width(),
+                   (p.y() - crop.y()) / crop.height());
+  };
+  const QRectF r = QRectF(view(original.from), view(original.to)).normalized();
+  const QPointF anchor = vector ? view(handle == 0 ? original.to : original.from)
+      : handle == 0 ? r.bottomRight() : handle == 1 ? r.bottomLeft()
+      : handle == 2 ? r.topLeft() : r.topRight();
+  const double aspect = vector ? 1. : (r.width() * width) / (r.height() * height);
+  const auto result = MarkConstraints::resolve(original.type, anchor, {x, y},
+                                               {width, height}, true, aspect);
+  if (result.valid) previewTransform(handle, result.point.x(), result.point.y());
+  return feedback(result);
 }
 void MarkDocument::endTransform(bool apply) {
   if (!m_transform)

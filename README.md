@@ -110,6 +110,9 @@ to reset the view. Zoom changes only the editor view, not the saved image.
 Click an active tool again to return to **Select**. With **Crop**, drag over the
 area to keep; the crop applies and returns to Select. Choose Crop again to trim
 the cropped image further. **Ctrl+Z** restores each previous crop in turn.
+Hold Shift while drawing or dragging an endpoint for 45-degree lines and arrows.
+Hold Shift while drawing shapes for squares and circles. Hold Shift while dragging
+a shape corner to keep its original proportions.
 Drag marks to move them, or hold Shift to move straight. Side handles resize
 width or height; text wraps without changing its font size. Drag text corners
 to scale the font. Arrow keys move a selected mark one pixel, or ten with Shift.
@@ -180,6 +183,8 @@ keeps your edits open.
 | Picking a finish | E / R | Mark up the selected finish / retake |
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
+| Marking up or video | Shift+drag | Constrain angles, draw squares or circles, keep corner proportions, or move straight |
+| Marking up or video | Arrows / Shift+arrows | Move a selected mark one / ten source pixels |
 | Marking up | Shift+H | Hide possible secrets |
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |

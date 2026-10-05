@@ -99,6 +99,12 @@ public:
   /** Preview from the drag's original geometry; committing adds one undo step. */
   Q_INVOKABLE void beginTransform();
   Q_INVOKABLE void previewTransform(int handle, double x, double y);
+  Q_INVOKABLE QVariantMap creationPreview(const QString &type, double x1, double y1,
+                                          double x2, double y2, double width,
+                                          double height, bool constrain) const;
+  Q_INVOKABLE QVariantMap previewConstrainedTransform(int handle, double x, double y,
+                                                       double width, double height,
+                                                       bool constrain);
   Q_INVOKABLE void endTransform(bool apply);
   Q_INVOKABLE void moveSelected(double dx, double dy);
   Q_INVOKABLE void nudgeSelected(int dx, int dy);
