@@ -8,6 +8,5 @@ inline const QString scope = QStringLiteral("omaframe-capture-countdown");
 bool prepare(QString &error);
 // Destroy the platform surface, acknowledge its removal, then cross two
 // compositor frames. Failure is bounded and never falls through to a grab.
-void clear(QQuickWindow *badge, QObject *owner,
-           std::function<void(bool)> done);
-}
+void clear(QQuickWindow *badge, QObject *owner, std::function<void(bool)> done);
+} // namespace CaptureDismissal

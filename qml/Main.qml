@@ -61,7 +61,10 @@ ApplicationWindow {
         else root.requestNavigation("image-draft", draft.id);
     }
     function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
-    function requestNavigation(command, file, delaySeconds) {
+    function requestNavigation(command, file) {
+        requestCaptureNavigation(command, file, -1);
+    }
+    function requestCaptureNavigation(command, file, delaySeconds) {
         if (studio.busy || video.busy || navigation.saving) return;
         studio.cancelTextCopy();
         studio.cancelPendingAccept();

@@ -17,7 +17,8 @@ QString keyLabel(const QJsonObject &bind);
 bool runsOmaframe(const QJsonObject &bind, Action action);
 /** The key that runs Omaframe for `action`, or empty when none does. */
 QString omaframeKey(const QJsonArray &binds, Action action);
-/** The default key for `action`: Print, Alt+Print, Alt+Shift+Print, or Shift+Print. */
+/** The default key for `action`: Print, Alt+Print, Alt+Shift+Print, or
+ * Shift+Print. */
 QString defaultKey(Action action);
 /** What the default key does now: "omaframe", "stock" (Omarchy's own
  *  action, safe to replace), "none", or "custom". */

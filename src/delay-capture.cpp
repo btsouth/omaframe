@@ -21,7 +21,11 @@ void DelayCapture::begin(int seconds) {
 void DelayCapture::desktopCleared(quint64 generation, bool success) {
   if (!current(generation) || m_phase != Hiding)
     return;
-  if (!success) { cancel(); emit failed(); return; }
+  if (!success) {
+    cancel();
+    emit failed();
+    return;
+  }
   m_deadline = m_clock() + m_seconds * 1000;
   m_phase = Countdown;
   m_timer.start();
@@ -46,7 +50,11 @@ void DelayCapture::tick() {
 void DelayCapture::badgeCleared(quint64 generation, bool success) {
   if (!current(generation) || m_phase != Clearing)
     return;
-  if (!success) { cancel(); emit failed(); return; }
+  if (!success) {
+    cancel();
+    emit failed();
+    return;
+  }
   m_phase = Capturing;
   emit grabRequested(m_generation);
 }

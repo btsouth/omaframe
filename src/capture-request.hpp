@@ -8,4 +8,4 @@ bool cliDelay(const QCommandLineParser &parser, int &seconds, QString &error);
 bool decode(const QJsonObject &request, QString &command, int &seconds);
 enum class Handling { Proceed, Cancel, Busy };
 Handling handle(const QString &command, bool delayed, bool busy);
-}
+} // namespace CaptureRequest

@@ -7,7 +7,8 @@ void Navigation::setDirty(bool dirty) {
   m_dirty = dirty;
   emit changed();
 }
-void Navigation::request(const QString &command, const QUrl &file, int delaySeconds) {
+void Navigation::request(const QString &command, const QUrl &file,
+                         int delaySeconds) {
   if (command.isEmpty() || pending())
     return;
   if (!m_dirty) {

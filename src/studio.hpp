@@ -1,6 +1,6 @@
 #pragma once
-#include "delay-capture.hpp"
 #include "capture-session.hpp"
+#include "delay-capture.hpp"
 #include "marks.hpp"
 #include "renderer.hpp"
 #include "scroll-capture.hpp"
@@ -78,7 +78,8 @@ class Studio final : public QObject {
   Q_PROPERTY(bool tallImage READ tallImage NOTIFY changed)
   /** True while the selector is set to scroll and stitch what it covers. */
   Q_PROPERTY(bool scrollSelection READ scrollSelection NOTIFY changed)
-  Q_PROPERTY(int delaySeconds READ delaySeconds WRITE setDelaySeconds NOTIFY changed)
+  Q_PROPERTY(
+      int delaySeconds READ delaySeconds WRITE setDelaySeconds NOTIFY changed)
   Q_PROPERTY(int delayRemaining READ delayRemaining NOTIFY changed)
   Q_PROPERTY(bool delayedCapture READ delayedCapture NOTIFY changed)
   Q_PROPERTY(bool captureBarHidden READ captureBarHidden WRITE setCaptureBarHidden NOTIFY changed)
@@ -345,7 +346,8 @@ private:
   void refreshDrafts();
   void invalidateSaved();
   void finishQuick(int style, bool save);
-  void captureImpl(bool region, int monitor, bool repeat, quint64 delayGeneration = 0);
+  void captureImpl(bool region, int monitor, bool repeat,
+                   quint64 delayGeneration = 0);
   /** Starts reading the text in the current image in the background, and
    *  forgets what was read from the previous one. */
   void startReading();

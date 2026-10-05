@@ -31,6 +31,7 @@ signals:
   void grabRequested(quint64 generation);
   void cancelled();
   void failed();
+
 private:
   friend class DelayTest;
   enum Phase { Idle, Hiding, Countdown, Clearing, Capturing };
