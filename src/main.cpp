@@ -754,6 +754,7 @@ int main(int argc, char **argv) {
                          window->setProperty("closingApproved", true);
                        QTimer::singleShot(0, &app, &QCoreApplication::quit);
                      } else if (cmd == "history") {
+                       mark("history requested");
                        studio.closeImage();
                        showStudioWindow();
                        if (window) window->setProperty("historyMode", true);

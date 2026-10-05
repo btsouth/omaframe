@@ -53,6 +53,8 @@ qt_add_resources(omaframe ui PREFIX / FILES qml/HistoryPane.qml qml/Main.qml qml
 if(BUILD_TESTING)
   qt_add_executable(history-tests tests/history-test.cpp)
   target_link_libraries(history-tests PRIVATE studio-core Qt6::Test)
+  target_compile_definitions(history-tests PRIVATE HISTORY_APP_PATH="$<TARGET_FILE:omaframe>")
+  add_dependencies(history-tests omaframe)
   add_test(NAME history COMMAND history-tests)
   set_tests_properties(history PROPERTIES TIMEOUT 60 LABELS "headless" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   qt_add_executable(quick-copy-tests tests/quick-copy-test.cpp)

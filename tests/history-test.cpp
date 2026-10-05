@@ -2,6 +2,7 @@
 #include "history.hpp"
 #include "recording.hpp"
 #include <QClipboard>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -9,8 +10,10 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QLocalSocket>
 #include <QMimeData>
 #include <QProcess>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -250,9 +253,9 @@ private slots:
     QProcess p;
     p.start("ffmpeg",
             {"-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=10",
-             "-t", ".2", "-c:v", "libx264", "-threads", "1", path});
+             "-t", "0.2", "-c:v", "libx264", "-threads", "1", path});
     QVERIFY(p.waitForFinished(10000));
-    QCOMPARE(p.exitCode(), 0);
+    QVERIFY2(p.exitCode() == 0, p.readAllStandardError().constData());
     auto e = scan().first();
     const auto cache = folder + "/cache";
     QVERIFY(!History::thumbnail(e, cache, cancel).isNull());
@@ -334,6 +337,48 @@ private slots:
     QVERIFY(!QFileInfo::exists(part));
     QVERIFY(
         QFileInfo::exists(final.left(final.size() - 4) + "-incomplete.mp4"));
+  }
+  void historyIpcRouting() {
+    const auto runtime = folder + "/runtime";
+    QVERIFY(QDir().mkpath(runtime));
+    QVERIFY(QFile::setPermissions(
+        runtime, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    auto env = QProcessEnvironment::systemEnvironment();
+    env.insert("HOME", folder);
+    env.insert("XDG_RUNTIME_DIR", runtime);
+    env.insert("XDG_CONFIG_HOME", folder + "/config");
+    env.insert("XDG_DATA_HOME", folder + "/app-data");
+    env.insert("XDG_CACHE_HOME", folder + "/app-cache");
+    env.insert("WAYLAND_DISPLAY", "history-ipc-test");
+    env.insert("QT_QPA_PLATFORM", "offscreen");
+    env.insert("QT_QUICK_BACKEND", "software");
+    env.insert("OMAFRAME_PROFILE_STARTUP", "1");
+    QProcess app;
+    app.setProcessEnvironment(env);
+    app.start(HISTORY_APP_PATH, {"--studio"});
+    QVERIFY(app.waitForStarted(5000));
+    const auto cleanup = qScopeGuard([&] {
+      app.kill();
+      app.waitForFinished(5000);
+    });
+    const auto socket = runtime + "/omaframe-" +
+                        QString::fromLatin1(QCryptographicHash::hash(
+                                                QByteArray("history-ipc-test"),
+                                                QCryptographicHash::Sha256)
+                                                .toHex()
+                                                .left(16));
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(socket), 5000);
+    QProcess command;
+    command.setProcessEnvironment(env);
+    command.start(HISTORY_APP_PATH, {"--history"});
+    QVERIFY(command.waitForFinished(5000));
+    QCOMPARE(command.exitCode(), 0);
+    QByteArray log;
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (log += app.readAllStandardError()).contains("history requested"),
+        5000);
+    QVERIFY2(!log.contains("failed to load") && !log.contains("is not defined"),
+             log.constData());
   }
   void largeFolderBound() {
     for (int i = 0; i < 5000; ++i)
