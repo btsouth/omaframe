@@ -35,6 +35,7 @@ ApplicationWindow {
     palette.mid: theme.controlBorder
     palette.dark: theme.frame
     palette.shadow: theme.scrim
+    property bool historyMode: false
     property bool videoMode: false
     property bool recordingReview: false
     property bool editing: false
@@ -47,7 +48,7 @@ ApplicationWindow {
     readonly property bool videoSavedCurrent: videoLoaded && video.savedName.length > 0 && savedSignature === videoPane.signature
     readonly property bool typing: markCanvas.typing || videoPane.typing
     readonly property bool adjustingControl: root.activeFocusItem instanceof Slider || root.activeFocusItem instanceof ComboBox
-    property bool shortcutsAllowed: !markCanvas.dragging && !imageStyle.opened && !root.adjustingControl && !root.working && !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
+    property bool shortcutsAllowed: !markCanvas.dragging && !imageStyle.opened && !root.adjustingControl && !root.working && !historyPane.popupOpen && !gifMenu.opened && !videoPane.popupOpen && !leaveDialog.opened && !openDialog.visible && !imageFolderDialog.visible && !videoFolderDialog.visible && !originalsDialog.opened && !draftDeleteDialog.opened && !captureMenu.opened && !settingsPopup.opened && !aspectChoice.popup.visible && !typing
     property bool working: navigation.saving || studio.busy || video.busy || (recorder.active && !studio.quickMode)
     property string operationStatus: ""
     property string currentStatus: operationStatus || (videoMode ? video.status : studio.status)
@@ -65,7 +66,7 @@ ApplicationWindow {
         requestCaptureNavigation(command, file, -1);
     }
     function requestCaptureNavigation(command, file, delaySeconds) {
-        if (studio.busy || video.busy || navigation.saving) return;
+        if (studio.busy || video.busy || navigation.saving || (command === "history" && recorder.active)) return;
         studio.cancelTextCopy();
         studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
@@ -202,7 +203,7 @@ ApplicationWindow {
             }
         }
         function onDraftSaveFailed() { navigation.request("finish-draft", ""); }
-        function onEditorRequested() { root.editing = true; root.videoMode = false; root.tool = "select"; }
+        function onEditorRequested() { root.historyMode = false; root.editing = true; root.videoMode = false; root.tool = "select"; }
         function onSourceChanged() {
             canvasArea.resetZoom();
             preview.displayedCropBounds = Qt.rect(-1, -1, 0, 0);
@@ -210,6 +211,10 @@ ApplicationWindow {
             root.editing = false;
             root.videoMode = false;
             root.tool = "select";
+            if (root.historyMode && studio.hasImage) {
+                root.historyMode = false;
+                root.editing = true;
+            }
         }
     }
     Connections {
@@ -223,6 +228,7 @@ ApplicationWindow {
             }
         }
         function onOpening() {
+            root.historyMode = false;
             root.videoMode = true;
             root.editing = false;
             root.recordingReview = false;
@@ -256,6 +262,11 @@ ApplicationWindow {
                 navigation.saveFailed();
             }
         }
+    }
+    Shortcut {
+        sequence: "Ctrl+H"
+        enabled: root.shortcutsAllowed && !studio.quickMode
+        onActivated: root.requestNavigation("history")
     }
     Shortcut {
         sequence: "Ctrl+O"
@@ -613,6 +624,16 @@ ApplicationWindow {
                             }
                         }
                     }
+                    Text { visible: history.previousFolders.length > 0; text: "Previously used folders in History"; color: theme.muted; font.pixelSize: 12 }
+                    Repeater {
+                        model: history.previousFolders
+                        RowLayout {
+                            required property string modelData
+                            Layout.fillWidth: true
+                            Text { Layout.fillWidth: true; text: root.home(modelData); color: theme.muted; font.pixelSize: 11; elide: Text.ElideMiddle }
+                            StudioButton { text: "Forget"; quiet: true; implicitHeight: 30; hint: "Forget this previous folder. Current save folders are still scanned. Files stay in place."; onClicked: history.removeFolder(modelData) }
+                        }
+                    }
                     RecordToggle {
                         objectName: "autoSaveScreenshotsToggle"
                         Layout.fillWidth: true
@@ -727,8 +748,16 @@ ApplicationWindow {
                     glyph: "back"
                     quiet: true
                     enabled: !root.working
-                    hint: "Return to the start screen. Your edits stay in Recent edits."
+                    hint: "Return to the start screen. Your edits stay in History."
                     onClicked: root.requestNavigation("home")
+                }
+                StudioButton {
+                    visible: !studio.quickMode
+                    text: "History"
+                    quiet: true
+                    enabled: !root.working
+                    hint: "Saved captures and editable drafts · Ctrl+H"
+                    onClicked: root.requestNavigation("history")
                 }
                 StudioButton {
                     visible: !studio.quickMode
@@ -762,12 +791,26 @@ ApplicationWindow {
             }
         }
 
+        Loader {
+            id: historyPane
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.margins: 24
+            visible: active
+            active: root.historyMode
+            enabled: !root.working
+            readonly property bool popupOpen: item ? item.popupOpen : false
+            sourceComponent: Component {
+                HistoryPane { onHomeRequested: root.requestNavigation("home") }
+            }
+        }
+
         // Start screen: no image or video open.
         Flickable {
             id: startScreen
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !root.videoMode && !studio.hasImage
+            visible: !root.historyMode && !root.videoMode && !studio.hasImage
             clip: true
             contentWidth: width
             contentHeight: startColumn.implicitHeight + 64
@@ -941,94 +984,10 @@ ApplicationWindow {
                         ShortcutPanel { Layout.fillWidth: true }
                     }
                 }
-                ColumnLayout {
-                    visible: studio.drafts.length + video.drafts.length > 0
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
-                    SectionLabel { text: "RECENT EDITS" }
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: startColumn.width > 640 ? 2 : 1
-                        columnSpacing: 12
-                        rowSpacing: 8
-                        Repeater {
-                            model: root.recentDrafts
-                            delegate: Rectangle {
-                                id: draftCard
-                                required property var modelData
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 64
-                                radius: theme.radius
-                                color: draftMouse.containsMouse ? theme.hoverFill : theme.controlFill
-                                border.width: activeFocus ? 2 : 1
-                                border.color: activeFocus ? theme.focusBorder : theme.controlBorder
-                                activeFocusOnTab: true
-                                Accessible.role: Accessible.Button
-                                enabled: !root.working
-                                Accessible.name: modelData.name + ". Resume edit"
-                                Accessible.onPressAction: root.resumeRecent(modelData)
-                                Keys.onReturnPressed: root.resumeRecent(modelData)
-                                Keys.onSpacePressed: root.resumeRecent(modelData)
-                                MouseArea {
-                                    id: draftMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.resumeRecent(draftCard.modelData)
-                                }
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 10
-                                    Rectangle {
-                                        Layout.preferredWidth: 72
-                                        Layout.fillHeight: true
-                                        radius: theme.radius
-                                        color: theme.well
-                                        clip: true
-                                        Image {
-                                            anchors.fill: parent
-                                            source: draftCard.modelData.image || ""
-                                            Glyph { anchors.centerIn: parent; visible: draftCard.modelData.kind === "video"; name: "record"; width: 24; height: 24; ink: theme.muted }
-                                            sourceSize.width: 144
-                                            fillMode: Image.PreserveAspectCrop
-                                            asynchronous: true
-                                        }
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 2
-                                        Text { Layout.fillWidth: true; text: draftCard.modelData.name; color: theme.text; font.pixelSize: 12; elide: Text.ElideMiddle }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            elide: Text.ElideRight
-                                            text: (draftCard.modelData.kind === "video" ? "Video · " : "") + draftCard.modelData.when + (draftCard.modelData.kind === "video" ? "" : " · " + draftCard.modelData.edits + (draftCard.modelData.edits === 1 ? " edit" : " edits")) + (draftCard.modelData.exported ? " · exported" : "")
-                                            color: theme.muted
-                                            font.pixelSize: 11
-                                        }
-                                    }
-                                    StudioButton {
-                                        glyph: "trash"
-                                        hint: "Delete this draft"
-                                        quiet: true
-                                        implicitHeight: 30
-                                        onClicked: {
-                                            draftDeleteDialog.videoDraft = draftCard.modelData.kind === "video";
-                                            draftDeleteDialog.draftId = draftCard.modelData.id;
-                                            draftDeleteDialog.open();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Image drafts keep a private original. Video drafts keep edits and refer to the original video; keep that file in place. Delete drafts when you are done."
-                        color: theme.faint
-                        font.pixelSize: 11
-                        wrapMode: Text.Wrap
-                    }
+                    Text { Layout.fillWidth: true; text: "Recent captures and editable drafts are in History."; color: theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap }
+                    StudioButton { text: "History"; quiet: true; onClicked: root.requestNavigation("history") }
                 }
                 StudioButton {
                     text: "Try the editor on a sample image"
@@ -1147,7 +1106,7 @@ ApplicationWindow {
                         quiet: true
                         implicitHeight: 34
                         enabled: !root.working
-                        hint: "Close this image. Editable drafts stay in Recent edits."
+                        hint: "Close this image. Editable drafts stay in History."
                         onClicked: root.requestNavigation("home")
                     }
                 }

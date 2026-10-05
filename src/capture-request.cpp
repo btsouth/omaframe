@@ -18,7 +18,7 @@ bool CaptureRequest::cliDelay(const QCommandLineParser &parser, int &seconds,
     return false;
   }
   for (const auto *mode :
-       {"studio", "screen", "repeat", "scroll", "record", "stop-recording",
+       {"studio", "history", "screen", "repeat", "scroll", "record", "stop-recording",
         "pause-recording", "resume-recording", "toggle-recording-pause"})
     if (parser.isSet(mode)) {
       error = "--delay is available with default capture or --capture only.";
@@ -33,7 +33,7 @@ bool CaptureRequest::cliDelay(const QCommandLineParser &parser, int &seconds,
 bool CaptureRequest::decode(const QJsonObject &request, QString &command,
                             int &seconds) {
   command = request.value("command").toString();
-  if (!QStringList{"capture", "screen", "repeat", "scroll", "record", "studio",
+  if (!QStringList{"capture", "screen", "repeat", "scroll", "record", "studio", "history",
                    "open", "stop-recording", "pause-recording",
                    "resume-recording", "toggle-recording-pause"}
            .contains(command))

@@ -8,7 +8,7 @@ private slots:
   void cleanRequestsProceed_data() {
     QTest::addColumn<QString>("command");
     for (const auto *cmd :
-         {"open", "capture", "scroll", "screen", "repeat", "record", "review", "home", "quit"})
+         {"open", "capture", "scroll", "screen", "repeat", "record", "review", "home", "history", "quit"})
       QTest::newRow(cmd) << QString(cmd);
   }
   void cleanRequestsProceed() {
@@ -84,7 +84,7 @@ private slots:
     nav.setDirty(true);
     QSignalSpy proceed(&nav, &Navigation::proceed);
     QSignalSpy prompt(&nav, &Navigation::confirmationRequested);
-    nav.request("record");
+    nav.request("history");
     nav.save();
     nav.saveFailed();
     QCOMPARE(prompt.count(), 2);
@@ -93,7 +93,7 @@ private slots:
     nav.save();
     nav.saveSucceeded();
     QCOMPARE(proceed.count(), 1);
-    QCOMPARE(proceed.first().at(0).toString(), QString("record"));
+    QCOMPARE(proceed.first().at(0).toString(), QString("history"));
   }
   void failedSaveCanBeCancelled() {
     Navigation nav;

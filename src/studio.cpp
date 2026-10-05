@@ -1,3 +1,4 @@
+#include "history.hpp"
 #include "studio.hpp"
 #include "capture-session.hpp"
 #include "capture.hpp"
@@ -577,6 +578,7 @@ void Studio::open(const QUrl &url) {
 void Studio::setOutputDirectory(const QUrl &url) {
   if (!url.isLocalFile() || m_busy)
     return;
+  if (m_directory != url.toLocalFile()) History::rememberFolder(m_directory);
   m_directory = url.toLocalFile();
   QSettings().setValue("outputDirectory", m_directory);
   if (m_quickMode && m_quickState == "failed" && recoveryAction().isEmpty()) {

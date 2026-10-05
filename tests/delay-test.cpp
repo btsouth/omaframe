@@ -65,7 +65,7 @@ private slots:
     for (const auto *n : {"-1", "31", "1.5", "abc", "999999999999", ""})
       QTest::newRow(n) << QStringList{"--delay", n} << false << -1;
     for (const auto *mode :
-         {"studio", "screen", "repeat", "scroll", "record", "stop-recording",
+         {"studio", "history", "screen", "repeat", "scroll", "record", "stop-recording",
           "pause-recording", "resume-recording", "toggle-recording-pause"})
       QTest::newRow(mode) << QStringList{"--" + QString(mode), "--delay", "0"}
                           << false << -1;
@@ -79,7 +79,7 @@ private slots:
     QFETCH(int, seconds);
     QCommandLineParser parser;
     parser.addOption({"delay", "Delay", "N"});
-    for (const auto *mode : {"capture", "studio", "screen", "repeat", "scroll",
+    for (const auto *mode : {"capture", "studio", "history", "screen", "repeat", "scroll",
                              "record", "stop-recording", "pause-recording",
                              "resume-recording", "toggle-recording-pause"})
       parser.addOption({mode, mode});
@@ -106,10 +106,14 @@ private slots:
                       seconds));
     QVERIFY(
         !decode({{"command", "repeat"}, {"delaySeconds", 3}}, cmd, seconds));
+    QVERIFY(decode({{"command", "history"}}, cmd, seconds));
+    QCOMPARE(seconds, -1);
+    QVERIFY(decode({{"command", "history"}, {"delaySeconds", -1}}, cmd, seconds));
+    QVERIFY(!decode({{"command", "history"}, {"delaySeconds", 3}}, cmd, seconds));
     QVERIFY(!decode({{"command", "bogus"}}, cmd, seconds));
     for (const auto *request : {"capture", "screen", "repeat"})
       QCOMPARE(handle(request, true, true), Handling::Cancel);
-    for (const auto *request : {"scroll", "record", "open", "studio"})
+    for (const auto *request : {"scroll", "record", "open", "studio", "history"})
       QCOMPARE(handle(request, true, true), Handling::Busy);
     QCOMPARE(handle("capture", false, true), Handling::Busy);
     QCOMPARE(handle("capture", false, false), Handling::Proceed);
