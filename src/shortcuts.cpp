@@ -395,25 +395,28 @@ void ShortcutSetup::run(const QList<Shortcuts::Action> &actions) {
       }
       QThread::msleep(100);
     }
-    // Keep the old bindings if the new ones could not be verified live.
-    bool restored = false, reloaded = false;
-    if (!backup.isEmpty()) {
+    // Keep the old bindings if the new ones could not be verified live. An
+    // empty backup means install found nothing to change.
+    const bool unchanged = backup.isEmpty();
+    bool restored = unchanged;
+    if (!unchanged) {
       QSaveFile restore(path);
-      if (restore.open(QIODevice::WriteOnly) &&
-          restore.write(original) == original.size() && restore.commit())
-        restored = true;
-      if (restored)
-        reloaded = hyprctl({"reload"}, 5000).trimmed() == "ok";
+      restored = restore.open(QIODevice::WriteOnly) &&
+                 restore.write(original) == original.size() && restore.commit();
     }
+    const bool reloaded =
+        restored && hyprctl({"reload"}, 5000).trimmed() == "ok";
     r.binds = binds().array();
-    r.message = restored
-                    ? "Hyprland did not accept the new shortcuts. Your bindings "
-                      "file was restored."
-                    : "Hyprland did not accept the new shortcuts, and Omaframe "
-                      "could not restore your bindings file.";
+    r.message = unchanged ? "Hyprland did not accept the shortcuts. Your bindings "
+                            "file was left unchanged."
+                : restored ? "Hyprland did not accept the new shortcuts. Your "
+                             "bindings file was restored."
+                           : "Hyprland did not accept the new shortcuts, and "
+                             "Omaframe could not restore your bindings file.";
     if (restored && !reloaded)
-      r.message += " Hyprland could not reload the restored bindings.";
-    if (!backup.isEmpty())
+      r.message += unchanged ? " Hyprland could not reload your bindings."
+                             : " Hyprland could not reload the restored bindings.";
+    if (!unchanged)
       r.message += " Previous bindings: " + backup;
     return r;
   }));

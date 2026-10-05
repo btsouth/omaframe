@@ -1477,9 +1477,11 @@ void Studio::copyQuick() {
       return result;
     }
     const QSize output = Frame::outputSize(edited.size(), options, Frame::edgeRoom(edited));
-    if (qint64(output.width()) * output.height() > 80000000)
-      return CopyResult{"This canvas would exceed 80 megapixels. Use a smaller border "
-                        "or a different aspect ratio.", {}};
+    if (qint64(output.width()) * output.height() > 80000000) {
+      result.error = "This canvas would exceed 80 megapixels. Use a smaller border "
+                     "or a different aspect ratio.";
+      return result;
+    }
     const QImage composed = Frame::compose(edited, options);
     QImage flattened(composed.size(), QImage::Format_ARGB32_Premultiplied);
     flattened.fill(Qt::transparent);
@@ -1492,8 +1494,10 @@ void Studio::copyQuick() {
     buffer.open(QIODevice::WriteOnly);
     QImageWriter writer(&buffer, "png");
     writer.setCompression(60);
-    if (!writer.write(flattened))
-      return CopyResult{writer.errorString(), {}};
+    if (!writer.write(flattened)) {
+      result.error = writer.errorString();
+      return result;
+    }
     if (!copyPngBytes(png, result.error))
       return result;
     if (!notificationPreview)
