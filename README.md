@@ -237,6 +237,13 @@ same recording open and leaves the paused interval out of the saved video
 and audio. The timer counts recorded time. You can still take screenshots
 while paused, and Stop saves the clip normally.
 
+If the recorder is still finishing 15 seconds after Stop, the button turns
+into **Force**. Force-stopping keeps whatever file was written, but it may be
+incomplete. If the camera is unplugged before recording starts, the recording
+continues screen-only and Omaframe tells you. A selected camera that is not
+connected stays selected until you pick another one, so Omaframe never
+switches to a different camera on its own.
+
 Enable capture shortcuts in Settings to use **Alt+Shift+Print Screen** for
 pause/resume, including whole-display recordings without a visible control.
 Setup keeps custom bindings and adds the new key only when it is free.
