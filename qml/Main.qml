@@ -1317,12 +1317,8 @@ ApplicationWindow {
                                     visible: root.editing
                                     doc: studio.marks
                                     tool: root.tool
-                                    feedbackViewport: {
-                                        // Explicit scroll dependencies keep this rect current while panning.
-                                        const scrollX = canvasScroll.contentX, scrollY = canvasScroll.contentY;
-                                        const origin = mapFromItem(canvasScroll, 0, 0);
-                                        return Qt.rect(origin.x, origin.y, canvasScroll.width, canvasScroll.height);
-                                    }
+                                    feedbackViewport: Qt.rect(canvasScroll.contentX - x, canvasScroll.contentY - y,
+                                                              canvasScroll.width, canvasScroll.height)
                                     cropCurrentView: true
                                     locked: studio.busy || !preview.geometryReady
                                     workingSize: studio.workingSize

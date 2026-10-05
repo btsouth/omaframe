@@ -7,7 +7,8 @@
 namespace MarkConstraints {
 struct Result {
   bool valid = false;
-  QPointF anchor, point; // Fractions of the displayed canvas, including off-crop anchors.
+  QPointF anchor,
+      point; // Fractions of the displayed canvas, including off-crop anchors.
   QString label;
 };
 bool shape(const QString &type);

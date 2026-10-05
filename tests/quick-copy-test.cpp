@@ -262,22 +262,27 @@ private slots:
     ImageStore store;
     Studio studio(&store, false);
     prepare(studio);
-    auto *marks=studio.marks();
-    QVERIFY(marks->cropCurrentView(.137,.219,.837,.891));
-    QTRY_COMPARE(studio.workingSize(), Frame::cropPixels(captureImage().size(),marks->edits()).size());
-    const QSize canvas=studio.workingSize();
-    for (const auto &type : {QString("arrow"),QString("box")}) {
-      const auto result=marks->creationPreview(type,.1,.1,.6,.5,canvas.width(),canvas.height(),true);
+    auto *marks = studio.marks();
+    QVERIFY(marks->cropCurrentView(.137, .219, .837, .891));
+    QTRY_COMPARE(
+        studio.workingSize(),
+        Frame::cropPixels(captureImage().size(), marks->edits()).size());
+    const QSize canvas = studio.workingSize();
+    for (const auto &type : {QString("arrow"), QString("box")}) {
+      const auto result = marks->creationPreview(
+          type, .1, .1, .6, .5, canvas.width(), canvas.height(), true);
       QVERIFY(result.value("valid").toBool());
-      marks->edit(type,.1,.1,result.value("x2").toDouble(),result.value("y2").toDouble());
+      marks->edit(type, .1, .1, result.value("x2").toDouble(),
+                  result.value("y2").toDouble());
     }
-    const auto original=marks->edits();
+    const auto original = marks->edits();
     QVERIFY(studio.saveDraftNow());
-    const auto id=studio.drafts().first().toMap().value("id").toString();
-    studio.closeImage(); studio.resumeDraft(id);
-    QCOMPARE(marks->edits(),original);
-    const auto square=marks->edits().last().to-marks->edits().last().from;
-    QVERIFY(std::abs(square.x()*160-square.y()*100)<1e-8);
+    const auto id = studio.drafts().first().toMap().value("id").toString();
+    studio.closeImage();
+    studio.resumeDraft(id);
+    QCOMPARE(marks->edits(), original);
+    const auto square = marks->edits().last().to - marks->edits().last().from;
+    QVERIFY(std::abs(square.x() * 160 - square.y() * 100) < 1e-8);
   }
   void stepNumbersSurviveLayerMovesAndDrafts() {
     ImageStore store;

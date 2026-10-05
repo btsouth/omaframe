@@ -701,25 +701,32 @@ void MarkDocument::previewTransform(int handle, double x, double y) {
 }
 namespace {
 QVariantMap feedback(const MarkConstraints::Result &result) {
-  return {{"valid", result.valid}, {"label", result.valid ? result.label : QString{}},
-          {"x1", result.anchor.x()}, {"y1", result.anchor.y()},
-          {"x2", result.point.x()}, {"y2", result.point.y()}};
+  return {{"valid", result.valid},
+          {"label", result.valid ? result.label : QString{}},
+          {"x1", result.anchor.x()},
+          {"y1", result.anchor.y()},
+          {"x2", result.point.x()},
+          {"y2", result.point.y()}};
 }
-}
-QVariantMap MarkDocument::creationPreview(const QString &type, double x1, double y1,
-                                         double x2, double y2, double width,
-                                         double height, bool constrain) const {
+} // namespace
+QVariantMap MarkDocument::creationPreview(const QString &type, double x1,
+                                          double y1, double x2, double y2,
+                                          double width, double height,
+                                          bool constrain) const {
   return feedback(MarkConstraints::resolve(type, {x1, y1}, {x2, y2},
-                                          {width, height}, constrain));
+                                           {width, height}, constrain));
 }
-QVariantMap MarkDocument::previewConstrainedTransform(int handle, double x, double y,
-                                                      double width, double height,
+QVariantMap MarkDocument::previewConstrainedTransform(int handle, double x,
+                                                      double y, double width,
+                                                      double height,
                                                       bool constrain) {
-  if (!m_transform || locked() || m_selected != m_transform->selected) return {};
+  if (!m_transform || locked() || m_selected != m_transform->selected)
+    return {};
   const auto &original = m_transform->edits[m_selected];
   const bool vector = original.type == "line" || original.type == "arrow";
-  if (!constrain || handle < 0 || (vector ? handle > 1 :
-      !MarkConstraints::shape(original.type) || handle > 3)) {
+  if (!constrain || handle < 0 ||
+      (vector ? handle > 1
+              : !MarkConstraints::shape(original.type) || handle > 3)) {
     previewTransform(handle, x, y);
     return {};
   }
@@ -729,13 +736,18 @@ QVariantMap MarkDocument::previewConstrainedTransform(int handle, double x, doub
                    (p.y() - crop.y()) / crop.height());
   };
   const QRectF r = QRectF(view(original.from), view(original.to)).normalized();
-  const QPointF anchor = vector ? view(handle == 0 ? original.to : original.from)
-      : handle == 0 ? r.bottomRight() : handle == 1 ? r.bottomLeft()
-      : handle == 2 ? r.topLeft() : r.topRight();
-  const double aspect = vector ? 1. : (r.width() * width) / (r.height() * height);
+  const QPointF anchor = vector
+                             ? view(handle == 0 ? original.to : original.from)
+                         : handle == 0 ? r.bottomRight()
+                         : handle == 1 ? r.bottomLeft()
+                         : handle == 2 ? r.topLeft()
+                                       : r.topRight();
+  const double aspect =
+      vector ? 1. : (r.width() * width) / (r.height() * height);
   const auto result = MarkConstraints::resolve(original.type, anchor, {x, y},
                                                {width, height}, true, aspect);
-  if (result.valid) previewTransform(handle, result.point.x(), result.point.y());
+  if (result.valid)
+    previewTransform(handle, result.point.x(), result.point.y());
   return feedback(result);
 }
 void MarkDocument::endTransform(bool apply) {

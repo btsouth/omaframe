@@ -184,7 +184,7 @@ keeps your edits open.
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
 | Marking up or video | Shift+drag | Constrain angles, draw squares or circles, keep corner proportions, or move straight |
-| Marking up or video | Arrows / Shift+arrows | Move a selected mark one / ten source pixels |
+| Marking up or video | Arrow keys / Shift+arrow keys | Move a selected mark one / ten source pixels |
 | Marking up | Shift+H | Hide possible secrets |
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |

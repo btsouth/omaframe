@@ -375,72 +375,103 @@ private slots:
   }
   void shiftedVideoGesturesUseDisplayedCropAndOneUndo() {
     PaneScene scene(temp);
-    QTRY_VERIFY2(scene.component.isReady(),qPrintable(scene.component.errorString()));
-    QVERIFY2(scene.create(),qPrintable(scene.component.errorString()));
-    scene.window.show(); scene.window.requestActivate();
+    QTRY_VERIFY2(scene.component.isReady(),
+                 qPrintable(scene.component.errorString()));
+    QVERIFY2(scene.create(), qPrintable(scene.component.errorString()));
+    scene.window.show();
+    scene.window.requestActivate();
     QVERIFY(QTest::qWaitForWindowExposed(&scene.window));
-    QSignalSpy loaded(&scene.video,&Video::loaded);
+    QSignalSpy loaded(&scene.video, &Video::loaded);
     scene.video.open(QUrl::fromLocalFile(plain));
-    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(),1,12000);
-    auto *player=scene.pane->findChild<QObject *>("videoPlayer"); QVERIFY(player);
-    QTRY_VERIFY_WITH_TIMEOUT(player->property("mediaStatus").toInt()==QMediaPlayer::LoadedMedia ||
-                             player->property("mediaStatus").toInt()==QMediaPlayer::BufferedMedia,12000);
-    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(),"seek",Q_ARG(QVariant,1.5)));
-    QTRY_COMPARE(scene.pane->property("head").toDouble(),1.5);
-    auto *marks=scene.video.marks();
-    marks->edit("crop",.137,.219,.837,.891);
-    QCOMPARE(marks->cropBounds(),scene.video.cropBounds());
-    auto *canvas=scene.pane->findChild<QQuickItem *>("videoMarkCanvas"); QVERIFY(canvas);
-    QTRY_VERIFY(canvas->isVisible() && canvas->width()>100);
-    const auto at=[&](double x,double y) { return canvas->mapToScene({x*canvas->width(),y*canvas->height()}).toPoint(); };
-    const auto undoSteps=[&] { return value(scene.pane.get(),"undoStack").toList().size(); };
-    const int before=undoSteps();
-    scene.pane->setProperty("tool","arrow");
-    QTest::mousePress(&scene.window,Qt::LeftButton,Qt::NoModifier,at(.1,.1));
-    QTest::mouseMove(&scene.window,at(.55,.45));
-    QTest::keyPress(&scene.window,Qt::Key_Shift);
-    QTRY_COMPARE(canvas->property("constraintLabel").toString(),QString("45°"));
-    QCOMPARE(undoSteps(),before);
-    QTest::keyRelease(&scene.window,Qt::Key_Shift);
+    QTRY_COMPARE_WITH_TIMEOUT(loaded.count(), 1, 12000);
+    auto *player = scene.pane->findChild<QObject *>("videoPlayer");
+    QVERIFY(player);
+    QTRY_VERIFY_WITH_TIMEOUT(player->property("mediaStatus").toInt() ==
+                                     QMediaPlayer::LoadedMedia ||
+                                 player->property("mediaStatus").toInt() ==
+                                     QMediaPlayer::BufferedMedia,
+                             12000);
+    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "seek",
+                                      Q_ARG(QVariant, 1.5)));
+    QTRY_COMPARE(scene.pane->property("head").toDouble(), 1.5);
+    auto *marks = scene.video.marks();
+    marks->edit("crop", .137, .219, .837, .891);
+    QCOMPARE(marks->cropBounds(), scene.video.cropBounds());
+    auto *canvas = scene.pane->findChild<QQuickItem *>("videoMarkCanvas");
+    QVERIFY(canvas);
+    QTRY_VERIFY(canvas->isVisible() && canvas->width() > 100);
+    const auto at = [&](double x, double y) {
+      return canvas->mapToScene({x * canvas->width(), y * canvas->height()})
+          .toPoint();
+    };
+    const auto undoSteps = [&] {
+      return value(scene.pane.get(), "undoStack").toList().size();
+    };
+    const int before = undoSteps();
+    scene.pane->setProperty("tool", "arrow");
+    QTest::mousePress(&scene.window, Qt::LeftButton, Qt::NoModifier,
+                      at(.1, .1));
+    QTest::mouseMove(&scene.window, at(.55, .45));
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QTRY_COMPARE(canvas->property("constraintLabel").toString(),
+                 QString("45°"));
+    QCOMPARE(undoSteps(), before);
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
     QTRY_VERIFY(!canvas->property("constraintActive").toBool());
-    QTest::keyPress(&scene.window,Qt::Key_Shift);
-    QTest::mouseRelease(&scene.window,Qt::LeftButton,Qt::ShiftModifier,at(.55,.45));
-    QTest::keyRelease(&scene.window,Qt::Key_Shift);
-    QCOMPARE(undoSteps(),before+1); QCOMPARE(marks->edits().size(),2);
-    const auto arrow=marks->edits().last();
-    QCOMPARE(arrow.start,1.5); QCOMPARE(arrow.end,4.);
-    QVERIFY(std::abs((arrow.to.x()-arrow.from.x())*160-(arrow.to.y()-arrow.from.y())*120)<1e-8);
-    // Shift-click selects inside, Shift-drag draws, and Steps still place on click.
-    scene.pane->setProperty("tool","box");
-    marks->edit("box",.1,.1,.9,.9); marks->clearSelection();
-    QTest::mouseClick(&scene.window,Qt::LeftButton,Qt::ShiftModifier,at(.5,.5));
-    QCOMPARE(marks->selected(),2); QCOMPARE(marks->edits().size(),3);
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QTest::mouseRelease(&scene.window, Qt::LeftButton, Qt::ShiftModifier,
+                        at(.55, .45));
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QCOMPARE(undoSteps(), before + 1);
+    QCOMPARE(marks->edits().size(), 2);
+    const auto arrow = marks->edits().last();
+    QCOMPARE(arrow.start, 1.5);
+    QCOMPARE(arrow.end, 4.);
+    QVERIFY(std::abs((arrow.to.x() - arrow.from.x()) * 160 -
+                     (arrow.to.y() - arrow.from.y()) * 120) < 1e-8);
+    // Shift-click selects inside, Shift-drag draws, and Steps still place on
+    // click.
+    scene.pane->setProperty("tool", "box");
+    marks->edit("box", .1, .1, .9, .9);
     marks->clearSelection();
-    QTest::mousePress(&scene.window,Qt::LeftButton,Qt::NoModifier,at(.3,.5));
-    QTest::mouseMove(&scene.window,at(.5,.6)); QTest::keyPress(&scene.window,Qt::Key_Shift);
-    QTRY_COMPARE(canvas->property("constraintLabel").toString(),QString("1:1"));
-    QTest::mouseRelease(&scene.window,Qt::LeftButton,Qt::ShiftModifier,at(.5,.6));
-    QTest::keyRelease(&scene.window,Qt::Key_Shift);
-    QCOMPARE(marks->edits().size(),4);
-    const auto box=marks->edits().last();
-    QVERIFY(std::abs((box.to.x()-box.from.x())*160-(box.to.y()-box.from.y())*120)<1e-8);
-    const auto saved=marks->edits();
+    QTest::mouseClick(&scene.window, Qt::LeftButton, Qt::ShiftModifier,
+                      at(.5, .5));
+    QCOMPARE(marks->selected(), 2);
+    QCOMPARE(marks->edits().size(), 3);
+    marks->clearSelection();
+    QTest::mousePress(&scene.window, Qt::LeftButton, Qt::NoModifier,
+                      at(.3, .5));
+    QTest::mouseMove(&scene.window, at(.5, .6));
+    QTest::keyPress(&scene.window, Qt::Key_Shift);
+    QTRY_COMPARE(canvas->property("constraintLabel").toString(),
+                 QString("1:1"));
+    QTest::mouseRelease(&scene.window, Qt::LeftButton, Qt::ShiftModifier,
+                        at(.5, .6));
+    QTest::keyRelease(&scene.window, Qt::Key_Shift);
+    QCOMPARE(marks->edits().size(), 4);
+    const auto box = marks->edits().last();
+    QVERIFY(std::abs((box.to.x() - box.from.x()) * 160 -
+                     (box.to.y() - box.from.y()) * 120) < 1e-8);
+    const auto saved = marks->edits();
     QVERIFY(scene.video.saveDraftNow());
-    const auto id=scene.video.drafts().first().toMap().value("id").toString();
-    scene.pane->setProperty("tool","step"); marks->clearSelection();
-    QTest::mouseClick(&scene.window,Qt::LeftButton,Qt::ShiftModifier,at(.7,.7));
-    QCOMPARE(marks->edits().size(),5);
-    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(),"undo"));
-    QCOMPARE(marks->edits(),saved);
-    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(),"undo"));
-    QCOMPARE(marks->edits().size(),3);
-    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(),"redo"));
-    QCOMPARE(marks->edits(),saved);
+    const auto id = scene.video.drafts().first().toMap().value("id").toString();
+    scene.pane->setProperty("tool", "step");
+    marks->clearSelection();
+    QTest::mouseClick(&scene.window, Qt::LeftButton, Qt::ShiftModifier,
+                      at(.7, .7));
+    QCOMPARE(marks->edits().size(), 5);
+    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "undo"));
+    QCOMPARE(marks->edits(), saved);
+    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "undo"));
+    QCOMPARE(marks->edits().size(), 3);
+    QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "redo"));
+    QCOMPARE(marks->edits(), saved);
     Video reopened;
-    QSignalSpy resumed(&reopened,&Video::loaded); reopened.resumeDraft(id);
-    QTRY_COMPARE_WITH_TIMEOUT(resumed.count(),1,12000);
-    QCOMPARE(reopened.marks()->edits(),saved);
-    QCOMPARE(reopened.marks()->cropBounds(),reopened.cropBounds());
+    QSignalSpy resumed(&reopened, &Video::loaded);
+    reopened.resumeDraft(id);
+    QTRY_COMPARE_WITH_TIMEOUT(resumed.count(), 1, 12000);
+    QCOMPARE(reopened.marks()->edits(), saved);
+    QCOMPARE(reopened.marks()->cropBounds(), reopened.cropBounds());
   }
   void timingDrag_data() {
     QTest::addColumn<bool>("start");
