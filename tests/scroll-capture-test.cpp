@@ -1,6 +1,11 @@
 #include "scroll-capture.hpp"
 #include "auto-capture.hpp"
 #include "stitch.hpp"
+#include "shortcuts.hpp"
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QElapsedTimer>
 #include <QPainter>
 #include <QRandomGenerator>
@@ -334,6 +339,80 @@ class ScrollCaptureTest : public QObject {
 
 private slots:
   void stitcherChecks() { QVERIFY(runStitchChecks()); }
+
+  void shortcutSetupPreservesOverridesAfterItsBlock() {
+    QTemporaryDir config;
+    auto write = [](const QString &path, const QByteArray &text) {
+      QFile file(path);
+      return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    QVERIFY(write(config.filePath("hyprland.lua"), "require('hypr.bindings')\n"));
+    const QByteArray custom = "o.bind('PRINT', 'My screenshot', 'custom-capture')\n";
+    const QByteArray before = "-- user header\n";
+    const QByteArray after = "-- user footer\n" + custom;
+    const QByteArray original = before + "\n-- omaframe:shortcuts:start\n" +
+        Shortcuts::luaLine(Shortcuts::Action::Screenshot,
+                          QCoreApplication::applicationFilePath()).toUtf8() +
+        "\n-- omaframe:shortcuts:end\n" + after;
+    const QString path = config.filePath("bindings.lua");
+    QVERIFY(write(path, original));
+    QString error, backup;
+    QVERIFY2(Shortcuts::install(config.path(), QCoreApplication::applicationFilePath(),
+                               {Shortcuts::Action::Pause}, &error, &backup),
+             qPrintable(error));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray updated = file.readAll();
+    QVERIFY(updated.startsWith(before + after));
+    QVERIFY(updated.contains(custom));
+    QVERIFY(!updated.contains("Screenshot with Omaframe"));
+    QVERIFY(!updated.contains("hl.unbind(\"PRINT\")"));
+    QVERIFY(updated.contains("Pause recording with Omaframe"));
+    QFile saved(backup);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    QCOMPARE(saved.readAll(), original);
+  }
+
+  void cursorQueriesFailSafely() {
+    const QPointF expected(100, 200);
+    QVERIFY(!Scrolling::cursorMoved(R"({"x":100,"y":200})", expected));
+    QVERIFY(!Scrolling::cursorMoved(R"({"x":104,"y":196})", expected));
+    QVERIFY(Scrolling::cursorMoved(R"({"x":105,"y":200})", expected));
+    for (const QByteArray &json : {QByteArray(), QByteArray("bad JSON"),
+                                  QByteArray("{}"), QByteArray(R"({"x":100})"),
+                                  QByteArray(R"({"x":100,"y":"200"})")})
+      QVERIFY(Scrolling::cursorMoved(json, expected));
+  }
+
+  void initialTakeoverNeverParksThePointer() {
+    FakeDisplay display;
+    display.page = makeDocument(1200, 1800, 5);
+    std::atomic_bool stopped{false};
+    auto desktop = display.desktop(stopped);
+    int parks = 0, scrolls = 0, queries = 0;
+    desktop.park = [&](QPointF) { ++parks; return true; };
+    desktop.scroll = [&](int) { ++scrolls; return true; };
+    const Scrolling::Plan plan = planFor(display);
+    desktop.pointerMoved = [&](QPointF at) {
+      ++queries;
+      if (at != plan.home)
+        queries += 100;
+      return true; // moved during initial settling, or cursor query failed
+    };
+    Scrolling::Session *running = nullptr;
+    Scrolling::Session session(desktop, plan,
+        [&](const Scrolling::Progress &p) {
+          if (p.mode == Scrolling::Progress::Mode::Manual)
+            running->finish();
+        }, {}, fastTiming());
+    running = &session;
+    QString error;
+    const QImage image = session.run(error);
+    QVERIFY2(!image.isNull(), qPrintable(error));
+    QCOMPARE(parks, 0);
+    QCOMPARE(scrolls, 0);
+    QCOMPARE(queries, 1);
+  }
 
   void areaPixelsRoundEdges() {
     // At a fractional scale, edges round on their own so the crop never

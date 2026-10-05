@@ -177,6 +177,14 @@ QColor OmarchyTheme::readableOn(const QColor &fill) const {
 }
 
 void OmarchyTheme::reload() {
+  const auto snapshot = [this] {
+    return std::tuple(name_, dark_, background_, well_, text_, muted_, faint_,
+                      accent_, onAccent_, urgent_, recording_, frame_, popupFrame_,
+                      scrim_, selectedText_, separator_, controlFill_, hoverFill_,
+                      pressedFill_, selectedFill_, controlBorder_, hoverBorder_,
+                      focusBorder_, radius_);
+  };
+  const auto old = snapshot();
   const QString themeDir = stateDir_ + QStringLiteral("/current/theme");
   const auto colors = readToml(themeDir + QStringLiteral("/colors.toml"));
   shell_ = readToml(themeDir + QStringLiteral("/shell.toml"));
@@ -205,9 +213,6 @@ void OmarchyTheme::reload() {
   const QString mode = colors.value(QStringLiteral("mode")).toLower();
   dark_ = mode == QLatin1String("light") ? false : mode == QLatin1String("dark") ? true : luminance(bg) < 0.5;
 
-  const auto old = std::tuple(background_, text_, accent_, urgent_, recording_, frame_, popupFrame_, scrim_,
-                              selectedText_, controlFill_, hoverFill_, selectedFill_, controlBorder_,
-                              hoverBorder_, well_, name_, dark_);
   background_ = surface(QStringLiteral("menu"), QStringLiteral("background"), bg, 1.0);
   const QColor opaque = alpha(background_, 1.0);
   text_ = role(shell_.value(QStringLiteral("menu.text")), foreground);
@@ -245,10 +250,7 @@ void OmarchyTheme::reload() {
   rearm();
   if (queryHyprland_)
     readRounding();
-  const auto now = std::tuple(background_, text_, accent_, urgent_, recording_, frame_, popupFrame_, scrim_,
-                              selectedText_, controlFill_, hoverFill_, selectedFill_, controlBorder_,
-                              hoverBorder_, well_, name_, dark_);
-  if (now != old)
+  if (snapshot() != old)
     emit changed();
 }
 

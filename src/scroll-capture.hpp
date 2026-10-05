@@ -39,7 +39,7 @@ struct Desktop {
   /** Scrolls by wheel notches; positive moves the page down. */
   std::function<bool(int)> scroll;
   /** Whether the real pointer has left `parked` (a fraction of the display):
-   *  the user has moved the mouse. */
+   *  the user has moved the mouse. True also when its position is unknown. */
   std::function<bool(QPointF parked)> pointerMoved;
   /** Gives the pointer back. */
   std::function<void()> closePointer;
@@ -131,6 +131,8 @@ private:
 
 /** The pixels of `area` (a fraction of a display) in a frame of `size`. */
 QRect areaPixels(QRectF area, QSize size);
+/** Whether cursor JSON differs from `expected`; invalid data hands control back. */
+bool cursorMoved(const QByteArray &json, QPointF expected);
 /** Where to scroll a capture of the window at `area`, a fraction of a display
  *  that is `logical` pixels in size: near its right edge, below its toolbar,
  *  where the wheel reaches the page itself rather than a panel inside it.

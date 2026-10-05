@@ -29,7 +29,8 @@ QString command(Action action, const QString &executable);
 QString luaLine(Action action, const QString &executable);
 /** Adds or updates Omaframe's marked block in `configDir/bindings.lua` for
  *  `actions`, after backing the file up. Refuses keys that the file binds
- *  to something else. */
+ *  to something else. Previously managed actions with custom overrides are
+ *  omitted from the regenerated block. */
 bool install(const QString &configDir, const QString &executable,
              const QList<Action> &actions, QString *error,
              QString *backup = nullptr);

@@ -56,6 +56,7 @@ class Recorder final : public QObject {
   Q_PROPERTY(QString state READ state NOTIFY changed)
   Q_PROPERTY(QString status READ status NOTIFY changed)
   Q_PROPERTY(bool active READ active NOTIFY changed)
+  Q_PROPERTY(bool canForceStop READ canForceStop NOTIFY changed)
   Q_PROPERTY(QString elapsed READ elapsed NOTIFY changed)
   Q_PROPERTY(bool pausePending READ pausePending NOTIFY changed)
   Q_PROPERTY(int remaining READ remaining NOTIFY changed)
@@ -81,12 +82,13 @@ class Recorder final : public QObject {
   Q_PROPERTY(QString controlLocation READ controlLocation NOTIFY changed)
   Q_PROPERTY(QString savedPath READ savedPath NOTIFY changed)
 public:
-  explicit Recorder(QObject *parent = nullptr);
+  explicit Recorder(QObject *parent = nullptr, int stopGraceMs = 15000);
   Webcam *camera() { return &m_webcam; }
   ~Recorder() override;
   QString state() const { return m_state; }
   QString status() const { return m_status; }
   bool active() const;
+  bool canForceStop() const { return m_canForceStop; }
   QString elapsed() const;
   bool pausePending() const { return m_pausePending; }
   int remaining() const { return m_remaining; }
@@ -176,6 +178,7 @@ private:
   void completeWhenCameraReady();
   Webcam m_webcam;
   bool m_screenReady = false;
+  bool m_canForceStop = false, m_forcedStop = false;
   QString m_cameraWarning;
   QString m_state = "idle", m_status, m_screen, m_target, m_path, m_error,
           m_defaultSink, m_preferredMic, m_stopKey, m_pauseKey;
@@ -184,7 +187,7 @@ private:
   Recording::Placement m_control, m_countdownControl;
   QRect m_capture;
   QProcess m_process;
-  QTimer m_tick, m_countdownTick, m_startupCheck;
+  QTimer m_tick, m_countdownTick, m_startupCheck, m_stopTimeout;
   QElapsedTimer m_clock;
   QLocalSocket m_pauseSocket;
   QTimer m_pauseTimeout;

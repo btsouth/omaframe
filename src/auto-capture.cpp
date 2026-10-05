@@ -183,7 +183,7 @@ AutoCapture::Outcome AutoCapture::feed(const QImage &input) {
       // Check the whole verified pair before committing either frame. A
       // normal budget stop keeps the previous reference and every band.
       if (accumulator_->wouldExceedBudget(decision.path.firstDelta +
-                                          decision.path.secondDelta)) {
+                                          decision.path.secondDelta, 2)) {
         state_ = State::Halted;
         haltReason_ = HaltReason::ReachedLimit;
         Outcome result = outcome(Event::Halted, Ack::Hold);
@@ -331,7 +331,7 @@ AutoCapture::Outcome AutoCapture::continueAnyway() {
     return outcome(Event::Paused, Ack::Hold);
   QString error;
   const ForwardMatchPath path = *pausedBestEffort_;
-  if (accumulator_->wouldExceedBudget(path.firstDelta + path.secondDelta)) {
+  if (accumulator_->wouldExceedBudget(path.firstDelta + path.secondDelta, 2)) {
     state_ = State::Halted;
     haltReason_ = HaltReason::ReachedLimit;
     Outcome result = outcome(Event::Halted, Ack::Hold);

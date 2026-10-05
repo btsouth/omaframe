@@ -216,7 +216,12 @@ bool Shortcuts::install(const QString &configDir, const QString &executable,
   if (!withoutBlocks(kept, &wanted))
     return fail("Omaframe's block in hypr/bindings.lua is missing its end "
                 "line, so it was left alone. Delete the block and try again.");
-  for (Action action : actions) {
+  for (Action action : actions)
+    if (!wanted.contains(action))
+      wanted.append(action);
+  // Recovered actions will also be regenerated after the user's lines.
+  // Drop any they have overridden since the previous setup.
+  for (Action action : QList<Action>(wanted)) {
     const QRegularExpression custom(
         action == Action::Screenshot
             ? R"((?:o\.(?:re)?bind|hl\.bind)\s*\(\s*["']\s*PRINT\s*["'])"
@@ -224,11 +229,12 @@ bool Shortcuts::install(const QString &configDir, const QString &executable,
             ? R"((?:o\.(?:re)?bind|hl\.bind)\s*\(\s*["']\s*(?:ALT\s*\+\s*SHIFT|SHIFT\s*\+\s*ALT)\s*\+\s*PRINT\s*["'])"
             : R"((?:o\.(?:re)?bind|hl\.bind)\s*\(\s*["']\s*ALT\s*\+\s*PRINT\s*["'])",
         QRegularExpression::CaseInsensitiveOption);
-    if (custom.match(QString::fromUtf8(kept)).hasMatch())
-      return fail(defaultKey(action) +
-                  " already has a custom binding. Omaframe left it alone.");
-    if (!wanted.contains(action))
-      wanted.append(action);
+    if (custom.match(QString::fromUtf8(kept)).hasMatch()) {
+      if (actions.contains(action))
+        return fail(defaultKey(action) +
+                    " already has a custom binding. Omaframe left it alone.");
+      wanted.removeAll(action);
+    }
   }
   if (!QFileInfo(executable).isExecutable())
     return fail("The Omaframe executable is unavailable for the shortcut.");
@@ -389,18 +395,29 @@ void ShortcutSetup::run(const QList<Shortcuts::Action> &actions) {
       }
       QThread::msleep(100);
     }
-    // Keep the old bindings if the new ones could not be verified live.
-    QFile now(path);
-    if (!backup.isEmpty() && now.open(QIODevice::ReadOnly)) {
-      now.close();
+    // Keep the old bindings if the new ones could not be verified live. An
+    // empty backup means install found nothing to change.
+    const bool unchanged = backup.isEmpty();
+    bool restored = unchanged;
+    if (!unchanged) {
       QSaveFile restore(path);
-      if (restore.open(QIODevice::WriteOnly) &&
-          restore.write(original) == original.size() && restore.commit())
-        hyprctl({"reload"}, 5000);
+      restored = restore.open(QIODevice::WriteOnly) &&
+                 restore.write(original) == original.size() && restore.commit();
     }
+    const bool reloaded =
+        restored && hyprctl({"reload"}, 5000).trimmed() == "ok";
     r.binds = binds().array();
-    r.message = "Hyprland did not accept the new shortcuts, so your bindings "
-                "were left as they were.";
+    r.message = unchanged ? "Hyprland did not accept the shortcuts. Your bindings "
+                            "file was left unchanged."
+                : restored ? "Hyprland did not accept the new shortcuts. Your "
+                             "bindings file was restored."
+                           : "Hyprland did not accept the new shortcuts, and "
+                             "Omaframe could not restore your bindings file.";
+    if (restored && !reloaded)
+      r.message += unchanged ? " Hyprland could not reload your bindings."
+                             : " Hyprland could not reload the restored bindings.";
+    if (!unchanged)
+      r.message += " Previous bindings: " + backup;
     return r;
   }));
 }

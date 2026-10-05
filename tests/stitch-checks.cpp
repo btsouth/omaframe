@@ -766,6 +766,43 @@ bool runStitchChecks() {
     CHECK_FAILED;
   }
 
+  // Tiny steps retain footer-analysis rows for every band. Their budget
+  // must stop before the output-length cap, preserving all verified pixels.
+  {
+    const int width = 4096, viewport = 1024;
+    const QImage doc = makeTexture(width, viewport + 260);
+    QString error;
+    bool ok = false;
+    StitchAccumulator acc(doc.copy(0, 0, width, viewport), Axis::Vertical, ok, error);
+    if (!ok)
+      CHECK_FAILED;
+    int top = 0;
+    while (!acc.wouldExceedBudget(2, 2) && top < 260) {
+      ++top;
+      if (!acc.pushForward(doc.copy(0, top, width, viewport), 1, error))
+        CHECK_FAILED;
+    }
+    if (top == 260 || exceedsStitchBudget(width, acc.extent() + 2))
+      CHECK_FAILED;
+    // A pair is refused together even when one of its bands still fits.
+    if (acc.wouldExceedBudget(1) || !acc.wouldExceedBudget(2, 2))
+      CHECK_FAILED;
+    ++top;
+    if (!acc.pushForward(doc.copy(0, top, width, viewport), 1, error))
+      CHECK_FAILED;
+    const long retained = acc.retainedRgbaBytes();
+    const int extent = acc.extent(), frames = acc.frameCount();
+    if (!acc.wouldExceedBudget(1) || retained > kMaxRetainedBytes ||
+        acc.pushForward(doc.copy(0, top + 1, width, viewport), 1, error) ||
+        acc.extent() != extent || acc.frameCount() != frames ||
+        acc.retainedRgbaBytes() != retained || !error.contains("memory limit"))
+      CHECK_FAILED;
+    const QImage out = acc.finish(error);
+    if (out.isNull() || out != doc.copy(0, 0, width, viewport + top)
+                                   .convertToFormat(QImage::Format_RGBA8888))
+      CHECK_FAILED;
+  }
+
   if (!runLookaheadChecks())
     CHECK_FAILED;
   if (!runAutoCaptureChecks())

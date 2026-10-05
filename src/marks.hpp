@@ -143,6 +143,7 @@ private:
   QPointF sourcePoint(double x, double y) const;
   /** Gives a new mark its times on a video. */
   void timeNewMark(Frame::Edit &edit) const;
+  void orderNewStep(Frame::Edit &edit) const;
   bool showing(const Frame::Edit &edit) const;
   /** With `edgesOnly`, filled areas (boxes, highlights, redactions, blur)
    *  are hit only near their border, so a drawing tool can still start a

@@ -64,6 +64,7 @@ ApplicationWindow {
     function requestNavigation(command, file) {
         if (studio.busy || video.busy || navigation.saving) return;
         studio.cancelTextCopy();
+        studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
         captureMenu.close();
         settingsPopup.close();
@@ -131,6 +132,7 @@ ApplicationWindow {
     // Escape peels one layer at a time: typing, a drag, the selection, the
     // tool, then Edit itself.
     function escapeEditor() {
+        studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
         else if (markCanvas.dragging) markCanvas.cancelDrag();
         else if (studio.marks.selectedAnnotation.type !== undefined) studio.marks.clearSelection();
@@ -139,6 +141,7 @@ ApplicationWindow {
         else root.editing = false;
     }
     function showFinish() {
+        studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
         if (studio.quickMode) studio.showFinishes();
         else root.editing = false;
@@ -195,6 +198,7 @@ ApplicationWindow {
                 root.operationStatus = studio.status;
             }
         }
+        function onDraftSaveFailed() { navigation.request("finish-draft", ""); }
         function onEditorRequested() { root.editing = true; root.videoMode = false; root.tool = "select"; }
         function onSourceChanged() {
             canvasArea.resetZoom();
@@ -236,6 +240,7 @@ ApplicationWindow {
     }
     Connections {
         target: navigation
+        function onProceed(command, file) { if (command === "finish-draft") studio.finishDraftRecovery(); }
         function onConfirmationRequested() { leaveDialog.open(); }
         function onChanged() { if (!navigation.pending) leaveDialog.close(); }
         function onSaveRequested() {

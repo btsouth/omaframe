@@ -218,6 +218,8 @@ public:
   /** Returns the studio to its start screen. Drafts are kept. */
   Q_INVOKABLE void closeImage();
   Q_INVOKABLE void accept();
+  Q_INVOKABLE void cancelPendingAccept() { m_pendingFinish = -1; }
+  Q_INVOKABLE void finishDraftRecovery();
   Q_INVOKABLE void retryOutput();
   Q_INVOKABLE void clearOriginals();
   Q_INVOKABLE void setOutputDirectory(const QUrl &url);
@@ -232,6 +234,7 @@ public:
     emit changed();
   }
   void leaveQuickMode() {
+    cancelPendingAccept();
     m_quickMode = false;
     m_recordingSelection = false;
     m_scrollSelection = false;
@@ -300,6 +303,7 @@ signals:
   void chooserRequested();
   void editorRequested();
   void dismissRequested();
+  void draftSaveFailed();
   void captureFailed();
   /** The first frame is stitched; the progress control may appear on
    *  `monitor` at `bounds` (logical, desktop layout). */
@@ -357,7 +361,7 @@ private:
   ScrollCapture *m_scrollCapture = nullptr;
   QString m_scrollMonitor;
   QRect m_scrollBounds;
-  bool m_copyPending = false, m_backupPending = false;
+  bool m_copyPending = false, m_backupPending = false, m_failedDraftExport = false;
   QString m_quickState = "idle", m_captureMonitor, m_pointerMonitor;
   int m_pendingFinish = -1;
   bool m_editing = false, m_thumbnailsStale = false, m_returnToStudio = false;

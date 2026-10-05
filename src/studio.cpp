@@ -263,6 +263,8 @@ bool Studio::tallImage() const {
              qint64(m_workingSize.width()) * kTallImageRatio;
 }
 QString Studio::recoveryAction() const {
+  if (m_failedDraftExport && draftDirty())
+    return "Retry editable draft";
   if (m_savedPath.isEmpty() || (!m_copyPending && !m_backupPending))
     return {};
   if (m_copyPending && m_backupPending)
@@ -277,6 +279,7 @@ void Studio::persistOptions() {
   s.setValue("aspect", m_options.aspect);
 }
 void Studio::invalidateSaved() {
+  m_failedDraftExport = false;
   m_savedPath.clear();
   m_backupPath.clear();
   m_copyPending = m_backupPending = false;
@@ -358,6 +361,7 @@ void Studio::setKeepOriginals(bool value) {
 
 struct PreviewResult {
   QImage source, uncropped, preview;
+  QString error;
   QVector<QImage> thumbnails;
   QSize workingSize;
   QRectF cropBounds;
@@ -385,6 +389,7 @@ void Studio::scheduleRender() {
             m_previewCropBounds = result.cropBounds;
             m_edgeRoom = result.edgeRoom;
             m_rendering = false;
+            if (!result.error.isEmpty()) m_status = result.error;
             ++m_revision;
             emit changed();
             if (m_pendingFinish >= 0) {
@@ -406,7 +411,7 @@ void Studio::scheduleRender() {
                                   double(pixels.y()) / source.height(),
                                   double(pixels.width()) / source.width(),
                                   double(pixels.height()) / source.height());
-        const QImage uncropped = Frame::applyEdits(source, edits, false);
+        const QImage uncropped = Frame::applyEdits(source, edits, false, &result.error);
         const QImage working = Frame::cropImage(uncropped, edits);
         result.workingSize = working.size();
         result.edgeRoom = Frame::edgeRoom(working);
@@ -448,6 +453,7 @@ void Studio::scheduleRender() {
       }));
 }
 void Studio::loadImage(QImage image, QString name, bool demo) {
+  cancelPendingAccept();
   if (image.isNull())
     return;
   if (!saveDraftNow())
@@ -470,6 +476,7 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
   emit sourceChanged();
 }
 void Studio::closeImage() {
+  cancelPendingAccept();
   if (m_busy || m_original.isNull())
     return;
   if (!saveDraftNow())
@@ -495,6 +502,7 @@ void Studio::loadDemo(int variant) {
               variant == 1 ? "Terminal sample" : "Noon workspace", true);
 }
 void Studio::open(const QUrl &url) {
+  cancelPendingAccept();
   if (m_busy || !url.isLocalFile())
     return;
   if (!saveDraftNow())
@@ -627,8 +635,11 @@ bool Studio::saveDraftNow() {
     }
   }
   QJsonArray edits;
-  for (const auto &edit : m_marks.edits())
-    edits.append(Frame::editToJson(edit));
+  for (const auto &edit : m_marks.edits()) {
+    auto item = Frame::editToJson(edit);
+    if (edit.type == "step") item.insert("stepOrder", edit.stepOrder);
+    edits.append(item);
+  }
   const QJsonObject document{{"version", 1}, {"name", m_name},
                              {"style", m_options.style},
                              {"padding", m_options.padding},
@@ -655,6 +666,7 @@ void Studio::discardUnsavedDraft() {
   emit changed();
 }
 void Studio::resumeDraft(const QString &id) {
+  cancelPendingAccept();
   if (m_busy || !validDraftId(id))
     return;
   if (!saveDraftNow())
@@ -676,12 +688,13 @@ void Studio::resumeDraft(const QString &id) {
   }
   QVector<Frame::Edit> edits;
   for (const auto &value : savedEdits) {
-    const auto edit = Frame::editFromJson(value.toObject());
+    auto edit = Frame::editFromJson(value.toObject());
     if (!edit) {
       m_status = "This editable draft contains a damaged annotation.";
       emit changed();
       return;
     }
+    edit->stepOrder = std::max(0, value.toObject().value("stepOrder").toInt());
     edits.append(*edit);
   }
   QImageReader reader(directory + "/" + id + ".png");
@@ -717,7 +730,7 @@ void Studio::resumeDraft(const QString &id) {
   if (!QFileInfo::exists(m_savedPath))
     m_savedPath.clear();
   m_backupPath.clear();
-  m_copyPending = m_backupPending = false;
+  m_copyPending = m_backupPending = m_failedDraftExport = false;
   m_draftId = id;
   m_draftDirty = false;
   m_draftTimer.stop();
@@ -816,24 +829,31 @@ static bool copyPng(const QString &path, QString &error) {
   return copyPngBytes(input.readAll(), error);
 }
 struct ExportResult {
-  QString path, backupPath, error, copyError, backupError;
+  QString path, backupPath, error, copyError, backupError, renderError;
   bool copied = false, backupSaved = false;
 };
 static QString exportStatus(const ExportResult &r) {
   if (r.path.isEmpty())
     return r.error;
   if (r.copied && r.backupSaved)
-    return "Copied to the clipboard and saved as " + QFileInfo(r.path).fileName() + ".";
+    return "Copied to the clipboard and saved as " + QFileInfo(r.path).fileName() + "." +
+           (r.renderError.isEmpty() ? QString() : " " + r.renderError);
   QStringList problems;
   if (!r.copied)
     problems << "Clipboard copy failed: " + r.copyError;
   if (!r.backupSaved)
     problems << "Private original backup failed: " + r.backupError;
+  if (!r.renderError.isEmpty()) problems << r.renderError;
   return "Finished PNG saved. " + problems.join(" ");
 }
 void Studio::accept() {
-  if (m_busy || m_rendering || m_original.isNull())
+  if (m_busy || m_original.isNull())
     return;
+  if (m_rendering) {
+    m_pendingFinish = style();
+    return;
+  }
+  m_pendingFinish = -1;
   cancelTextCopy();
   saveDraftNow();
   const QSize output = Frame::outputSize(m_workingSize, m_options, m_edgeRoom);
@@ -862,18 +882,22 @@ void Studio::accept() {
             m_savedPath = r.path;
             if (!r.path.isEmpty() && !m_draftId.isEmpty()) {
               m_draftDirty = true;
-              m_draftTimer.start();
             }
+            const bool draftSaved = saveDraftNow();
+            const QString draftError = m_status;
+            m_failedDraftExport = !r.path.isEmpty() && !draftSaved && draftDirty();
             m_backupPath = r.backupPath;
             m_copyPending = !r.path.isEmpty() && !r.copied;
             m_backupPending = !r.path.isEmpty() && !r.backupSaved;
             m_status = exportStatus(r);
+            if (m_failedDraftExport) m_status += " " + draftError;
             m_originalsSummary = summarizeOriginals(&m_originalsCount);
             if (m_quickMode)
-              m_quickState = r.path.isEmpty() || m_copyPending || m_backupPending
+              m_quickState = r.path.isEmpty() || m_copyPending || m_backupPending || m_failedDraftExport
                                  ? "failed"
                                  : "done";
             emit changed();
+            if (m_failedDraftExport) emit draftSaveFailed();
             // Keep failures visible. Never dismiss a capture that was not both
             // saved and copied, including a failed original backup.
             if (m_quickMode && m_quickState == "done")
@@ -892,7 +916,12 @@ void Studio::accept() {
         QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss-zzz") + "-" +
         QUuid::createUuid().toString(QUuid::Id128).left(6);
     const QString path = directory + "/Omaframe-" + id + ".png";
-    QImage composed = Frame::compose(Frame::applyEdits(source, edits), options);
+    const QImage edited = Frame::applyEdits(source, edits, true, &r.renderError);
+    if (edited.isNull()) {
+      r.error = r.renderError;
+      return r;
+    }
+    QImage composed = Frame::compose(edited, options);
     // A fresh raster strips imported PNG text and other source metadata,
     // including in Raw mode.
     QImage flattened(composed.size(), QImage::Format_ARGB32_Premultiplied);
@@ -920,7 +949,24 @@ void Studio::accept() {
     return r;
   }));
 }
+void Studio::finishDraftRecovery() {
+  if (!m_failedDraftExport || draftDirty() || m_busy) return;
+  m_failedDraftExport = false;
+  if (m_copyPending || m_backupPending) {
+    retryOutput();
+    return;
+  }
+  if (m_quickMode) m_quickState = "done";
+  m_status = "Screenshot copied and saved. Editable draft recovery completed.";
+  emit changed();
+  if (m_quickMode) emit dismissRequested();
+}
 void Studio::retryOutput() {
+  if (m_failedDraftExport && !m_busy) {
+    if (saveDraftNow()) finishDraftRecovery();
+    else emit draftSaveFailed();
+    return;
+  }
   if (m_busy || m_savedPath.isEmpty() || (!m_copyPending && !m_backupPending))
     return;
   cancelTextCopy();
@@ -1361,6 +1407,7 @@ void Studio::openEditor() {
   emit editorRequested();
 }
 void Studio::showFinishes() {
+  cancelPendingAccept();
   if (!m_quickMode || m_busy)
     return;
   m_quickState = "choosing";
@@ -1392,11 +1439,11 @@ void Studio::copyQuick() {
   m_status = "Copying to the clipboard…";
   emit changed();
   struct CopyResult {
-    QString error, preview;
+    QString error, preview, renderError;
   };
   auto *watcher = new QFutureWatcher<CopyResult>(this);
   connect(watcher, &QFutureWatcher<CopyResult>::finished, this, [this, watcher] {
-    const auto [error, preview] = watcher->result();
+    const auto [error, preview, renderError] = watcher->result();
     watcher->deleteLater();
     m_busy = false;
     m_copyPreview = preview;
@@ -1412,6 +1459,7 @@ void Studio::copyQuick() {
                    ? "Copied to the clipboard without saving."
                    : "Clipboard copy failed: " + error +
                          (m_editing ? " Press Copy to retry." : " Press Ctrl+C to retry.");
+    if (!renderError.isEmpty()) m_status += " " + renderError;
     emit changed();
     if (error.isEmpty())
       emit dismissRequested();
@@ -1422,11 +1470,18 @@ void Studio::copyQuick() {
                                         options = m_options, notificationPreview] {
     // The same image accept() would save: edits and the chosen finish. A
     // fresh raster strips source metadata.
-    const QImage edited = Frame::applyEdits(source, edits);
+    CopyResult result;
+    const QImage edited = Frame::applyEdits(source, edits, true, &result.renderError);
+    if (edited.isNull()) {
+      result.error = result.renderError;
+      return result;
+    }
     const QSize output = Frame::outputSize(edited.size(), options, Frame::edgeRoom(edited));
-    if (qint64(output.width()) * output.height() > 80000000)
-      return CopyResult{"This canvas would exceed 80 megapixels. Use a smaller border "
-                        "or a different aspect ratio.", {}};
+    if (qint64(output.width()) * output.height() > 80000000) {
+      result.error = "This canvas would exceed 80 megapixels. Use a smaller border "
+                     "or a different aspect ratio.";
+      return result;
+    }
     const QImage composed = Frame::compose(edited, options);
     QImage flattened(composed.size(), QImage::Format_ARGB32_Premultiplied);
     flattened.fill(Qt::transparent);
@@ -1439,9 +1494,10 @@ void Studio::copyQuick() {
     buffer.open(QIODevice::WriteOnly);
     QImageWriter writer(&buffer, "png");
     writer.setCompression(60);
-    if (!writer.write(flattened))
-      return CopyResult{writer.errorString(), {}};
-    CopyResult result;
+    if (!writer.write(flattened)) {
+      result.error = writer.errorString();
+      return result;
+    }
     if (!copyPngBytes(png, result.error))
       return result;
     if (!notificationPreview)
@@ -1463,8 +1519,13 @@ void Studio::copyQuick() {
   }));
 }
 void Studio::dismissQuick() {
-  if (m_busy || m_pendingFinish >= 0)
+  cancelPendingAccept();
+  if (m_busy)
     return;
+  if (m_failedDraftExport && draftDirty()) {
+    emit draftSaveFailed();
+    return;
+  }
   cancelTextCopy();
   m_quickState = "cancelled";
   emit changed();
@@ -1532,14 +1593,15 @@ QVector<QRectF> Studio::uncoveredSecrets() const {
   QVector<QRectF> open;
   const auto &edits = m_marks.edits();
   for (const QRectF &secret : m_secrets) {
-    const double area = secret.width() * secret.height();
+    const QPointF tolerance(1. / std::max(1, m_original.width()),
+                             1. / std::max(1, m_original.height()));
     const bool hidden =
         std::any_of(edits.cbegin(), edits.cend(), [&](const Frame::Edit &e) {
-          if (e.type != "redact" && e.type != "blur")
+          if (e.type != "redact")
             return false;
-          const QRectF part =
-              QRectF(e.from, e.to).normalized().intersected(secret);
-          return part.width() * part.height() >= area * 0.9;
+          const QRectF cover = QRectF(e.from, e.to).normalized();
+          return cover.adjusted(-tolerance.x(), -tolerance.y(),
+                                 tolerance.x(), tolerance.y()).contains(secret);
         });
     if (!hidden)
       open << secret;

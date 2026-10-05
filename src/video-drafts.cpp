@@ -243,7 +243,10 @@ void Video::restorePendingDraft() {
     m_saved.clear();
   m_savedSignature =
       m_saved.isEmpty() ? QString() : doc.value("savedSignature").toString();
-  m_status = "Video draft reopened. Your original video stays unchanged.";
+  m_status = "Video draft reopened. " +
+             (m_cameraWarning.isEmpty()
+                  ? QString("Your original video stays unchanged.")
+                  : m_cameraWarning);
   m_draftTimer.stop();
 }
 void Video::deleteDraft(const QString &id) {
@@ -304,18 +307,30 @@ QRectF Video::cameraBounds() const {
 }
 void Video::readCameraTrack() {
   m_cameraSource = QUrl();
+  m_cameraWarning.clear();
   m_cameraDuration = 0;
   m_cameraLayout = {
       {"visible", false}, {"width", 0.24}, {"x", 0.74}, {"y", 0.72}};
   const auto doc = read(m_source.toLocalFile() + ".camera.json");
+  if (doc.value("version").toInt() == 1 &&
+      doc.value("missing").toBool()) {
+    m_cameraWarning = "The camera was not recorded. "
+                      "This video continues screen-only.";
+    m_status = m_cameraWarning;
+    return;
+  }
   const QString name = doc.value("file").toString();
   // Sidecars can only refer to a sibling track, never an arbitrary path.
   if (doc.value("version").toInt() != 1 || name.isEmpty() ||
       name != QFileInfo(name).fileName())
     return;
   const QString path = QFileInfo(m_source.toLocalFile()).dir().filePath(name);
-  if (!QFileInfo(path).isFile() || QFileInfo(path).isSymLink())
+  if (!QFileInfo(path).isFile() || QFileInfo(path).isSymLink()) {
+    m_cameraWarning = "The camera recording is missing. "
+                      "This video continues screen-only.";
+    m_status = m_cameraWarning;
     return;
+  }
   const double duration = doc.value("duration").toDouble();
   if (!std::isfinite(duration) || duration <= 0 || duration > m_duration + 1)
     return;

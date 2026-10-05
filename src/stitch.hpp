@@ -35,6 +35,10 @@ inline constexpr int kMaxStitchedEdge = 32000;
 /// capture is not refused at allocation time, it is OOM-killed part-way
 /// through assembly, after the user has spent a minute scrolling.
 inline constexpr long long kMaxStitchedBytes = 200LL * 1024 * 1024;
+/// Allow analysis rows as well as output pixels. Ordinary steps at least as
+/// deep as the analysis edge fit within twice the output budget; tiny steps
+/// cannot retain arbitrarily many overlapping bands.
+inline constexpr long long kMaxRetainedBytes = 2 * kMaxStitchedBytes;
 inline constexpr long long kMaxStitchedPixels = kMaxStitchedBytes / 4;
 /// Whether growing a capture of `crossLen` to `axisExtent` along the motion
 /// axis would pass that budget.
@@ -268,8 +272,9 @@ public:
   [[nodiscard]] int frameCount() const { return static_cast<int>(bands_.size()) + 1; }
   /// Length of the finished image along the motion axis, in pixels.
   [[nodiscard]] int extent() const { return axisLen_ + totalDelta_; }
-  /// Whether growing by `delta` along the motion axis would pass the budget.
-  [[nodiscard]] bool wouldExceedBudget(int delta) const;
+  /// Whether growing by `delta` across `bands` would exceed either the output
+  /// or retained-memory budget. A pair is checked before committing either band.
+  [[nodiscard]] bool wouldExceedBudget(int delta, int bands = 1) const;
   /// Whether the finished image would be longer than most other software will
   /// open. Advisory only; see kWidelyOpenableEdge.
   [[nodiscard]] bool exceedsWidelyOpenableEdge() const;
@@ -301,6 +306,7 @@ private:
   std::vector<std::uint8_t> firstRgba_;
   std::vector<TailBand> bands_;
   int totalDelta_ = 0;
+  long long retainedBytes_ = 0;
   std::vector<std::uint64_t> edgeSums_, edgeCounts_, alignedSums_, alignedCounts_;
 };
 

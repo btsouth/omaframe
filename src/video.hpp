@@ -72,6 +72,7 @@ class Video : public QObject {
   Q_PROPERTY(QString draftSignature READ draftSignature NOTIFY changed)
   Q_PROPERTY(QString savedSignature READ savedSignature NOTIFY changed)
   Q_PROPERTY(QUrl cameraSource READ cameraSource NOTIFY changed)
+  Q_PROPERTY(QString cameraWarning READ cameraWarning NOTIFY changed)
   Q_PROPERTY(QVariantMap cameraLayout READ cameraLayout NOTIFY changed)
   Q_PROPERTY(QRectF cameraBounds READ cameraBounds NOTIFY changed)
   Q_PROPERTY(double cameraDuration READ cameraDuration NOTIFY changed)
@@ -106,6 +107,7 @@ public:
   QString draftSignature() const { return m_draftSignature; }
   QString savedSignature() const { return m_savedSignature; }
   QUrl cameraSource() const { return m_cameraSource; }
+  QString cameraWarning() const { return m_cameraWarning; }
   QVariantMap cameraLayout() const { return m_cameraLayout; }
   QRectF cameraBounds() const;
   double cameraDuration() const { return m_cameraDuration; }
@@ -171,6 +173,7 @@ private:
   bool m_draftDeleted = false;
   qint64 m_sourceSize = 0, m_sourceModified = 0;
   QUrl m_cameraSource;
+  QString m_cameraWarning;
   double m_cameraDuration = 0;
   QUrl m_source;
   MarkDocument m_marks;

@@ -6,7 +6,7 @@ pkgdesc='Screenshot and screen recording studio for Omarchy and Hyprland'
 arch=('x86_64')
 url='https://github.com/btsouth/omaframe'
 license=('MIT')
-depends=('hyprland' 'qt6-base' 'qt6-declarative' 'qt6-multimedia'
+depends=('hyprland' 'qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-imageformats' 'bash'
          'qt6-wayland' 'layer-shell-qt' 'wayland' 'wl-clipboard' 'ffmpeg'
          'libpulse' 'procps-ng' 'xdg-utils' 'hicolor-icon-theme'
          'gpu-screen-recorder>=6.1.0')
