@@ -403,12 +403,12 @@ Item {
         color: theme.background
         border.color: theme.accent
         border.width: 1
-        readonly property real left: Math.max(0, editSurface.feedbackViewport.x)
-        readonly property real top: Math.max(0, editSurface.feedbackViewport.y)
-        readonly property real right: Math.min(editSurface.width, editSurface.feedbackViewport.x + editSurface.feedbackViewport.width)
-        readonly property real bottom: Math.min(editSurface.height, editSurface.feedbackViewport.y + editSurface.feedbackViewport.height)
-        x: Math.max(left + 4, Math.min(right - width - 4, drawArea.rawX + 14))
-        y: Math.max(top + 4, Math.min(bottom - height - 4, drawArea.rawY + 14))
+        readonly property real viewportLeft: Math.max(0, editSurface.feedbackViewport.x)
+        readonly property real viewportTop: Math.max(0, editSurface.feedbackViewport.y)
+        readonly property real viewportRight: Math.min(editSurface.width, editSurface.feedbackViewport.x + editSurface.feedbackViewport.width)
+        readonly property real viewportBottom: Math.min(editSurface.height, editSurface.feedbackViewport.y + editSurface.feedbackViewport.height)
+        x: Math.max(viewportLeft + 4, Math.min(viewportRight - width - 4, drawArea.rawX + 14))
+        y: Math.max(viewportTop + 4, Math.min(viewportBottom - height - 4, drawArea.rawY + 14))
         Text {
             id: readout
             anchors.centerIn: parent

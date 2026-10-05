@@ -74,7 +74,7 @@ private slots:
     }
   }
   void boundsAndDegenerate() {
-    auto result = MarkConstraints::resolve("line", {.8, .7}, {4, 2}, {1920, 1080}, true);
+    auto result = MarkConstraints::resolve("line", {.8, .7}, {2, 3}, {1920, 1080}, true);
     QVERIFY(result.valid);
     QVERIFY(near(result.point.x(), 1));
     QVERIFY(near((result.point.x()-.8)*1920, (result.point.y()-.7)*1080));
@@ -235,6 +235,27 @@ private slots:
     QVERIFY(!scene.canvas->property("constraintActive").toBool());
     scene.release({400,240}); QTest::keyRelease(&scene.window,Qt::Key_Shift);
     QCOMPARE(scene.marks.edits()[0].to,QPointF(.5,.4));
+  }
+  void croppedTallZoomedCanvas() {
+    Scene scene; QTRY_VERIFY(scene.component.isReady()); QVERIFY(scene.open("ellipse"));
+    QImage image(360,2400,QImage::Format_RGB32); image.fill(Qt::white);
+    scene.marks.reset(image); QVERIFY(scene.marks.cropCurrentView(.13,.21,.83,.89));
+    const auto crop=scene.marks.cropBounds();
+    const QSizeF canvas(360*crop.width()*2,2400*crop.height()*2);
+    scene.canvas->setSize(canvas);
+    scene.canvas->setPosition({-100,-200});
+    scene.canvas->setProperty("feedbackViewport",QRectF(100,200,540,360));
+    scene.press({30,30}); scene.move({200,100});
+    QTest::keyPress(&scene.window,Qt::Key_Shift);
+    QTRY_COMPARE(scene.canvas->property("constraintLabel").toString(),QString("1:1"));
+    auto *readout=scene.canvas->findChild<QQuickItem *>("constraintReadout"); QVERIFY(readout);
+    QVERIFY(readout->x()>=100 && readout->y()>=200);
+    QVERIFY(readout->x()+readout->width()<=canvas.width());
+    QVERIFY(readout->y()+readout->height()<=560);
+    scene.release({200,100},Qt::ShiftModifier); QTest::keyRelease(&scene.window,Qt::Key_Shift);
+    QCOMPARE(scene.marks.edits().size(),2);
+    const auto v=pixels(scene.marks.edits()[1].to-scene.marks.edits()[1].from,image.size());
+    QVERIFY(near(std::abs(v.x()),std::abs(v.y())));
   }
   void shiftClickDragRouting() {
     Scene scene; QTRY_VERIFY(scene.component.isReady()); QVERIFY(scene.open("box"));
