@@ -29,8 +29,9 @@ than GPU Screen Recorder 6.1.0. Run `omarchy-update` (or `sudo pacman -Syu` on
 plain Arch) and then the command again.
 
 Open Omaframe from the launcher and enable its capture shortcuts. It only
-replaces Omarchy's default actions for those two keys, backs up your bindings
-first, and never touches a key you set up yourself.
+sets up Print, Alt+Print and Alt+Shift+Print when they are free or still use
+Omarchy's stock capture actions. It backs up your bindings first and leaves
+custom keys alone.
 
 Version 0.9.0 makes a click in the finish chooser select a finish instead of
 copying it, and lets Ctrl+C and Ctrl+V copy and paste marks in the editor.
@@ -55,13 +56,14 @@ shows it again. On the finish chooser:
 
 **Save screenshots automatically** is on by default. Turn it off in Settings
 to stop keeping screenshot files. This does not disable editable drafts that
-are autosaved while you edit.
+are autosaved while you edit. A final clipboard-only copy does not update
+the draft with your latest edits.
 
 Paste it anywhere. Crops, marks and redactions you made in the editor are kept
-either way. If copying fails, the panel stays open; Ctrl+C (Copy in the editor)
-retries a clipboard-only copy, and a saved screenshot offers a retry for its
-unfinished step. The close button still cancels, and Esc while choosing an
-area still cancels the capture. Clicking outside the panel does nothing.
+either way. If copying fails, the panel stays open. In the chooser, Ctrl+C
+retries a clipboard-only copy; in the editor, use Ctrl+Enter or **Copy**.
+A saved screenshot offers a retry for its unfinished step. The close button
+still cancels, and Esc while choosing an area still cancels the capture. Clicking outside the panel does nothing.
 
 <p align="center"><img src="docs/media/screenshot.gif" width="800" alt="Pressing Print Screen, clicking a window, picking a finish and getting a Screenshot copied notification"></p>
 
@@ -83,15 +85,18 @@ To keep only part of the page, crop it in the editor afterwards.
 Choose Done, Enter or Esc to keep what has been captured. Cancel discards it.
 For keyboard controls, point at the progress panel to focus it. The panel sits
 outside the capture when there is room; otherwise its rows come from the first
-frame, before the panel appeared. Fixed headers and footers are kept once.
+frame, before the panel appeared. Fixed headers and small footers are usually
+kept once. Footers taller than about one eighth of the viewport, or 128 pixels,
+may repeat.
 
 The result uses the same finishes and editor as an ordinary screenshot. Long
 pages fit to width; use Shift+wheel or the scrollbar to reach the bottom while editing.
-Capture stops at 32000 pixels on either edge or 200 MiB of image pixels. If it
-loses track of the page, Omaframe switches to manual scrolling. Scrollbars remain in the capture so window
-controls are preserved. Completely
-repeating content uses wheel cadence and ranked matches to resolve ambiguous
-seams, so check the result before sharing. Pages with large animations, overlays
+Capture stops at 32000 pixels along the scrolling direction, 200 MiB of image
+pixels, or 200 MiB of retained frame bands. Tiny scroll steps can reach the
+frame-band limit first. If it loses track of the page, Omaframe switches to
+manual scrolling. A scrollbar is removed when its gutter is verified; window
+controls are preserved. Completely repeating content uses wheel cadence and
+ranked matches to resolve ambiguous seams, so check the result before sharing. Pages with large animations, overlays
 or replaced content may need manual scrolling.
 
 ## Mark it up
@@ -116,7 +121,8 @@ outline controls. Boxes and ovals can have a colored fill with opacity.
 Highlights offer color and opacity, steps offer circle and number colors and
 size, and blur offers strength. Choices are remembered for new marks of each
 type. Video annotations use the same controls. Click outside a style panel
-to close it. Esc takes you back to the finishes.
+to close it. Esc finishes text, cancels a drag, clears the selected mark,
+resets the tool to Select, then leaves Edit, one step at a time.
 
 <p align="center"><img src="docs/media/edit.gif" width="800" alt="Typing a label on a screenshot, drawing an arrow and blurring a list"></p>
 
@@ -251,14 +257,16 @@ sudo pacman -R omaframe
 
 Then delete the block between `-- omaframe:shortcuts:start` and
 `-- omaframe:shortcuts:end` in `~/.config/hypr/bindings.lua` to give Print
-Screen and Alt+Print Screen back to Omarchy. Your screenshots, recordings and
-settings stay where they are.
+Screen and Alt+Print Screen back to Omarchy and remove the pause shortcut.
+Reload Hyprland to apply the change. If cached Lua keeps the running bindings,
+restart your Hyprland session. Your screenshots, recordings and settings stay
+where they are.
 
 ## Build from source
 
 Build dependencies: `base-devel cmake ninja pkgconf qt6-base qt6-declarative
-qt6-multimedia qt6-wayland layer-shell-qt wayland wayland-protocols
-wl-clipboard ffmpeg gpu-screen-recorder libpulse procps-ng xdg-utils`.
+qt6-multimedia qt6-wayland qt6-imageformats bash layer-shell-qt wayland
+wayland-protocols wl-clipboard ffmpeg gpu-screen-recorder libpulse procps-ng xdg-utils`.
 `libnotify` is optional and adds a notification after a quick screenshot.
 `tesseract` and `tesseract-data-eng` are optional and add secret hiding and
 copying text.

@@ -93,6 +93,35 @@ private slots:
     QVERIFY(omarchy.controlBorder().alphaF() > 0.3 && omarchy.controlBorder().alphaF() < 0.5);
   }
 
+  void notifiesForIndividualProperties_data() {
+    QTest::addColumn<QByteArray>("property");
+    QTest::newRow("name") << QByteArray("name");
+    QTest::newRow("dark") << QByteArray("dark");
+    QTest::newRow("pressedFill") << QByteArray("pressedFill");
+  }
+  void notifiesForIndividualProperties() {
+    QFETCH(QByteArray, property);
+    QTemporaryDir state, config;
+    const QByteArray colors = "mode = \"dark\"\nbackground = \"#101010\"\n"
+                              "foreground = \"#eeeeee\"\ndark_background = \"#080808\"\n";
+    applyTheme(state.path(), "One", colors);
+    OmarchyTheme omarchy(nullptr, state.path(), config.path(), false);
+    QSignalSpy changed(&omarchy, &OmarchyTheme::changed);
+    const QVariant before = omarchy.property(property.constData());
+    if (property == "name")
+      write(state.path() + "/current/theme.name", "Two");
+    else if (property == "dark")
+      write(state.path() + "/current/theme/colors.toml",
+            QByteArray(colors).replace("dark\"", "light\""));
+    else
+      write(config.path() + "/shell.toml", "[controls]\npressed-fill-alpha = 0.6\n");
+    omarchy.reload();
+    QVERIFY(omarchy.property(property.constData()) != before);
+    QCOMPARE(changed.count(), 1);
+    omarchy.reload();
+    QCOMPARE(changed.count(), 1);
+  }
+
   void followsThemeSwitchesAndEdits() {
     QTemporaryDir state, config;
     applyTheme(state.path(), "One", "background = \"#101010\"\nforeground = \"#eeeeee\"\naccent = \"#3366ff\"\n");

@@ -461,6 +461,7 @@ StitchAccumulator::StitchAccumulator(const QImage &first, Axis axis, bool &ok,
   crossLen_ = axis == Axis::Vertical ? width_ : height_;
   maxEdge_ = std::min(axisLen_ / 8, kMaxStationaryEdge);
   firstRgba_ = copyFrameTight(frame);
+  retainedBytes_ = static_cast<long long>(firstRgba_.size());
   edgeSums_.assign(maxEdge_, 0);
   edgeCounts_.assign(maxEdge_, 0);
   alignedSums_.assign(maxEdge_, 0);
@@ -528,8 +529,8 @@ bool StitchAccumulator::pushOriented(const QImage &image, int delta,
   }
   // Refuse before mutating, so the capture so far stays intact and can still
   // be finished: the caller reports this and the user stitches what they have.
-  if (exceedsStitchBudget(crossLen_, axisLen_ + newTotal)) {
-    error = QStringLiteral("scroll capture reached its maximum length "
+  if (wouldExceedBudget(delta)) {
+    error = QStringLiteral("scroll capture reached its length or memory limit "
                            "(%1 MB); finish to keep what was captured")
                 .arg(kMaxStitchedBytes / (1024 * 1024));
     return false;
@@ -619,6 +620,7 @@ bool StitchAccumulator::pushOriented(const QImage &image, int delta,
     alignedSums_[depth] += alignedSums[depth];
     alignedCounts_[depth] += alignedCounts[depth];
   }
+  retainedBytes_ += static_cast<long long>(band.rgba.size());
   bands_.push_back(std::move(band));
   totalDelta_ = static_cast<int>(newTotal);
   return true;
@@ -654,11 +656,17 @@ int StitchAccumulator::nearStationaryTrailingZone(int strip) const {
   return zone;
 }
 
-bool StitchAccumulator::wouldExceedBudget(int delta) const {
+bool StitchAccumulator::wouldExceedBudget(int delta, int bands) const {
   if (!valid_ || delta <= 0)
     return false;
+  // A verified pair is checked before either band is committed. Include
+  // each band's analysis rows, conservatively if a band spans the viewport.
+  const long long retainedExtent =
+      std::min(static_cast<long long>(axisLen_) * bands,
+               static_cast<long long>(delta) + static_cast<long long>(maxEdge_) * bands);
   return exceedsStitchBudget(crossLen_,
-                             axisLen_ + static_cast<long long>(totalDelta_) + delta);
+                             axisLen_ + static_cast<long long>(totalDelta_) + delta) ||
+         retainedBytes_ + retainedExtent * crossLen_ * 4 > kMaxRetainedBytes;
 }
 
 bool StitchAccumulator::exceedsWidelyOpenableEdge() const {
@@ -669,10 +677,7 @@ bool StitchAccumulator::exceedsWidelyOpenableEdge() const {
 }
 
 long StitchAccumulator::retainedRgbaBytes() const {
-  long total = static_cast<long>(firstRgba_.size());
-  for (const TailBand &band : bands_)
-    total += static_cast<long>(band.rgba.size());
-  return total;
+  return static_cast<long>(retainedBytes_);
 }
 
 QImage StitchAccumulator::finish(QString &error) {

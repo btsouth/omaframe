@@ -27,7 +27,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             base-devel cmake ninja pkgconf git python \
-            qt6-base qt6-declarative qt6-multimedia qt6-wayland \
+            qt6-base qt6-declarative qt6-multimedia qt6-wayland qt6-imageformats bash \
             layer-shell-qt wayland wayland-protocols libpulse \
             ffmpeg ttf-dejavu desktop-file-utils
 

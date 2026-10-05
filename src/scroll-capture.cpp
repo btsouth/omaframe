@@ -450,8 +450,11 @@ QImage Session::capture(QString &error) {
   bool limit = false, ended = false, userHasPointer = false;
   QString handover;
 
-  const bool canScroll = m_desktop.openPointer && m_desktop.openPointer() &&
-                         m_desktop.park(m_plan.anchor);
+  // Check against the click position before parking: initial settling may
+  // have given the user time to move the mouse already.
+  userHasPointer = !m_desktop.pointerMoved || m_desktop.pointerMoved(m_plan.home);
+  const bool canScroll = !userHasPointer && m_desktop.openPointer &&
+                         m_desktop.openPointer() && m_desktop.park(m_plan.anchor);
   auto length = [&] {
     const int body = automatic ? automatic->extent() : manual ? manual->extent() : 0;
     return body + cover;
@@ -726,6 +729,14 @@ QImage Session::capture(QString &error) {
 }
 } // namespace Scrolling
 
+bool Scrolling::cursorMoved(const QByteArray &json, QPointF expected) {
+  const auto at = QJsonDocument::fromJson(json).object();
+  if (!at.value("x").isDouble() || !at.value("y").isDouble())
+    return true;
+  return std::abs(at.value("x").toDouble() - expected.x()) > 4 ||
+         std::abs(at.value("y").toDouble() - expected.y()) > 4;
+}
+
 namespace {
 /// The real desktop: native output capture, a virtual pointer, and
 /// Hyprland's idea of where the pointer is.
@@ -761,15 +772,13 @@ Scrolling::Desktop realDesktop(const QString &monitor, QRect screen) {
     if (!process.waitForFinished(800)) {
       process.kill();
       process.waitForFinished();
-      return false;
+      return true;
     }
-    const auto at = QJsonDocument::fromJson(process.readAllStandardOutput()).object();
-    if (!at.contains("x"))
-      return false;
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+      return true;
     const QPointF expected(screen.x() + parked.x() * screen.width(),
                            screen.y() + parked.y() * screen.height());
-    return std::abs(at.value("x").toDouble() - expected.x()) > 4 ||
-           std::abs(at.value("y").toDouble() - expected.y()) > 4;
+    return Scrolling::cursorMoved(process.readAllStandardOutput(), expected);
   };
   desktop.closePointer = [pointer] { pointer->close(); };
   return desktop;
