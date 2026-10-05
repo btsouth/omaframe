@@ -310,17 +310,9 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs eleven headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs thirteen headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
-
-## License
-
-MIT. The native Wayland capture code is adapted from Omasnap at
-`acfb3b5772ccb041b57ccc76e16f1b72719f37e9`, copyright Tobi Lütke, and its
-license is kept in [docs/OMASNAP-LICENSE](docs/OMASNAP-LICENSE). MatteShot and
-Omaroll informed the workflow and style; Omaframe has its own interface and
-renderer.
 
 The real audio backend test runs against its own PulseAudio server and synthetic
 sources. It is separate from the headless suite. On a devbox with the
@@ -333,3 +325,12 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/src" -w /src o
 
 Build `build-ci` with testing enabled first. This checks synthetic audio only;
 physical microphones and Bluetooth devices need a separate hardware check.
+
+
+## License
+
+MIT. The native Wayland capture code is adapted from Omasnap at
+`acfb3b5772ccb041b57ccc76e16f1b72719f37e9`, copyright Tobi Lütke, and its
+license is kept in [docs/OMASNAP-LICENSE](docs/OMASNAP-LICENSE). MatteShot and
+Omaroll informed the workflow and style; Omaframe has its own interface and
+renderer.

@@ -62,7 +62,7 @@ Item {
             }
             Text {
                 text: meter.status
-                Layout.preferredWidth: meter.tiny ? 0 : meter.detailed ? 82 : 82
+                Layout.preferredWidth: meter.tiny ? 0 : 82
                 visible: !meter.tiny
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
