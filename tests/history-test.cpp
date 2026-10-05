@@ -366,7 +366,7 @@ private slots:
                                                 QByteArray("history-ipc-test"),
                                                 QCryptographicHash::Sha256)
                                                 .toHex()
-                                                .left(16));
+                                                .left(12));
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(socket), 5000);
     QProcess command;
     command.setProcessEnvironment(env);
