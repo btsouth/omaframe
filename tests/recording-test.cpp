@@ -1,4 +1,5 @@
 #include "recording.hpp"
+#include "audio-levels.hpp"
 #include "shortcuts.hpp"
 #include <QFile>
 #include <QDir>
@@ -58,8 +59,8 @@ fi
    executable("pactl",R"(#!/bin/sh
 case "$1" in
 get-default-source) echo clean_desktop_microphone;;
-get-default-sink) if [ -z "$OMAFRAME_TEST_NO_SINK" ]; then echo speakers; fi;;
-*) if [ "$4" = sinks ]; then printf '[{"name":"speakers","description":"Speakers","monitor_source_name":"%s"}]\n' "${OMAFRAME_TEST_MONITOR:-actual_monitor}"; else echo '[{"name":"clean_desktop_microphone","description":"Clean microphone"}]'; fi;;
+get-default-sink) if [ -n "$OMAFRAME_TEST_SINK" ]; then echo "$OMAFRAME_TEST_SINK"; elif [ -z "$OMAFRAME_TEST_NO_SINK" ]; then echo speakers; fi;;
+*) if [ "$4" = sinks ] && [ -n "$OMAFRAME_TEST_SINKS" ]; then cat "$OMAFRAME_TEST_SINKS"; elif [ "$4" = sinks ]; then printf '[{"name":"speakers","description":"Speakers","monitor_source":"%s"}]\n' "${OMAFRAME_TEST_MONITOR:-actual_monitor}"; else echo '[{"name":"clean_desktop_microphone","description":"Clean microphone"}]'; fi;;
 esac
 )");
    executable("pgrep","#!/bin/sh\nexit 1\n");
@@ -420,6 +421,26 @@ while True:
    QVERIFY(!camera.startTrack(temp.filePath("not-recorded.mp4"),[]{return qint64(0);}));
    QVERIFY(camera.status().contains("screen recording continues"));
    QVERIFY(!camera.finishing());QVERIFY(!QFileInfo::exists(temp.filePath("not-recorded.mp4")));
+ }
+ void capturedPactlMonitorIsSharedByRecordingAndMeter() {
+   const QByteArray sink="alsa_output.pci-0000_00_1f.3.analog-stereo";
+   QFile sinks(temp.filePath("sinks.json"));QVERIFY(sinks.open(QIODevice::WriteOnly));
+   sinks.write(R"([{"index":0,"name":"alsa_output.pci-0000_00_1f.3.analog-stereo","description":"Built-in Audio Analog Stereo","state":"RUNNING","sample_specification":"s32le 2ch 48000Hz","monitor_source":"alsa_output.pci-0000_00_1f.3.analog-stereo.monitor","driver":"PipeWire","mute":false,"properties":{"device.api":"alsa"}}])");sinks.close();
+   qputenv("OMAFRAME_TEST_SINK",sink);qputenv("OMAFRAME_TEST_SINKS",sinks.fileName().toUtf8());
+   const auto cleanup=qScopeGuard([]{qunsetenv("OMAFRAME_TEST_SINK");qunsetenv("OMAFRAME_TEST_SINKS");});
+   Recorder r;r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   const QString monitor=QString::fromUtf8(sink)+".monitor";
+   QCOMPARE(r.audioPreview().sound,monitor);
+   r.selectDisplay(0);r.setCountdown(0);r.setMicAudio(false);r.setDesktopAudio(true);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("recording"),5000);
+   QCOMPARE(r.audioSession().sound,monitor);
+   AudioLevels levels;levels.configure(r.audioPreview(),r.audioSession(),r.state(),false,true);
+   levels.setSurface("control","control",true);
+   QCOMPARE(levels.sound()["source"].toString(),monitor);
+   QFile invocation(r.savedPath()+".args");QVERIFY(invocation.open(QIODevice::ReadOnly));
+   const auto args=QJsonDocument::fromJson(invocation.readAll()).array().toVariantList();
+   QCOMPARE(args.value(args.indexOf(QString("-a"))+1).toString(),monitor);
+   r.stop();QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("saved"),5000);
  }
  void ownProcessStopsThenHandsOffValidClip() {
    Recorder r;QSignalSpy finished(&r,&Recorder::completed);

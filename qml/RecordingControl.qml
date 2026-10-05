@@ -133,12 +133,21 @@ Window {
             }
         }
     }
-    Column {
-        objectName: "meterRows"
+    Rectangle {
+        objectName: "meterPlate"
         visible: control.visible && control.live && lowerHint.text.length === 0
-        x: 8; y: 52; width: parent.width - 16; spacing: 0
-        AudioMeter { width: parent.width; channel: audioLevels.microphone }
-        AudioMeter { width: parent.width; label: "Computer sound"; channel: audioLevels.sound }
+        x: 0; y: 50; width: parent.width; height: 46
+        radius: theme.radius
+        color: theme.alpha(theme.background, 1)
+        border.width: 1
+        border.color: theme.controlBorder
+        Column {
+            id: meterRows
+            objectName: "meterRows"
+            x: 8; y: 3; width: parent.width - 16; spacing: 0
+            AudioMeter { width: parent.width; channel: audioLevels.microphone }
+            AudioMeter { width: parent.width; label: "Computer sound"; channel: audioLevels.sound }
+        }
     }
     BarHint {
         id: lowerHint

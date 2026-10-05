@@ -44,9 +44,9 @@ static QPair<QString, QString> defaultMonitor() {
   for (const auto &value : sinks) {
     const auto info = value.toObject();
     if (info.value("name").toString() == sink)
-      return {info.value("monitor_source_name").toString(), info.value("description").toString(sink)};
+      return {info.value("monitor_source").toString(sink + ".monitor"), info.value("description").toString(sink)};
   }
-  return {};
+  return {sink + ".monitor", sink};
 }
 
 AudioSnapshot Recorder::audioPreview() const {
