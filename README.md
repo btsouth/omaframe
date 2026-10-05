@@ -218,6 +218,14 @@ file beside the screen recording. Keep these files together to edit the camera
 later. Pause/resume leaves paused time out of both tracks. If the camera fails,
 screen recording continues. Share the exported MP4 to include your chosen layout.
 
+Audio meters check the selected microphone and computer sound without changing
+volume. Turn Mic on in the recording bar or open Options and speak to check it.
+Computer sound reads Quiet until something plays. Clip risk shows limited input
+headroom, not the volume of the encoded mix. Microphone preview is active only
+while the record-mode bar, Options, or the recording control needs it. Meters
+close during countdown, startup, pause, saving, and when those surfaces hide.
+Whole-display recordings without a visible control have no live meter.
+
 Recording a whole display on a single monitor leaves no room for a Stop button
 outside the video, so Omaframe shows a short countdown that tells you how to
 stop, and it is gone before the first frame. Stop with Alt+Print Screen or with
@@ -307,9 +315,22 @@ omabox run --net isolated -- ctest --test-dir build --output-on-failure
 Test notes and hardware results are in [docs/](docs/), starting with the
 [recording validation](docs/recording-validation.md).
 
-GitHub CI builds on Arch and runs eleven headless suites plus OCR pattern tests.
+GitHub CI builds on Arch and runs thirteen headless suites plus OCR pattern tests.
 Native capture, clipboard and full OCR recognition checks run locally in omabox. See
 [CI coverage](docs/ci.md) and the [current roadmap](docs/release-parity.md).
+
+The real audio backend test runs against its own PulseAudio server and synthetic
+sources. It is separate from the headless suite. On a devbox with the
+`omaframe-ci:latest` image:
+
+```sh
+docker build --network=host -f tests/audio-pulse.Dockerfile -t omaframe-ci-meter .
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/src" -w /src omaframe-ci-meter ctest --test-dir build-ci -L audio-server -V
+```
+
+Build `build-ci` with testing enabled first. This checks synthetic audio only;
+physical microphones and Bluetooth devices need a separate hardware check.
+
 
 ## License
 
