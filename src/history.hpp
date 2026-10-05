@@ -6,6 +6,7 @@
 #include <QMutex>
 #include <QQuickImageProvider>
 #include <QThreadPool>
+#include <QUrl>
 #include <atomic>
 #include <memory>
 
@@ -34,13 +35,14 @@ QString thumbnailKey(const Entry &entry);
 void trimCache(const QString &directory, qint64 byteCap);
 QImage thumbnail(const Entry &entry, const QString &cacheDirectory,
                  const std::shared_ptr<std::atomic_bool> &cancel);
-}
+} // namespace History
 
 class HistoryImages final : public QQuickImageProvider {
 public:
   HistoryImages() : QQuickImageProvider(Image), images(8 * 1024 * 1024) {}
   QImage requestImage(const QString &id, QSize *size, const QSize &) override;
   void put(const QString &key, const QImage &image);
+
 private:
   QMutex mutex;
   QCache<QString, QImage> images;
@@ -54,9 +56,20 @@ class CaptureHistoryModel final : public QAbstractListModel {
   Q_PROPERTY(QString status READ status NOTIFY changed)
   Q_PROPERTY(QStringList previousFolders READ previousFolders NOTIFY changed)
 public:
-  enum Role { Name = Qt::UserRole + 1, Kind, Day, When, Detail, Incomplete,
-              Draft, HasDraft, Thumbnail, FilePath };
-  explicit CaptureHistoryModel(HistoryImages *images, QObject *parent = nullptr);
+  enum Role {
+    Name = Qt::UserRole + 1,
+    Kind,
+    Day,
+    When,
+    Detail,
+    Incomplete,
+    Draft,
+    HasDraft,
+    Thumbnail,
+    FilePath
+  };
+  explicit CaptureHistoryModel(HistoryImages *images,
+                               QObject *parent = nullptr);
   ~CaptureHistoryModel() override;
   int rowCount(const QModelIndex &parent = {}) const override;
   QVariant data(const QModelIndex &index, int role) const override;
@@ -71,7 +84,8 @@ public:
   Q_INVOKABLE void refresh();
   Q_INVOKABLE void removeFolder(const QString &path);
   Q_INVOKABLE void setVisibleRange(int first, int last);
-  Q_INVOKABLE bool action(int row, const QString &action, const QString &expectedKey = {});
+  Q_INVOKABLE bool action(int row, const QString &action,
+                          const QString &expectedKey = {});
   Q_INVOKABLE QString keyAt(int row) const;
   Q_INVOKABLE QString pathAt(int row) const;
   Q_INVOKABLE bool isDraftAt(int row) const;
@@ -81,6 +95,7 @@ signals:
   void changed();
   void navigate(const QString &command, const QUrl &path);
   void deleteDraft(const QString &kind, const QString &id);
+
 private:
   void rebuild();
   void cancelThumbnails();
@@ -88,7 +103,7 @@ private:
   QVector<History::Entry> m_all, m_rows;
   QHash<QString, QString> m_thumbnails;
   QString m_filter = "All", m_search, m_status;
-  bool m_busy = false;
+  bool m_busy = false, m_scanned = false;
   int m_generation = 0;
   QThreadPool m_pool;
   std::shared_ptr<std::atomic_bool> m_scanCancel;

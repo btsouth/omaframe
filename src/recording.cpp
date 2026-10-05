@@ -423,7 +423,7 @@ QString Recorder::targetLabel() const {
       .arg(place(m_screen));
 }
 bool Recorder::canStart() const {
-  return !active() && m_state != "loading" && hasTarget() && !m_otherRecorder &&
+  return !active() && !m_webcam.finishing() && !m_incompleteReady && m_state != "loading" && hasTarget() && !m_otherRecorder &&
          (hasControl() || stopShortcut()) && (!m_microphone || m_mic >= 0) &&
          (!m_desktop || !m_defaultSink.isEmpty()) && m_webcam.ready();
 }

@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <fcntl.h>
+#include <linux/fs.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -15,73 +16,125 @@
 namespace {
 bool renameFile(const QString &from, const QString &to) {
   return ::syscall(SYS_renameat2, AT_FDCWD, QFile::encodeName(from).constData(),
-                   AT_FDCWD, QFile::encodeName(to).constData(), RENAME_NOREPLACE) == 0;
+                   AT_FDCWD, QFile::encodeName(to).constData(),
+                   RENAME_NOREPLACE) == 0;
 }
 bool openByRecorder(const QString &path) {
   struct stat expected{};
-  if (::stat(QFile::encodeName(path).constData(), &expected) != 0) return true;
-  const auto processes = QDir("/proc").entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+  if (::stat(QFile::encodeName(path).constData(), &expected) != 0)
+    return true;
+  const auto processes =
+      QDir("/proc").entryList(QDir::Dirs | QDir::NoDotAndDotDot);
   for (const auto &pid : processes) {
-    bool numeric = false; pid.toLongLong(&numeric); if (!numeric) continue;
+    bool numeric = false;
+    pid.toLongLong(&numeric);
+    if (!numeric)
+      continue;
     QFile cmd("/proc/" + pid + "/cmdline");
-    if (!cmd.open(QIODevice::ReadOnly)) continue;
-    const auto args = cmd.readAll().split('\0');
-    if (args.isEmpty() || !QFileInfo(QString::fromUtf8(args.first())).fileName().contains("gpu-screen-recorder")) continue;
+    QByteArray commandLine;
+    if (cmd.open(QIODevice::ReadOnly))
+      commandLine = cmd.readAll();
+    QFile comm("/proc/" + pid + "/comm");
+    QByteArray processName;
+    if (comm.open(QIODevice::ReadOnly))
+      processName = comm.readAll().trimmed();
+    const auto args = commandLine.split('\0');
+    if (!processName.startsWith("gpu-screen-reco") &&
+        (args.isEmpty() || !QFileInfo(QString::fromUtf8(args.first()))
+                                .fileName()
+                                .contains("gpu-screen-recorder")))
+      continue;
     const QDir fds("/proc/" + pid + "/fd");
-    if (!fds.isReadable()) return true;
-    for (const auto &fd : fds.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)) {
+    if (!fds.isReadable())
+      return true;
+    for (const auto &fd :
+         fds.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)) {
       struct stat s{};
       if (::stat(QFile::encodeName(fds.filePath(fd)).constData(), &s) == 0 &&
-          s.st_dev == expected.st_dev && s.st_ino == expected.st_ino) return true;
+          s.st_dev == expected.st_dev && s.st_ino == expected.st_ino)
+        return true;
     }
     // An -o argument also protects the startup gap before the output is opened.
-    if (args.contains(path.toUtf8())) return true;
+    if (args.contains(path.toUtf8()))
+      return true;
   }
   return false;
 }
-}
+} // namespace
 QString Recording::partPath(const QString &final) {
   const QFileInfo file(final);
   return file.dir().filePath('.' + file.completeBaseName() + ".part.mp4");
 }
-QString Recording::publishPart(const QString &part, const QString &final, bool incomplete) {
-  if (!QFileInfo(part).isFile() || QFileInfo(part).isSymLink()) return {};
-  const QString destination = incomplete ? final.left(final.size() - 4) + "-incomplete.mp4" : final;
-  if (QFileInfo::exists(destination)) return {};
+QString Recording::publishPart(const QString &part, const QString &final,
+                               bool incomplete) {
+  if (!QFileInfo(part).isFile() || QFileInfo(part).isSymLink())
+    return {};
+  const QString destination =
+      incomplete ? final.left(final.size() - 4) + "-incomplete.mp4" : final;
+  if (QFileInfo::exists(destination))
+    return {};
   const QString camera = part + "-webcam.mp4", sidecar = part + ".camera.json";
-  const QString newCamera = destination + "-webcam.mp4", newSidecar = destination + ".camera.json";
+  const QString newCamera = destination + "-webcam.mp4",
+                newSidecar = destination + ".camera.json";
   bool movedCamera = false, movedSidecar = false;
   auto rollback = [&] {
-    if (movedCamera) renameFile(newCamera, camera);
-    if (movedSidecar) renameFile(newSidecar, sidecar);
+    if (movedCamera)
+      renameFile(newCamera, camera);
+    if (movedSidecar)
+      QFile::remove(newSidecar);
   };
   if (QFileInfo::exists(camera)) {
-    if (QFileInfo(camera).isSymLink() || !renameFile(camera, newCamera)) return {};
+    if (QFileInfo(camera).isSymLink() || !renameFile(camera, newCamera))
+      return {};
     movedCamera = true;
   }
   if (QFileInfo::exists(sidecar)) {
     QFile input(sidecar);
-    if (QFileInfo(sidecar).isSymLink() || !input.open(QIODevice::ReadOnly) || input.size() > 64 * 1024) { rollback(); return {}; }
-    auto doc = QJsonDocument::fromJson(input.readAll()).object(); input.close();
-    if (doc.value("version").toInt() != 1) { rollback(); return {}; }
-    if (movedCamera) doc.insert("file", QFileInfo(newCamera).fileName());
+    if (QFileInfo(sidecar).isSymLink() || !input.open(QIODevice::ReadOnly) ||
+        input.size() > 64 * 1024) {
+      rollback();
+      return {};
+    }
+    auto doc = QJsonDocument::fromJson(input.readAll()).object();
+    input.close();
+    if (doc.value("version").toInt() != 1) {
+      rollback();
+      return {};
+    }
+    if (movedCamera)
+      doc.insert("file", QFileInfo(newCamera).fileName());
     QSaveFile output(newSidecar);
     const auto bytes = QJsonDocument(doc).toJson(QJsonDocument::Compact);
     if (QFileInfo::exists(newSidecar) || !output.open(QIODevice::WriteOnly) ||
         !output.setPermissions(QFile::ReadOwner | QFile::WriteOwner) ||
-        output.write(bytes) != bytes.size() || !output.commit()) { rollback(); return {}; }
+        output.write(bytes) != bytes.size() || !output.commit()) {
+      rollback();
+      return {};
+    }
     movedSidecar = true;
   }
-  if (!renameFile(part, destination)) { rollback(); return {}; }
-  if (movedSidecar) QFile::remove(sidecar);
+  if (!renameFile(part, destination)) {
+    rollback();
+    return {};
+  }
+  if (movedSidecar)
+    QFile::remove(sidecar);
   QFile::remove(part + ".ts");
   return destination;
 }
 void Recording::recoverParts(const QString &folder, qint64 minimumAgeSeconds) {
-  static const QRegularExpression pattern("^\\.(Recording-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9a-f]{6})\\.part\\.mp4$");
-  for (const auto &file : QDir(folder).entryInfoList(QDir::Files | QDir::Hidden | QDir::NoSymLinks)) {
+  static const QRegularExpression pattern(
+      "^\\.(Recording-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-"
+      "9a-f]{6})\\.part\\.mp4$");
+  for (const auto &file : QDir(folder).entryInfoList(
+           QDir::Files | QDir::Hidden | QDir::NoSymLinks)) {
     const auto match = pattern.match(file.fileName());
-    if (!match.hasMatch() || file.lastModified().secsTo(QDateTime::currentDateTime()) < minimumAgeSeconds || openByRecorder(file.absoluteFilePath())) continue;
-    publishPart(file.absoluteFilePath(), file.dir().filePath(match.captured(1) + ".mp4"), true);
+    if (!match.hasMatch() ||
+        file.lastModified().secsTo(QDateTime::currentDateTime()) <
+            minimumAgeSeconds ||
+        openByRecorder(file.absoluteFilePath()))
+      continue;
+    publishPart(file.absoluteFilePath(),
+                file.dir().filePath(match.captured(1) + ".mp4"), true);
   }
 }
