@@ -1085,7 +1085,7 @@ Item {
                 selected: pane.tool === "blur"
                 implicitHeight: 36
                 enabled: pane.editable
-                hint: "Drag over something to blur it in the saved video · G"
+                hint: "Drag to blur · G · Hold Shift for a square."
                 onClicked: pane.tool === "blur" ? pane.tool = "select" : pane.useTool("blur")
             }
             StudioButton {
@@ -1095,12 +1095,12 @@ Item {
                 selected: pane.tool === "redact"
                 implicitHeight: 36
                 enabled: pane.editable
-                hint: "Drag over something private to cover it in the saved video · R"
+                hint: "Drag to redact · R · Hold Shift for a square."
                 onClicked: pane.tool === "redact" ? pane.tool = "select" : pane.useTool("redact")
             }
             Repeater {
                 model: [
-                    { key: "arrow", label: "Arrow", hint: "Arrow · A" }, { key: "box", label: "Box", hint: "Box · B" },
+                    { key: "arrow", label: "Arrow", hint: "Arrow · A · Hold Shift for 45-degree angles." }, { key: "box", label: "Box", hint: "Box · B · Hold Shift for a square." },
                     { key: "text", label: "Label", hint: "Label · T" }, { key: "step", label: "Steps", hint: "Numbered step · N" }
                 ]
                 StudioButton {

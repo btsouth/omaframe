@@ -160,13 +160,13 @@ ApplicationWindow {
     property string toolDescription: ({
             select: "Drag a mark to move it; hold Shift to move straight. Drag side handles to resize width or height. Double-click a label to edit its words. Ctrl+C and Ctrl+V copy and paste a mark.",
             crop: "Drag over the area to keep. Crop again to trim it further, or press Ctrl+Z to undo a crop. Marks outside are kept.",
-            arrow: "Drag from the tail to the tip.",
-            line: "Drag to draw a line.",
-            box: "Drag to draw an outline box.",
-            ellipse: "Drag to draw an oval.",
-            highlight: "Drag across the part you want to stand out.",
-            redact: "Drag over private details. Their pixels are replaced in the saved image.",
-            blur: "Drag to soften an area. Use Redact for anything private.",
+            arrow: "Drag from the tail to the tip. Hold Shift for 45-degree angles.",
+            line: "Drag to draw a line. Hold Shift for 45-degree angles.",
+            box: "Drag to draw an outline box. Hold Shift for a square.",
+            ellipse: "Drag to draw an oval. Hold Shift for a circle.",
+            highlight: "Drag across the part you want to stand out. Hold Shift for a square.",
+            redact: "Drag over private details. Their pixels are replaced in the saved image. Hold Shift for a square.",
+            blur: "Drag to soften an area. Use Redact for anything private. Hold Shift for a square.",
             pen: "Draw freehand.",
             step: "Click to place the next number.",
             text: "Click to type a label. Drag sides for box size, corners for font size. Double-click to change its words."
@@ -1320,6 +1320,8 @@ ApplicationWindow {
                                     visible: root.editing
                                     doc: studio.marks
                                     tool: root.tool
+                                    feedbackViewport: Qt.rect(canvasScroll.contentX - x, canvasScroll.contentY - y,
+                                                              canvasScroll.width, canvasScroll.height)
                                     cropCurrentView: true
                                     locked: studio.busy || !preview.geometryReady
                                     workingSize: studio.workingSize

@@ -37,6 +37,28 @@ static QByteArray command(const QString &program, const QStringList &args,
   return p.exitCode() == 0 ? p.readAllStandardOutput() : QByteArray();
 }
 
+static QPair<QString, QString> defaultMonitor() {
+  const QString sink = QString::fromUtf8(command("pactl", {"get-default-sink"})).trimmed();
+  if (sink.isEmpty()) return {};
+  const auto sinks = QJsonDocument::fromJson(command("pactl", {"-f", "json", "list", "sinks"})).array();
+  for (const auto &value : sinks) {
+    const auto info = value.toObject();
+    if (info.value("name").toString() == sink)
+      return {info.value("monitor_source").toString(sink + ".monitor"), info.value("description").toString(sink)};
+  }
+  return {sink + ".monitor", sink};
+}
+
+AudioSnapshot Recorder::audioPreview() const {
+  const auto mic = m_mics.value(m_mic).toMap();
+  return {mic.value("id").toString(), m_defaultSink,
+          mic.value("label").toString(), m_sinkLabel};
+}
+QStringList Recording::arguments(const QString &target, const QString &path,
+                                 const AudioSnapshot &audio, bool cursor) {
+  return arguments(target, path, audio.sound, audio.mic, cursor);
+}
+
 Recording::Placement Recording::placeStop(const QList<Display> &displays,
                                           const QString &capturedDisplay,
                                           const QRect &capture, QSize size) {
@@ -511,7 +533,7 @@ void Recorder::prepare(bool showSetup) {
   struct Result {
     QList<Recording::Display> displays;
     QVariantList mics;
-    QString sink, defaultMic, stopKey, pauseKey;
+    QString sink, sinkLabel, defaultMic, stopKey, pauseKey;
     bool other = false;
   };
   auto *watcher = new QFutureWatcher<Result>(this);
@@ -524,6 +546,7 @@ void Recorder::prepare(bool showSetup) {
             m_displays = r.displays;
             m_mics = r.mics;
             m_defaultSink = r.sink;
+            m_sinkLabel = r.sinkLabel;
             m_otherRecorder = r.other;
             m_stopKey = r.stopKey;
             m_pauseKey = r.pauseKey;
@@ -585,10 +608,9 @@ void Recorder::prepare(bool showSetup) {
     }
     r.defaultMic =
         QString::fromUtf8(command("pactl", {"get-default-source"})).trimmed();
-    auto sink =
-        QString::fromUtf8(command("pactl", {"get-default-sink"})).trimmed();
-    if (!sink.isEmpty())
-      r.sink = sink + ".monitor";
+    const auto monitor = defaultMonitor();
+    r.sink = monitor.first;
+    r.sinkLabel = monitor.second;
     r.other = !command("pgrep", {"-f", "^([^ ]*/)?gpu-screen-recorder( |$)"})
                    .isEmpty();
     const auto binds =
@@ -761,7 +783,12 @@ void Recorder::launch() {
   const int generation = m_generation;
   struct Check {
     QString error;
+    AudioSnapshot audio;
   };
+  AudioSnapshot selected = audioPreview();
+  if (!m_microphone) selected.mic.clear();
+  if (!m_desktop) selected.sound.clear();
+  const bool soundOn = m_desktop;
   const auto target = m_capture;
   const bool hasControl = this->hasControl();
   const QString controlDisplay = m_control.display;
@@ -795,9 +822,7 @@ void Recorder::launch() {
                  QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") +
                  "-" + QUuid::createUuid().toString(QUuid::Id128).left(6) +
                  ".mp4";
-        const QString mic =
-            m_microphone ? m_mics.value(m_mic).toMap().value("id").toString()
-                         : QString();
+        m_audioSession = r.audio;
         m_controlDir = std::make_unique<QTemporaryDir>(
             QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) +
             "/omaframe-recorder-XXXXXX");
@@ -808,15 +833,14 @@ void Recorder::launch() {
         m_clock.start();
         const auto [program, arguments] = Recording::recorderCommand(
             Recording::arguments(m_target, m_path,
-                                 m_desktop ? m_defaultSink : QString(), mic,
-                                 m_cursor) +
+                                 m_audioSession, m_cursor) +
             QStringList{"-ipc", m_controlDir->filePath("control.sock")});
         m_process.start(program, arguments);
         m_startupCheck.start();
         emit changed();
       });
   watcher->setFuture(QtConcurrent::run([target, hasControl, controlDisplay,
-                                       capturedDisplay, bounds] {
+                                       capturedDisplay, bounds, selected, soundOn] {
     if (!command("pgrep", {"-f", "^([^ ]*/)?gpu-screen-recorder( |$)"})
              .isEmpty())
       return Check{"Another screen recorder is running. Stop it first."};
@@ -880,7 +904,20 @@ void Recorder::launch() {
             .isEmpty())
       return Check{"The stop shortcut is no longer active. Set it up again "
                    "before recording this area."};
-    return Check{};
+    AudioSnapshot audio = selected;
+    if (soundOn) {
+      const auto monitor = defaultMonitor();
+      audio.sound = monitor.first; audio.soundLabel = monitor.second;
+      if (audio.sound.isEmpty()) return Check{"Desktop audio is unavailable. Reconnect the output or turn sound off."};
+    }
+    if (!audio.mic.isEmpty()) {
+      bool found = false;
+      const auto sources = QJsonDocument::fromJson(command("pactl", {"-f", "json", "list", "sources"})).array();
+      for (const auto &value : sources)
+        found |= value.toObject().value("name").toString() == audio.mic;
+      if (!found) return Check{"The selected microphone is unavailable. Reconnect it or turn the microphone off."};
+    }
+    return Check{{}, audio};
   }));
 }
 void Recorder::freezeClock() {

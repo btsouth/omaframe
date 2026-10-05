@@ -1,3 +1,4 @@
+#include "audio-levels.hpp"
 #include "capture-dismissal.hpp"
 #include "capture-request.hpp"
 #include "delay-capture.hpp"
@@ -781,6 +782,7 @@ private slots:
     QVERIFY(all.contains("Screenshot with Omaframe"));
   }
   void selectionDelayRules() {
+    AudioLevels audioLevels;
     QQmlEngine engine;
     auto *store = new ImageStore;
     engine.addImageProvider("frames", store);
@@ -791,6 +793,7 @@ private slots:
                        temp.filePath("theme-config"), false);
     engine.rootContext()->setContextProperty("studio", &studio);
     engine.rootContext()->setContextProperty("recorder", &recorder);
+    engine.rootContext()->setContextProperty("audioLevels", &audioLevels);
     engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
     engine.rootContext()->setContextProperty("theme", &theme);
     QQmlComponent component(
