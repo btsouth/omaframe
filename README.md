@@ -189,6 +189,7 @@ keeps your edits open.
 | Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
 | Reviewing a video | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo trim, cuts and marks |
 | Reviewing a video | Ctrl+C / Ctrl+X / Ctrl+V, Ctrl+D | Copy / cut / paste the selected mark at the playhead, duplicate it |
+| In the window | Ctrl+H | Open capture history |
 | In the window | Ctrl+S | Copy and save, even when automatic saving is off |
 
 ## Good to know
@@ -313,3 +314,11 @@ MIT. The native Wayland capture code is adapted from Omasnap at
 license is kept in [docs/OMASNAP-LICENSE](docs/OMASNAP-LICENSE). MatteShot and
 Omaroll informed the workflow and style; Omaframe has its own interface and
 renderer.
+
+### History
+
+Find saved captures and editable drafts in History from the toolbar, with Ctrl+H, or with `omaframe --history`. Filter by type, search filenames, and refresh to see folder changes. Previously used save folders are scanned too; forget them in Settings. Only matching files directly in those folders appear.
+
+Copy again uses the saved PNG bytes or a video file link. Open captures in the editor, resume linked drafts, reveal files, or move one file to Trash after confirmation. Incomplete recordings carry an Incomplete badge.
+
+Clipboard-only copies add no history item. Editable drafts may remain. Screenshot draft previews apply the saved edits and finish. Video previews use a bounded private JPEG cache; history keeps no extra full captures.

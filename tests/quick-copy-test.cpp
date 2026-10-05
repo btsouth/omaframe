@@ -1,4 +1,5 @@
 #include "studio.hpp"
+#include "history.hpp"
 #include "omarchy-theme.hpp"
 #include "navigation.hpp"
 #include "recording.hpp"
@@ -513,6 +514,9 @@ private slots:
     engine.rootContext()->setContextProperty("video", &video);
     engine.rootContext()->setContextProperty("recorder", &recorder);
     engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    HistoryImages historyImages;
+    CaptureHistoryModel history(&historyImages);
+    engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("navigation", &navigation);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("captureAtStartup", false);
@@ -612,6 +616,9 @@ private slots:
     engine.rootContext()->setContextProperty("video", &video);
     engine.rootContext()->setContextProperty("recorder", &recorder);
     engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    HistoryImages historyImages;
+    CaptureHistoryModel history(&historyImages);
+    engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("navigation", &navigation);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("captureAtStartup", true);
