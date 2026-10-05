@@ -22,7 +22,7 @@ struct Edit {
    *  them. A negative end means until the end of the clip. */
   double start = 0;
   double end = -1;
-  /** The number a step shows. 0 counts the steps in the list, in order. */
+  /** The number a step shows. 0 counts the remaining steps by creation order. */
   int number = 0;
   /** Optional text box dimensions, as fractions of the source. Zero sizes to content. */
   QSizeF textBox = {0, 0};
@@ -31,6 +31,8 @@ struct Edit {
   bool filled = false;
   double opacity = 95. / 255.;
   QColor numberColor = Qt::white;
+  /** Stable creation order. Older drafts use their array order. */
+  int stepOrder = 0;
   bool operator==(const Edit &) const = default;
 };
 struct Options {
@@ -49,7 +51,7 @@ int blurRadius(const Edit &edit, QSize size);
 double textSizeForPixels(int pixels, const QImage &source);
 QImage cropImage(const QImage &image, const QVector<Edit> &edits);
 QImage applyEdits(const QImage &source, const QVector<Edit> &edits,
-                  bool applyCrop = true);
+                  bool applyCrop = true, QString *error = nullptr);
 /** Room to add past each edge of a capture whose edge is one flat color
  *  and which ends close to its content. Zero on edges that are not flat or
  *  already have room. */
