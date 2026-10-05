@@ -272,6 +272,9 @@ QString History::thumbnailKey(const Entry &e) {
                  .toHex());
 }
 void History::trimCache(const QString &directory, qint64 cap) {
+  if (QFileInfo(directory).canonicalFilePath() !=
+      QDir::cleanPath(QFileInfo(directory).absoluteFilePath()))
+    return;
   const auto files = QDir(directory).entryInfoList(
       {"*.jpg"}, QDir::Files | QDir::NoSymLinks, QDir::Time);
   qint64 bytes = 0;
@@ -391,6 +394,7 @@ void HistoryImages::put(const QString &key, const QImage &image) {
 CaptureHistoryModel::CaptureHistoryModel(HistoryImages *images, QObject *parent)
     : QAbstractListModel(parent), m_images(images) {
   m_pool.setMaxThreadCount(2);
+  m_previousFolders = previousFolders();
 }
 CaptureHistoryModel::~CaptureHistoryModel() {
   if (m_scanCancel)
@@ -475,6 +479,13 @@ void CaptureHistoryModel::setSearch(const QString &value) {
     rebuild();
   }
 }
+void CaptureHistoryModel::foldersChanged() {
+  const auto folders = previousFolders();
+  if (m_previousFolders != folders) {
+    m_previousFolders = folders;
+    emit changed();
+  }
+}
 void CaptureHistoryModel::removeFolder(const QString &path) {
   auto list = previousFolders();
   list.removeAll(path);
@@ -534,7 +545,8 @@ void CaptureHistoryModel::refresh() {
       if (!e.draft && e.kind == "Recording")
         valid.insert(History::thumbnailKey(e) + ".jpg");
     QMutexLocker lock(&cacheMutex);
-    if (!*cancel) {
+    if (!*cancel && QFileInfo(cache).canonicalFilePath() ==
+                        QDir::cleanPath(QFileInfo(cache).absoluteFilePath())) {
       for (const auto &f :
            QDir(cache).entryInfoList({"*.jpg"}, QDir::Files | QDir::NoSymLinks))
         if (!valid.contains(f.fileName()))

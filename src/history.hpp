@@ -82,6 +82,7 @@ public:
   void setFilter(const QString &value);
   void setSearch(const QString &value);
   Q_INVOKABLE void refresh();
+  void foldersChanged();
   Q_INVOKABLE void removeFolder(const QString &path);
   Q_INVOKABLE void setVisibleRange(int first, int last);
   Q_INVOKABLE bool action(int row, const QString &action,
@@ -102,6 +103,7 @@ private:
   HistoryImages *m_images;
   QVector<History::Entry> m_all, m_rows;
   QHash<QString, QString> m_thumbnails;
+  QStringList m_previousFolders;
   QString m_filter = "All", m_search, m_status;
   bool m_busy = false, m_scanned = false;
   int m_generation = 0;

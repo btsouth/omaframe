@@ -152,6 +152,8 @@ int main(int argc, char **argv) {
   Navigation navigation;
   auto *historyImages = new HistoryImages;
   CaptureHistoryModel history(historyImages);
+  QObject::connect(&studio, &Studio::changed, &history, &CaptureHistoryModel::foldersChanged);
+  QObject::connect(&video, &Video::changed, &history, &CaptureHistoryModel::foldersChanged);
   QObject::connect(&history, &CaptureHistoryModel::deleteDraft, &app, [&](const QString &kind, const QString &id) {
     if (kind == "video") video.deleteDraft(id);
     else studio.deleteDraft(id);

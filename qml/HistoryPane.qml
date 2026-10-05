@@ -174,7 +174,7 @@ ColumnLayout {
         MenuItem { text: "Copy again"; enabled: !actions.draft; onTriggered: actions.act("copy") }
         MenuItem { text: "Open externally"; enabled: !actions.draft; onTriggered: actions.act("external") }
         MenuItem { text: "Reveal in folder"; enabled: !actions.draft; onTriggered: actions.act("reveal") }
-        MenuItem { text: actions.draft ? "Delete draft…" : "Move to Trash…"; onTriggered: pane.confirmDelete() }
+        MenuItem { text: actions.draft ? "Delete draft…" : "Move to Trash…"; onTriggered: { list.currentIndex = actions.row; pane.confirmDelete(); } }
         onClosed: list.forceActiveFocus()
     }
     ConfirmDialog {
