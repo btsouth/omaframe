@@ -1,20 +1,20 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.9.0**. This tracks shipped behavior and possible future
+Current release: **0.10.0**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.9.0 | Future work |
+| Workflow | Omaframe 0.10.0 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
-| Capture and finish | Window, area or display; automatic window scrolling capture with manual takeover; movable and hideable capture bar; click selects a finish; double-click, Enter or 1 to 9 copies; E edits; copy/save; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
-| Screenshot editing | Ctrl+C/X/V copy, cut and paste marks; movable marks, side and corner resize handles, inline multiline labels, contextual styles, wheel zoom and drag panning, repeated crops, blur/redaction, layers, undo/redo, readable tall-image editing and editable drafts | Pinning, curved arrows |
+| Capture and finish | Window, area or display; delay timer (Shift+Print, T or --delay); capture history (Ctrl+H or --history); automatic window scrolling capture with manual takeover; movable and hideable capture bar; click selects a finish; double-click, Enter or 1 to 9 copies; E edits; copy/save; system file chooser for Open; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
+| Screenshot editing | Ctrl+C/X/V copy, cut and paste marks; Shift snaps arrows and lines to 45 degree steps and shapes to squares or circles; movable marks, side and corner resize handles, inline multiline labels, contextual styles, wheel zoom and drag panning, repeated crops, blur/redaction, layers, undo/redo, readable tall-image editing and editable drafts | Pinning, curved arrows |
 | Screenshot text | Copy text with T; hide possible secrets with H in the picker or Shift+H in the editor; optional local Tesseract | Selectable OCR regions |
-| Record and stop | Display or region, computer sound and selected microphone, countdown, pause/resume, optional webcam overlay; controls outside the capture or shortcut/bar stop when no safe placement exists | Window-follow capture |
-| Video review | Playback, trim and middle cuts, sound on/off, timed marks, crop, camera placement, recovery drafts, undo/redo, copy/save MP4 and short looping GIFs | Animated zoom and speed sections |
+| Record and stop | Display or region, computer sound and selected microphone with live level meters, countdown, pause/resume, optional webcam overlay; controls outside the capture or shortcut/bar stop when no safe placement exists | Window-follow capture |
+| Video review | Playback, trim and middle cuts, sound on/off, timed marks, crop, camera placement, recovery drafts, undo/redo, copy/save MP4 and short looping GIFs; recordings published only once finished and shown as Incomplete otherwise | Animated zoom and speed sections |
 | Distribution | Published Arch package, source archive, PKGBUILD, checksums, desktop entry and license notices | Optional sharing and updates need their own design |
 
 ## MatteShot comparison
@@ -84,12 +84,11 @@ use the same movement and resize controls. Capture hints no longer block
 buttons, settings borders fit correctly and recording review closes reliably
 after annotation edits.
 
-## Since 0.8.0
+## Since 0.9.0
 
-Version 0.9.0 makes a click select a finish. Double-click, Enter or 1 to 9
-copies it; E opens the selected finish for editing. Editor Ctrl+C, Ctrl+X and
-Ctrl+V copy, cut and paste marks. Ctrl+Enter finishes, following automatic
-saving; Ctrl+S copies and saves. See the [0.9.0 release notes](release-notes-0.9.0.md).
+Version 0.10.0 adds a screenshot delay timer, capture history, Shift angle
+snapping and live mic and computer sound meters, and uses the system file
+chooser for Open. See the [0.10.0 release notes](release-notes-0.10.0.md).
 
 ## Possible next work
 
