@@ -73,8 +73,12 @@ private slots:
     QTest::addColumn<QString>("state"); QTest::addColumn<QString>("surface"); QTest::addColumn<bool>("open");
     for (const auto &state : {"idle", "loading", "setup", "selecting", "countdown", "starting", "recording", "pending", "paused", "stopping", "saved", "failed"})
       for (const auto &surface : {"bar", "options", "control"}) {
-        const bool allowed = QString(state) == "recording" ? QString(surface) == "control" :
-          (QString(state) == "loading" || QString(state) == "setup" || QString(state) == "selecting") && QString(surface) != "control";
+        const QString st = state, sf = surface;
+        // Options meters follow the window; the bar only previews while choosing.
+        const bool preview = st == "loading" || st == "setup" || st == "selecting";
+        const bool allowed = st == "recording" ? sf == "control" :
+          sf == "bar" ? preview :
+          sf == "options" && (preview || st == "idle" || st == "failed");
         QTest::newRow(qPrintable(QString(state) + ":" + surface)) << QString(state) << QString(surface) << allowed;
       }
   }
@@ -101,6 +105,47 @@ private slots:
       levels.setSurface("second", surface, false);
       QCOMPARE(fake->closes, closed + 1);
     }
+  }
+  void optionsMetersStayLiveAfterFailureAndCancel() {
+    auto backend = std::make_unique<FakeLevels>(); auto *fake = backend.get();
+    AudioLevels levels(std::move(backend), nullptr, false);
+    levels.setSurface("options", "options", true);
+    levels.configure(preview, session, "setup", true, true);
+    QCOMPARE(fake->opens, 1);
+    // A failed recording shows the options window again; levels keep running.
+    for (const char *state : {"starting", "failed"}) {
+      levels.configure(preview, session, state, true, true);
+      const bool open = QString(state) == "failed";
+      QCOMPARE(levels.microphone()["state"].toString(), open ? "Checking" : "Off");
+      QCOMPARE(levels.sound()["state"].toString(), open ? "Checking" : "Off");
+      QCOMPARE(fake->snapshot, preview);
+    }
+    fake->send(0, {0.5f}); fake->send(1, {0.25f}); levels.advance(40);
+    QCOMPARE(levels.microphone()["state"].toString(), "Level");
+    QCOMPARE(levels.sound()["state"].toString(), "Level");
+    // Toggling an input off in the open window closes only that stream.
+    levels.configure(preview, session, "failed", false, true);
+    QCOMPARE(levels.microphone()["state"].toString(), "Off");
+    QVERIFY(fake->snapshot.mic.isEmpty());
+    levels.configure(preview, session, "failed", true, true);
+    // After a cancel the state is idle and the window may still be up.
+    levels.configure(preview, session, "idle", true, true);
+    QCOMPARE(levels.microphone()["state"].toString(), "Checking");
+    // Hiding the window closes the streams for good.
+    const int closed = fake->closes;
+    levels.setSurface("options", "options", false);
+    QCOMPARE(fake->closes, closed + 1);
+    QCOMPARE(levels.microphone()["state"].toString(), "Off");
+    QCOMPARE(levels.sound()["state"].toString(), "Off");
+    // The window opening in a failed state opens meters immediately.
+    levels.configure(preview, session, "failed", true, true);
+    const int opens = fake->opens;
+    levels.setSurface("options", "options", true);
+    QCOMPARE(fake->opens, opens + 1);
+    QCOMPARE(levels.microphone()["state"].toString(), "Checking");
+    // A countdown owns the meters now; the hidden window never reopens them.
+    levels.configure(preview, session, "countdown", true, true);
+    QCOMPARE(levels.microphone()["state"].toString(), "Off");
   }
   void stateTransitionsCloseAndFrozenNamesMatchArguments() {
     auto backend = std::make_unique<FakeLevels>(); auto *fake = backend.get();

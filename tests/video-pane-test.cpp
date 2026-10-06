@@ -414,7 +414,7 @@ private slots:
     QTest::mouseMove(&scene.window, at(.55, .45));
     QTest::keyPress(&scene.window, Qt::Key_Shift);
     QTRY_COMPARE(canvas->property("constraintLabel").toString(),
-                 QString("45°"));
+                 QString("315°"));
     QCOMPARE(undoSteps(), before);
     QTest::keyRelease(&scene.window, Qt::Key_Shift);
     QTRY_VERIFY(!canvas->property("constraintActive").toBool());

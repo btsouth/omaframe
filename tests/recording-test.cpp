@@ -79,6 +79,14 @@ if os.environ.get('OMAFRAME_TEST_HEADER_ONLY'):
 else:
     shutil.copyfile(os.environ['OMAFRAME_TEST_FIXTURE'],path)
     open(path+'.ts','w').write('monotonic_microsec\trealtime_microsec\n123456\t123456\n')
+die=os.environ.get('OMAFRAME_TEST_DIE')
+if die:
+    noise='gsr info: update fps: 61, damage fps: 60 '*30
+    sys.stderr.write(noise+('No space left on device' if die=='disk' else 'kms client shutdown')+'\n');sys.stderr.flush()
+    if die!='disk': open(path,'ab').write(b'\0'*70000)
+    time.sleep(.5)
+    if die=='kill': os.kill(os.getpid(),signal.SIGKILL)
+    sys.exit(1 if die=='disk' else 3)
 signal.signal(signal.SIGINT,signal.SIG_IGN if os.environ.get('OMAFRAME_TEST_STALL_STOP') else lambda *_:sys.exit(0))
 mode=os.environ.get('OMAFRAME_TEST_PAUSE_REPLY', 'ok')
 default_mode=mode
@@ -388,8 +396,10 @@ while True:
    QVERIFY(r.status().contains("Still finishing"));QVERIFY(r.status().contains("may be incomplete"));
    r.stop();QTRY_COMPARE(r.state(),QString("idle"));
    QVERIFY(!r.active());QVERIFY(!r.canForceStop());QVERIFY(finished.isEmpty());
-   QVERIFY(r.status().contains("partial file was kept"));QVERIFY(r.status().contains("has not been checked"));
+   QVERIFY(r.status().contains("has not been checked"));
    QVERIFY(r.savedPath().endsWith("-incomplete.mp4"));
+   QVERIFY(r.status().endsWith("The partial recording was kept as "+QFileInfo(r.savedPath()).fileName()+"."));
+   QVERIFY(!r.status().contains(".part"));QVERIFY(!r.status().contains("/"));
    QVERIFY(!QFileInfo::exists(path));QCOMPARE(QFileInfo(r.savedPath()).size(),size);
  }
  void cameraUnavailableAtLaunchIsReportedThroughCompletion() {
@@ -608,6 +618,42 @@ while True:
    QVERIFY(r.setPaused(true));QTRY_COMPARE(r.state(),QString("paused"));
    r.layoutChanged();QTRY_COMPARE_WITH_TIMEOUT(finished.count(),1,5000);
    QCOMPARE(r.state(),QString("saved"));
+ }
+ void failureReasonsArePlainWords() {
+   using Recording::failureReason;
+   const auto normal=QProcess::NormalExit,crashed=QProcess::CrashExit;
+   QCOMPARE(failureReason(0,crashed,"gsr info: update fps: 61",false),QString("The recorder stopped unexpectedly."));
+   QCOMPARE(failureReason(3,normal,"",false),QString("The recorder stopped with an error (exit code 3)."));
+   QCOMPARE(failureReason(1,normal,"",true),QString("The recorder did not capture any video."));
+   QCOMPARE(failureReason(0,crashed,"",true),QString("The recorder did not capture any video."));
+   QCOMPARE(failureReason(1,normal,"write: No space left on device",false),QString("The disk is full."));
+   QVERIFY(failureReason(1,normal,"open: Permission denied",false).contains("not allowed"));
+   QCOMPARE(Recording::keptNote("/home/u/Omaframe/Recording-2026-10-05_10-00-00-abc123-incomplete.mp4"),
+            QString("The partial recording was kept as Recording-2026-10-05_10-00-00-abc123-incomplete.mp4."));
+   QVERIFY(!Recording::keptNote("/x/.Recording-1.part.mp4").contains("/"));
+ }
+ void recorderFailureShowsPlainMessageAndKeepsRawOutputOutOfIt_data() {
+   QTest::addColumn<QString>("mode");QTest::addColumn<QString>("reason");QTest::addColumn<bool>("kept");
+   QTest::newRow("killed")<<"kill"<<"The recorder stopped unexpectedly."<<true;
+   QTest::newRow("exit-code")<<"exit"<<"The recorder stopped with an error (exit code 3)."<<true;
+   QTest::newRow("disk-full-empty")<<"disk"<<"The disk is full. No file was kept."<<false;
+ }
+ void recorderFailureShowsPlainMessageAndKeepsRawOutputOutOfIt() {
+   QFETCH(QString,mode);QFETCH(QString,reason);QFETCH(bool,kept);
+   qputenv("OMAFRAME_TEST_DIE",mode.toUtf8());
+   const auto cleanup=qScopeGuard([]{qunsetenv("OMAFRAME_TEST_DIE");});
+   QTest::ignoreMessage(QtWarningMsg,QRegularExpression("Recorder failed"));
+   Recorder r;QSignalSpy finished(&r,&Recorder::completed);
+   r.prepare();QTRY_COMPARE(r.state(),QString("setup"));
+   r.selectDisplay(0);r.setCountdown(0);r.start();
+   QTRY_COMPARE_WITH_TIMEOUT(r.state(),QString("failed"),8000);
+   QVERIFY(finished.isEmpty());
+   const QString status=r.status();
+   if(kept){
+     QVERIFY(r.savedPath().endsWith("-incomplete.mp4"));QVERIFY(QFileInfo::exists(r.savedPath()));
+     QCOMPARE(status,reason+" The partial recording was kept as "+QFileInfo(r.savedPath()).fileName()+".");
+   } else QCOMPARE(status,reason);
+   for(const char *raw:{"gsr","fps","kms","Recording failed",".part","/"})QVERIFY2(!status.contains(raw),raw);
  }
  void headerOnlyRecordingNeverReportsReady() {
    Recorder r;QSignalSpy finished(&r,&Recorder::completed);
