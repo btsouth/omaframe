@@ -87,9 +87,6 @@ public:
 };
 std::unique_ptr<PortalBus> sessionPortalBus();
 
-/** The portal's identifier for a window, or empty when it has none. */
-QString portalWindowHandle(QWindow *window);
-
 } // namespace FilePicks
 
 Q_DECLARE_METATYPE(FilePicks::Glob)

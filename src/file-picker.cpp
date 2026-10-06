@@ -14,12 +14,6 @@
 #include <QQuickWindow>
 #include <QWindow>
 #include <algorithm>
-#if __has_include(<QtGui/private/qdesktopunixservices_p.h>)
-#include <QtGui/private/qdesktopunixservices_p.h>
-#include <QtGui/private/qguiapplication_p.h>
-#include <qpa/qplatformintegration.h>
-#define OMAFRAME_PORTAL_WINDOW 1
-#endif
 
 namespace FilePicks {
 
@@ -278,19 +272,6 @@ std::unique_ptr<PortalBus> sessionPortalBus() {
   return std::make_unique<SessionBus>();
 }
 
-QString portalWindowHandle(QWindow *window) {
-#ifdef OMAFRAME_PORTAL_WINDOW
-  if (!window || !window->isVisible() || !QGuiApplicationPrivate::platformIntegration())
-    return {};
-  if (auto *services = dynamic_cast<QDesktopUnixServices *>(
-          QGuiApplicationPrivate::platformIntegration()->services()))
-    return services->portalWindowIdentifier(window);
-#else
-  Q_UNUSED(window)
-#endif
-  return {};
-}
-
 } // namespace FilePicks
 
 using namespace FilePicks;
@@ -312,49 +293,19 @@ QUrl FilePicker::startFolder(const QString &purpose, bool recording) const {
       QDir::homePath()));
 }
 
-// The stock combo box shows "Images (*.png *.jpg ...)", too long to read when
-// closed. The dialog selects a filter by the list's text, so the list stays
-// and only the closed box shows the short name.
-class FilterNames : public QObject {
-  Q_OBJECT
-public:
-  FilterNames(QQuickItem *combo, QStringList labels)
-      : QObject(combo), m_combo(combo), m_labels(std::move(labels)) {
-    connect(combo, SIGNAL(currentIndexChanged()), this, SLOT(update()));
-    update();
-  }
-public slots:
-  void update() {
-    const int index = m_combo->property("currentIndex").toInt();
-    if (index >= 0 && index < m_labels.size())
-      m_combo->setProperty("displayText", m_labels.at(index));
-  }
-
-private:
-  QQuickItem *m_combo;
-  QStringList m_labels;
-};
-static void shortenFilters(QQuickItem *item, const QStringList &labels) {
-  if (item->inherits("QQuickComboBox"))
-    new FilterNames(item, labels);
-  for (auto *child : item->childItems())
-    shortenFilters(child, labels);
-}
 // A dialog's popup is created when it opens and has no QML handle, so find it
 // from its popup item. Its QML types are named FileDialog_QMLTYPE_n and
 // FolderDialog_QMLTYPE_n.
-static void fitPopups(QQuickItem *item, const QSize &size, const QStringList &labels) {
+static void fitPopups(QQuickItem *item, const QSize &size) {
   QObject *popup = item->parent();
   const QByteArray type = popup ? QByteArray(popup->metaObject()->className()) : QByteArray();
   if (QByteArray(item->metaObject()->className()) == "QQuickPopupItem" &&
       (type.startsWith("FileDialog") || type.startsWith("FolderDialog"))) {
     popup->setProperty("implicitWidth", size.width());
     popup->setProperty("implicitHeight", size.height());
-    if (type.startsWith("FileDialog"))
-      shortenFilters(item, labels);
   }
   for (auto *child : item->childItems())
-    fitPopups(child, size, labels);
+    fitPopups(child, size);
 }
 
 void FilePicker::fitDialog(QObject *dialog, QWindow *window) const {
@@ -363,10 +314,7 @@ void FilePicker::fitDialog(QObject *dialog, QWindow *window) const {
     return;
   const QSize size(std::clamp(window->width() * 7 / 10, 600, 1040),
                    std::clamp(window->height() * 3 / 4, 400, 720));
-  QStringList labels;
-  for (const auto &filter : mediaFilters())
-    labels << filter.label;
-  QTimer::singleShot(0, dialog, [=] { fitPopups(quick->contentItem(), size, labels); });
+  QTimer::singleShot(0, dialog, [=] { fitPopups(quick->contentItem(), size); });
 }
 
 void FilePicker::rememberOpened(const QUrl &file) {
@@ -384,7 +332,9 @@ void FilePicker::chooseFolder(QWindow *parent, const QString &purpose) {
   start(purposeFromName(purpose), parent, false);
 }
 
-void FilePicker::start(Purpose purpose, QWindow *parent, bool recording) {
+// The portal gets no parent window: a window handle needs Qt private API, and
+// the spec allows an empty one.
+void FilePicker::start(Purpose purpose, QWindow *, bool recording) {
   if (m_busy)
     return;
   const QString name = purposeName(purpose);
@@ -394,7 +344,7 @@ void FilePicker::start(Purpose purpose, QWindow *parent, bool recording) {
       {"recordings", "Save recordings and clips in"}};
   const QString folder = startFolder(name, recording).toLocalFile();
   const auto request = buildRequest(purpose, titles.value(name),
-                                    portalWindowHandle(parent), folder,
+                                    QString(), folder,
                                     QString("omaframe%1").arg(++m_requests));
   m_busy = true;
   emit busyChanged();

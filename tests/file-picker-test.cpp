@@ -188,9 +188,9 @@ private slots:
   }
 
   void buildsAnOpenRequest() {
-    const auto request = buildRequest(Purpose::Open, "Open", "wayland:abc", "/home/u/Pictures", "tok1");
+    const auto request = buildRequest(Purpose::Open, "Open", QString(), "/home/u/Pictures", "tok1");
     QCOMPARE(request.method, QString("OpenFile"));
-    QCOMPARE(request.parent, QString("wayland:abc"));
+    QVERIFY(request.parent.isEmpty());
     QCOMPARE(request.title, QString("Open"));
     QCOMPARE(request.options.value("handle_token").toString(), QString("tok1"));
     QVERIFY(request.options.value("modal").toBool());
