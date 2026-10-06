@@ -221,6 +221,10 @@ Screenshots go to `~/Pictures/Omaframe` and recordings to `~/Videos/Omaframe`.
 Change either in Settings. Saved images contain only the rendered pixels, and
 redaction replaces pixels with a solid fill. Your originals are never changed.
 
+Open and the folder buttons use your desktop's file chooser through
+xdg-desktop-portal, starting in your screenshot folder (or in the folder you
+last opened from). Without a portal, Omaframe shows its own dialog instead.
+
 The text Omaframe reads for H and T stays in memory. It is never saved, not
 even in drafts. Reading needs `tesseract` and `tesseract-data-eng`; without
 them the button and T are simply not there. Set `OMARCHY_OCR_LANGS` (for

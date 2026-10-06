@@ -1,4 +1,5 @@
 #include "studio.hpp"
+#include "file-picker.hpp"
 #include "history.hpp"
 #include "omarchy-theme.hpp"
 #include "navigation.hpp"
@@ -544,6 +545,8 @@ private slots:
     CaptureHistoryModel history(&historyImages);
     engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("navigation", &navigation);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("captureAtStartup", false);
     const QString input = temp.filePath("navigation.png");
@@ -646,6 +649,8 @@ private slots:
     CaptureHistoryModel history(&historyImages);
     engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("navigation", &navigation);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("captureAtStartup", true);
     prepare(studio);
@@ -832,6 +837,8 @@ private slots:
       studio.scrollFailed("Capture failed with an older image still open.");
     engine.rootContext()->setContextProperty("studio", &studio);
     engine.rootContext()->setContextProperty("theme", &theme);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
     QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/FinishChooser.qml")));
     QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
     std::unique_ptr<QQuickWindow> chooser(qobject_cast<QQuickWindow *>(component.create()));

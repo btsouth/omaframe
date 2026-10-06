@@ -271,7 +271,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+O"
         enabled: root.shortcutsAllowed && !root.working && !studio.quickMode
-        onActivated: openDialog.open()
+        onActivated: root.chooseFile()
     }
     Shortcut {
         sequence: "Ctrl+S"
@@ -367,26 +367,42 @@ ApplicationWindow {
     Shortcut { sequence: "Shift+Up"; enabled: root.nudging; onActivated: studio.marks.nudgeSelected(0, -10) }
     Shortcut { sequence: "Shift+Down"; enabled: root.nudging; onActivated: studio.marks.nudgeSelected(0, 10) }
 
+    // The system's file chooser comes first. These Qt Quick dialogs only show
+    // when there is none.
     FileDialog {
         id: openDialog
         Component.onCompleted: if ("popupType" in openDialog) openDialog.popupType = Popup.Item
         title: "Open an image or recording"
-        nameFilters: ["Images and recordings (*.png *.jpg *.jpeg *.webp *.bmp *.avif *.heic *.mp4 *.webm *.mkv *.mov *.m4v *.avi)", "Images (*.png *.jpg *.jpeg *.webp *.bmp *.avif *.heic)", "Recordings (*.mp4 *.webm *.mkv *.mov *.m4v *.avi)"]
-        onAccepted: root.requestNavigation("open", selectedFile)
+        nameFilters: filePicker.nameFilters
+        onAccepted: { filePicker.rememberOpened(selectedFile); root.requestNavigation("open", selectedFile); }
     }
     FolderDialog {
         id: imageFolderDialog
         Component.onCompleted: if ("popupType" in imageFolderDialog) imageFolderDialog.popupType = Popup.Item
         title: "Save screenshots in"
-        currentFolder: "file://" + studio.outputDirectory
         onAccepted: studio.setOutputDirectory(selectedFolder)
     }
     FolderDialog {
         id: videoFolderDialog
         Component.onCompleted: if ("popupType" in videoFolderDialog) videoFolderDialog.popupType = Popup.Item
         title: "Save recordings and clips in"
-        currentFolder: "file://" + video.outputDirectory
         onAccepted: video.setOutputDirectory(selectedFolder)
+    }
+    function chooseFile() { filePicker.openMedia(root, root.videoMode) }
+    function chooseFolder(purpose) { filePicker.chooseFolder(root, purpose) }
+    Connections {
+        target: filePicker
+        function onFileChosen(file) { root.requestNavigation("open", file) }
+        function onFolderChosen(purpose, folder) {
+            if (purpose === "recordings") video.setOutputDirectory(folder)
+            else studio.setOutputDirectory(folder)
+        }
+        function onFallback(purpose) {
+            const dialog = purpose === "open" ? openDialog : purpose === "recordings" ? videoFolderDialog : imageFolderDialog
+            dialog.currentFolder = filePicker.startFolder(purpose, root.videoMode)
+            dialog.open()
+            filePicker.fitDialog(dialog, root)
+        }
     }
     ConfirmDialog {
         id: originalsDialog
@@ -620,7 +636,7 @@ ApplicationWindow {
                                 text: "Change"
                                 quiet: true
                                 implicitHeight: 30
-                                onClicked: { settingsPopup.close(); modelData.video ? videoFolderDialog.open() : imageFolderDialog.open(); }
+                                onClicked: { settingsPopup.close(); root.chooseFolder(modelData.video ? "recordings" : "screenshots"); }
                             }
                         }
                     }
@@ -766,7 +782,7 @@ ApplicationWindow {
                     quiet: true
                     enabled: !root.working
                     hint: "Open an image or recording · Ctrl+O"
-                    onClicked: openDialog.open()
+                    onClicked: root.chooseFile()
                 }
                 StudioButton {
                     visible: !studio.quickMode
@@ -912,7 +928,7 @@ ApplicationWindow {
                         detail: "Edit an image or trim a video. You can also drop a file here."
                         key: "Ctrl+O"
                         enabled: !root.working
-                        onActivated: openDialog.open()
+                        onActivated: root.chooseFile()
                     }
                 }
                 Text {
@@ -1680,7 +1696,7 @@ ApplicationWindow {
                             font.pixelSize: 10
                             enabled: !root.working
                             Accessible.name: root.videoMode ? "Change the recordings folder" : "Change the screenshots folder"
-                            onClicked: root.videoMode ? videoFolderDialog.open() : imageFolderDialog.open()
+                            onClicked: root.chooseFolder(root.videoMode ? "recordings" : "screenshots")
                         }
                     }
                 }
