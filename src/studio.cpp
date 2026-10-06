@@ -1,5 +1,6 @@
 #include "history.hpp"
 #include "studio.hpp"
+#include "file-picker.hpp"
 #include "capture-session.hpp"
 #include "capture.hpp"
 #include "displays.hpp"
@@ -533,8 +534,7 @@ void Studio::open(const QUrl &url) {
     return;
   if (!saveDraftNow())
     return;
-  if (QStringList{"mp4", "webm", "mkv", "mov", "m4v", "avi"}.contains(
-          QFileInfo(url.toLocalFile()).suffix().toLower())) {
+  if (FilePicks::isRecording(url.toLocalFile())) {
     emit videoRequested(url);
     return;
   }

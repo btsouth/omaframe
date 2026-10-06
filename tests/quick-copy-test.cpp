@@ -1,4 +1,5 @@
 #include "studio.hpp"
+#include "file-picker.hpp"
 #include "history.hpp"
 #include "omarchy-theme.hpp"
 #include "navigation.hpp"
@@ -544,6 +545,8 @@ private slots:
     CaptureHistoryModel history(&historyImages);
     engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("navigation", &navigation);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("captureAtStartup", false);
     const QString input = temp.filePath("navigation.png");
@@ -612,6 +615,53 @@ private slots:
       QCOMPARE(contents(clipboard() + ".calls"), QByteArray("copy\n"));
     }
   }
+  void welcomeShowsTheConfiguredFolders() {
+    // Folders that differ from the standard ones, one of them under home.
+    const QString shots = QDir::homePath() + "/Omaframe-test-shots";
+    const QString clips = temp.filePath("clips");
+    QSettings().setValue("outputDirectory", shots);
+    QSettings().setValue("videoDirectory", clips);
+    QQmlEngine engine;
+    auto *store = new ImageStore;
+    engine.addImageProvider("frames", store);
+    auto *videoStore = new ImageStore;
+    engine.addImageProvider("videomarks", videoStore);
+    Studio studio(store, false);
+    Video video;
+    video.setImageStore(videoStore);
+    Recorder recorder;
+    ShortcutSetup shortcuts;
+    Navigation navigation;
+    OmarchyTheme theme(nullptr, temp.filePath("theme"), temp.filePath("theme-config"), false);
+    engine.rootContext()->setContextProperty("studio", &studio);
+    engine.rootContext()->setContextProperty("video", &video);
+    engine.rootContext()->setContextProperty("recorder", &recorder);
+    engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    HistoryImages historyImages;
+    CaptureHistoryModel history(&historyImages);
+    engine.rootContext()->setContextProperty("history", &history);
+    engine.rootContext()->setContextProperty("navigation", &navigation);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    engine.rootContext()->setContextProperty("captureAtStartup", false);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
+    QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
+    QVERIFY2(window, qPrintable(component.errorString()));
+    QVERIFY(!studio.welcomed());
+    QString step;
+    std::function<void(QQuickItem *)> visit = [&](QQuickItem *item) {
+      const QString text = item->property("text").toString();
+      if (text.startsWith("Copy and save always keeps"))
+        step = text;
+      for (auto *child : item->childItems()) visit(child);
+    };
+    visit(window->contentItem());
+    QCOMPARE(step, QString("Copy and save always keeps a file in ~/Omaframe-test-shots. "
+                           "Paste into a chat, document or folder. Recordings are saved in %1.")
+                       .arg(clips));
+  }
   void editorClipboardKeysKeepTheScreenshotOpen_data() {
     QTest::addColumn<bool>("autoSave");
     QTest::addColumn<bool>("ctrlS");
@@ -646,6 +696,8 @@ private slots:
     CaptureHistoryModel history(&historyImages);
     engine.rootContext()->setContextProperty("history", &history);
     engine.rootContext()->setContextProperty("navigation", &navigation);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("captureAtStartup", true);
     prepare(studio);
@@ -832,6 +884,8 @@ private slots:
       studio.scrollFailed("Capture failed with an older image still open.");
     engine.rootContext()->setContextProperty("studio", &studio);
     engine.rootContext()->setContextProperty("theme", &theme);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
     QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/FinishChooser.qml")));
     QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
     std::unique_ptr<QQuickWindow> chooser(qobject_cast<QQuickWindow *>(component.create()));

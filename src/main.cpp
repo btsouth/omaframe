@@ -1,5 +1,6 @@
 #include "capture-dismissal.hpp"
 #include "capture-request.hpp"
+#include "file-picker.hpp"
 #include "navigation.hpp"
 #include "omarchy-theme.hpp"
 #include "recording.hpp"
@@ -234,6 +235,8 @@ int main(int argc, char **argv) {
   };
   applyPalette();
   QObject::connect(&theme, &OmarchyTheme::changed, &app, applyPalette);
+  FilePicker filePicker([&] { return studio.outputDirectory(); },
+                        [&] { return video.outputDirectory(); });
   QQmlApplicationEngine engine;
   engine.addImageProvider("frames", store);
   engine.addImageProvider("history", historyImages);
@@ -246,6 +249,7 @@ int main(int argc, char **argv) {
   engine.rootContext()->setContextProperty("recorder", &recorder);
   engine.rootContext()->setContextProperty("audioLevels", &audioLevels);
   engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+  engine.rootContext()->setContextProperty("filePicker", &filePicker);
   engine.rootContext()->setContextProperty("captureAtStartup", captureStartup);
   // The capture path only creates a selection surface. Load the chooser
   // after selection, and the full editor only when explicitly requested.

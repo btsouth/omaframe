@@ -48,7 +48,9 @@ Window {
         // versions can change the folder from the regular editor window.
         if (inlineFolderDialog) {
             saveFolder.popupType = Popup.Item
+            saveFolder.currentFolder = filePicker.startFolder("screenshots")
             saveFolder.open()
+            filePicker.fitDialog(saveFolder, chooser)
         } else studio.openEditor()
     }
     onVisibleChanged: if (visible) {selected = studio.style; keyboard.forceActiveFocus()}
@@ -58,7 +60,6 @@ Window {
     FolderDialog {
         id: saveFolder
         title: "Choose screenshot save folder"
-        currentFolder: "file://" + studio.outputDirectory
         onAccepted: {
             studio.setOutputDirectory(selectedFolder)
             keyboard.forceActiveFocus()
