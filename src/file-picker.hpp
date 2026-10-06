@@ -9,6 +9,8 @@
 #include <functional>
 #include <memory>
 
+#include "window-export.hpp"
+
 class QWindow;
 
 // File and folder choosing. The system's file chooser comes first, through
@@ -45,6 +47,9 @@ void registerPortalTypes();
 QList<Filter> mediaFilters();
 /** The same filters as Qt Quick name filters, "Images (*.png *.jpg)". */
 QStringList nameFilters();
+
+/** The path with a leading home folder written as ~. */
+QString abbreviateHome(const QString &path, const QString &home);
 
 /** The first candidate that exists as a folder, or home. The default output
  * folder is created on the first save, so it may not exist yet. */
@@ -100,6 +105,7 @@ public:
   using Folder = std::function<QString()>;
   FilePicker(Folder imageFolder, Folder videoFolder,
              std::unique_ptr<FilePicks::PortalBus> bus = nullptr,
+             std::unique_ptr<FilePicks::WindowExporter> exporter = nullptr,
              QObject *parent = nullptr);
   bool busy() const { return m_busy; }
   QStringList nameFilters() const { return FilePicks::nameFilters(); }
@@ -112,6 +118,8 @@ public:
    * or "recordings". */
   Q_INVOKABLE QUrl startFolder(const QString &purpose,
                                bool recording = false) const;
+  /** A path as shown to people: home is ~. */
+  Q_INVOKABLE QString abbreviate(const QString &path) const;
   /** Enlarges an open Qt Quick dialog relative to its window: the stock size
    * is 600 by 400, which truncates the filter name. */
   Q_INVOKABLE void fitDialog(QObject *dialog, QWindow *window) const;
@@ -129,6 +137,7 @@ private:
   QString lastFolder(bool recording) const;
   Folder m_imageFolder, m_videoFolder;
   std::unique_ptr<FilePicks::PortalBus> m_bus;
+  std::unique_ptr<FilePicks::WindowExporter> m_exporter;
   bool m_busy = false;
   int m_requests = 0;
 };

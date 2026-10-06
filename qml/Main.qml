@@ -61,7 +61,7 @@ ApplicationWindow {
         if (draft.kind === "video") root.requestNavigation("video-draft", draft.id);
         else root.requestNavigation("image-draft", draft.id);
     }
-    function home(path) { return path.replace(/^\/home\/[^/]+/, "~") }
+    function home(path) { return filePicker.abbreviate(path) }
     function requestNavigation(command, file) {
         requestCaptureNavigation(command, file, -1);
     }

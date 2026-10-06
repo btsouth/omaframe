@@ -114,6 +114,15 @@ QStringList nameFilters() {
           label("Recordings", suffixesOf(false, true))};
 }
 
+QString abbreviateHome(const QString &path, const QString &home) {
+  const QString root = QDir::cleanPath(home);
+  if (root.isEmpty() || root == "/")
+    return path;
+  if (path == root)
+    return "~";
+  return path.startsWith(root + "/") ? "~" + path.mid(root.size()) : path;
+}
+
 QString firstExistingFolder(const QStringList &candidates, const QString &home) {
   for (const auto &candidate : candidates)
     if (!candidate.isEmpty() && QFileInfo(candidate).isDir())
@@ -277,10 +286,12 @@ std::unique_ptr<PortalBus> sessionPortalBus() {
 using namespace FilePicks;
 
 FilePicker::FilePicker(Folder imageFolder, Folder videoFolder,
-                       std::unique_ptr<PortalBus> bus, QObject *parent)
+                       std::unique_ptr<PortalBus> bus,
+                       std::unique_ptr<WindowExporter> exporter, QObject *parent)
     : QObject(parent), m_imageFolder(std::move(imageFolder)),
       m_videoFolder(std::move(videoFolder)),
-      m_bus(bus ? std::move(bus) : sessionPortalBus()) {}
+      m_bus(bus ? std::move(bus) : sessionPortalBus()),
+      m_exporter(exporter ? std::move(exporter) : waylandWindowExporter()) {}
 
 QString FilePicker::lastFolder(bool recording) const {
   return QSettings().value(recording ? "openFolder/video" : "openFolder/image").toString();
@@ -291,6 +302,10 @@ QUrl FilePicker::startFolder(const QString &purpose, bool recording) const {
       startCandidates(purposeFromName(purpose), recording, lastFolder(false),
                       lastFolder(true), m_imageFolder(), m_videoFolder()),
       QDir::homePath()));
+}
+
+QString FilePicker::abbreviate(const QString &path) const {
+  return abbreviateHome(path, QDir::homePath());
 }
 
 // A dialog's popup is created when it opens and has no QML handle, so find it
@@ -332,9 +347,10 @@ void FilePicker::chooseFolder(QWindow *parent, const QString &purpose) {
   start(purposeFromName(purpose), parent, false);
 }
 
-// The portal gets no parent window: a window handle needs Qt private API, and
-// the spec allows an empty one.
-void FilePicker::start(Purpose purpose, QWindow *, bool recording) {
+// The chooser is parented to an exported handle of the window, so the
+// compositor shows it as a dialog over Omaframe. Without a handle it gets no
+// parent, which the spec allows.
+void FilePicker::start(Purpose purpose, QWindow *parent, bool recording) {
   if (m_busy)
     return;
   const QString name = purposeName(purpose);
@@ -343,29 +359,33 @@ void FilePicker::start(Purpose purpose, QWindow *, bool recording) {
       {"screenshots", "Save screenshots in"},
       {"recordings", "Save recordings and clips in"}};
   const QString folder = startFolder(name, recording).toLocalFile();
-  const auto request = buildRequest(purpose, titles.value(name),
-                                    QString(), folder,
-                                    QString("omaframe%1").arg(++m_requests));
+  const QString token = QString("omaframe%1").arg(++m_requests);
   m_busy = true;
   emit busyChanged();
-  m_bus->call(request, [this, purpose, name](bool delivered, uint code,
-                                             const QVariantMap &results) {
-    m_busy = false;
-    emit busyChanged();
-    const Reply reply = delivered ? parseResponse(code, results) : Reply{};
-    if (reply.status == Reply::Cancelled)
-      return;
-    if (reply.status == Reply::Failed ||
-        (isFolder(purpose) && !QFileInfo(reply.urls.first().toLocalFile()).isDir())) {
-      emit fallback(name);
-      return;
-    }
-    if (isFolder(purpose))
-      emit folderChosen(name, reply.urls.first());
-    else {
-      rememberOpened(reply.urls.first());
-      emit fileChosen(reply.urls.first());
-    }
+  m_exporter->exportWindow(parent, [=, this](const QString &handle) {
+    const auto request = buildRequest(purpose, titles.value(name),
+                                      portalParent(handle), folder, token);
+    m_bus->call(request, [this, purpose, name](bool delivered, uint code,
+                                               const QVariantMap &results) {
+      m_exporter->release();
+      m_busy = false;
+      emit busyChanged();
+      const Reply reply = delivered ? parseResponse(code, results) : Reply{};
+      if (reply.status == Reply::Cancelled)
+        return;
+      if (reply.status == Reply::Failed ||
+          (isFolder(purpose) &&
+           !QFileInfo(reply.urls.first().toLocalFile()).isDir())) {
+        emit fallback(name);
+        return;
+      }
+      if (isFolder(purpose))
+        emit folderChosen(name, reply.urls.first());
+      else {
+        rememberOpened(reply.urls.first());
+        emit fileChosen(reply.urls.first());
+      }
+    });
   });
 }
 

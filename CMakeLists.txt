@@ -5,7 +5,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 include(CTest)
 include(GNUInstallDirs)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Concurrent Multimedia Network DBus Test)
+# GuiPrivate is used for one QPA header (the window's Wayland surface); no
+# private symbol is linked, so the version warning does not apply.
+set(QT_NO_PRIVATE_MODULE_WARNING ON)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Quick QuickControls2 Concurrent Multimedia Network DBus Test)
 find_package(LayerShellQt REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(Pulse REQUIRED IMPORTED_TARGET libpulse)
@@ -20,6 +23,14 @@ foreach(PROTOCOL ext-foreign-toplevel-list ext-image-capture-source ext-image-co
     COMMAND ${WAYLAND_SCANNER} private-code ${XML} ${CODE} DEPENDS ${XML} VERBATIM)
   list(APPEND PROTOCOL_SOURCES ${HEADER} ${CODE})
 endforeach()
+# The file chooser's parent window handle.
+set(XML /usr/share/wayland-protocols/unstable/xdg-foreign/xdg-foreign-unstable-v2.xml)
+set(HEADER ${CMAKE_CURRENT_BINARY_DIR}/xdg-foreign-unstable-v2-client-protocol.h)
+set(CODE ${CMAKE_CURRENT_BINARY_DIR}/xdg-foreign-unstable-v2-protocol.c)
+add_custom_command(OUTPUT ${HEADER} ${CODE}
+  COMMAND ${WAYLAND_SCANNER} client-header ${XML} ${HEADER}
+  COMMAND ${WAYLAND_SCANNER} private-code ${XML} ${CODE} DEPENDS ${XML} VERBATIM)
+set(PICKER_PROTOCOL_SOURCES ${HEADER} ${CODE})
 # Scrolling capture's virtual pointer. Not in wayland-protocols, so it ships
 # with the source.
 set(XML ${CMAKE_CURRENT_SOURCE_DIR}/protocols/wlr-virtual-pointer-unstable-v1.xml)
@@ -41,9 +52,11 @@ target_include_directories(frame-core PUBLIC src)
 add_library(stitch-core src/stitch.cpp src/stitch.hpp src/auto-capture.cpp src/auto-capture.hpp)
 target_link_libraries(stitch-core PUBLIC Qt6::Gui)
 target_include_directories(stitch-core PUBLIC src)
-add_library(picker-core src/file-picker.cpp src/file-picker.hpp)
-target_link_libraries(picker-core PUBLIC Qt6::Quick Qt6::DBus)
-target_include_directories(picker-core PUBLIC src)
+add_library(picker-core src/file-picker.cpp src/file-picker.hpp src/window-export.cpp src/window-export.hpp ${PICKER_PROTOCOL_SOURCES})
+# GuiPrivate only for the QPA header of Qt's native interface: no private
+# symbol is linked.
+target_link_libraries(picker-core PUBLIC Qt6::Quick Qt6::DBus PRIVATE Qt6::GuiPrivate PkgConfig::WaylandClient)
+target_include_directories(picker-core PUBLIC src PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 add_library(studio-core src/history.cpp src/history.hpp src/recording-publication.cpp src/studio.cpp src/studio.hpp src/delay-capture.cpp src/delay-capture.hpp src/marks.cpp src/marks.hpp src/mark-constraints.cpp src/mark-constraints.hpp src/displays.cpp src/displays.hpp src/window-targets.cpp src/window-targets.hpp src/video.cpp src/video-drafts.cpp src/video.hpp src/recording.cpp src/recording.hpp src/audio-levels.cpp src/audio-levels.hpp src/audio-pulse.cpp src/webcam.cpp src/webcam.hpp src/shortcuts.cpp src/shortcuts.hpp src/capture.hpp src/capture-session.cpp src/capture-session.hpp src/surface-capture.cpp src/scroll-capture.cpp src/scroll-capture.hpp src/scroll-pointer.cpp src/scroll-pointer.hpp ${PROTOCOL_SOURCES})
 target_include_directories(studio-core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(studio-core PUBLIC picker-core frame-core ocr-core stitch-core Qt6::Quick Qt6::Concurrent Qt6::Network Qt6::Multimedia PkgConfig::WaylandClient PkgConfig::Pulse)

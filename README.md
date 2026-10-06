@@ -218,8 +218,9 @@ Clipboard-only copies add no history item. Editable drafts may remain. Screensho
 
 ## Good to know
 
-Screenshots go to `~/Pictures/Omaframe` and recordings to `~/Videos/Omaframe`.
-Change either in Settings. Saved images contain only the rendered pixels, and
+Screenshots go to an `Omaframe` folder in your Pictures folder and recordings to
+one in your Videos folder (`~/Pictures/Omaframe` and `~/Videos/Omaframe` unless
+your desktop says otherwise). Change either in Settings. Saved images contain only the rendered pixels, and
 redaction replaces pixels with a solid fill. Your originals are never changed.
 
 Open and the folder buttons use your desktop's file chooser through

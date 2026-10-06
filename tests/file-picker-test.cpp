@@ -12,6 +12,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QWindow>
+#include <utility>
 
 using namespace FilePicks;
 
@@ -33,6 +35,24 @@ public:
   uint code = 0;
   QVariantMap results;
   Done pending;
+};
+
+// A window handle that arrives at once, later, or never.
+class FakeExporter : public WindowExporter {
+public:
+  void exportWindow(QWindow *, Ready ready) override {
+    ++exports;
+    if (deferred)
+      pending = std::move(ready);
+    else
+      ready(handle);
+  }
+  void release() override { ++releases; }
+  void deliver(const QString &value) { std::exchange(pending, nullptr)(value); }
+  QString handle;
+  bool deferred = false;
+  Ready pending;
+  int exports = 0, releases = 0;
 };
 
 // The real portal service, played on a private session bus.
@@ -209,6 +229,19 @@ private slots:
     QVERIFY(!request.options.contains("filters"));
     QVERIFY(request.parent.isEmpty());
   }
+  void formatsThePortalParent() {
+    QCOMPARE(portalParent("a1b2c3"), QString("wayland:a1b2c3"));
+    QVERIFY(portalParent(QString()).isEmpty());
+  }
+  void abbreviatesHome() {
+    QCOMPARE(abbreviateHome("/home/u/Videos/Omaframe", "/home/u"), QString("~/Videos/Omaframe"));
+    QCOMPARE(abbreviateHome("/home/u/Omaframe", "/home/u/"), QString("~/Omaframe"));
+    QCOMPARE(abbreviateHome("/home/u", "/home/u"), QString("~"));
+    QCOMPARE(abbreviateHome("/root/shots", "/root"), QString("~/shots"));
+    QCOMPARE(abbreviateHome("/home/user2/x", "/home/user"), QString("/home/user2/x"));
+    QCOMPARE(abbreviateHome("/mnt/data/shots", "/home/u"), QString("/mnt/data/shots"));
+    QCOMPARE(abbreviateHome("/mnt/data", "/"), QString("/mnt/data"));
+  }
   void parsesResponses() {
     auto chosen = parseResponse(0, {{"uris", QStringList{"file:///tmp/a%20b.png"}}});
     QCOMPARE(chosen.status, Reply::Chosen);
@@ -244,6 +277,76 @@ private slots:
     picker.openMedia(nullptr, true);
     QCOMPARE(fake->requests.last().options.value("current_folder").toByteArray(),
              (clips + '\0').toLocal8Bit());
+  }
+  void pickerParentsTheChooserToTheExportedWindow() {
+    auto bus = std::make_unique<FakeBus>();
+    auto *fake = bus.get();
+    fake->deferred = true;
+    auto exporter = std::make_unique<FakeExporter>();
+    auto *window = exporter.get();
+    window->handle = "h4ndle";
+    FilePicker picker([] { return QString(); }, [] { return QString(); },
+                      std::move(bus), std::move(exporter));
+    picker.openMedia(nullptr, false);
+    QCOMPARE(fake->requests.size(), 1);
+    QCOMPARE(fake->requests.first().parent, QString("wayland:h4ndle"));
+    // The export lives until the portal answers.
+    QCOMPARE(window->releases, 0);
+    fake->answer(1, {});
+    QCOMPARE(window->releases, 1);
+    QVERIFY(!picker.busy());
+  }
+  void pickerWaitsForTheHandleWithoutBlocking() {
+    auto bus = std::make_unique<FakeBus>();
+    auto *fake = bus.get();
+    fake->deferred = true;
+    auto exporter = std::make_unique<FakeExporter>();
+    auto *window = exporter.get();
+    window->deferred = true;
+    FilePicker picker([] { return QString(); }, [] { return QString(); },
+                      std::move(bus), std::move(exporter));
+    picker.openMedia(nullptr, false);
+    QVERIFY(picker.busy());
+    QCOMPARE(fake->requests.size(), 0);
+    picker.openMedia(nullptr, false);
+    QCOMPARE(window->exports, 1);
+    window->deliver("late");
+    QCOMPARE(fake->requests.size(), 1);
+    QCOMPARE(fake->requests.first().parent, QString("wayland:late"));
+  }
+  void pickerOpensUnparentedWhenThereIsNoHandle() {
+    auto bus = std::make_unique<FakeBus>();
+    auto *fake = bus.get();
+    fake->deferred = true;
+    auto exporter = std::make_unique<FakeExporter>();
+    FilePicker picker([] { return QString(); }, [] { return QString(); },
+                      std::move(bus), std::move(exporter));
+    picker.chooseFolder(nullptr, "screenshots");
+    QCOMPARE(fake->requests.size(), 1);
+    QVERIFY(fake->requests.first().parent.isEmpty());
+    QVERIFY(fake->requests.first().options.value("directory").toBool());
+  }
+  void windowWithoutWaylandExportsNothing() {
+    // Offscreen, or a null window: the default exporter answers at once with
+    // no handle.
+    auto exporter = waylandWindowExporter();
+    int calls = 0;
+    QString handle = "unset";
+    exporter->exportWindow(nullptr, [&](const QString &value) {
+      ++calls;
+      handle = value;
+    });
+    QCOMPARE(calls, 1);
+    QVERIFY(handle.isEmpty());
+    QWindow window;
+    window.show();
+    exporter->exportWindow(&window, [&](const QString &value) {
+      ++calls;
+      handle = value;
+    });
+    QTRY_COMPARE(calls, 2);
+    QVERIFY(handle.isEmpty());
+    exporter->release();
   }
   void pickerStaysQuietOnCancel() {
     auto bus = std::make_unique<FakeBus>();
