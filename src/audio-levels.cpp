@@ -45,9 +45,13 @@ void AudioLevels::setSurface(const QString &token, const QString &kind, bool vis
 }
 void AudioLevels::reconcile() {
   const bool previewState = m_state == "setup" || m_state == "selecting" || m_state == "loading";
+  // The options window shows live levels whenever it is visible, including
+  // after a failure or cancel, except while a recording owns the meters.
+  const bool optionsState = previewState || m_state == "idle" || m_state == "failed";
   bool needed = false;
   for (const auto &kind : m_surfaces)
-    needed |= (previewState && (kind == "bar" || kind == "options")) ||
+    needed |= (previewState && kind == "bar") ||
+              (optionsState && kind == "options") ||
               (m_state == "recording" && kind == "control");
   const auto &snapshot = m_state == "recording" ? m_session : m_preview;
   AudioSnapshot wanted = snapshot;

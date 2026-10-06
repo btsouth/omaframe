@@ -38,7 +38,8 @@ Result resolve(const QString &type, QPointF anchor, QPointF pointer,
       const int index = int(std::floor(angle / sector + .5 + 1e-12));
       v = {length * std::cos(index * sector),
            length * std::sin(index * sector)};
-      result.label = QString::number((index % 8 + 8) % 8 * 45) + QChar(0x00b0);
+      // The readout is a protractor angle, counterclockwise from the right.
+      result.label = QString::number((8 - index % 8) % 8 * 45) + QChar(0x00b0);
     }
   } else {
     const double h = std::max(std::abs(v.x()) / aspect, std::abs(v.y()));

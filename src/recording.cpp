@@ -54,6 +54,25 @@ AudioSnapshot Recorder::audioPreview() const {
   return {mic.value("id").toString(), m_defaultSink,
           mic.value("label").toString(), m_sinkLabel};
 }
+QString Recording::failureReason(int exitCode, QProcess::ExitStatus status,
+                                 const QString &output, bool noFrames) {
+  if (noFrames)
+    return "The recorder did not capture any video.";
+  const QString text = output.toLower();
+  if (text.contains("no space left"))
+    return "The disk is full.";
+  if (text.contains("permission denied") || text.contains("not permitted"))
+    return "The recorder was not allowed to capture the screen or write the "
+           "file.";
+  if (status != QProcess::NormalExit)
+    return "The recorder stopped unexpectedly.";
+  return "The recorder stopped with an error (exit code " +
+         QString::number(exitCode) + ").";
+}
+QString Recording::keptNote(const QString &path) {
+  return "The partial recording was kept as " + QFileInfo(path).fileName() +
+         ".";
+}
 QStringList Recording::arguments(const QString &target, const QString &path,
                                  const AudioSnapshot &audio, bool cursor) {
   return arguments(target, path, audio.sound, audio.mic, cursor);
@@ -1037,8 +1056,8 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
     m_state = "idle";
     m_status = "Recording force-stopped. The file may be incomplete "
                "and has not been checked.";
-    m_status += QFileInfo::exists(m_path) ? " The partial file was kept at " + m_path
-                                         : " No recording file was created.";
+    if (!QFileInfo::exists(m_path))
+      m_status += " No recording file was created.";
     m_incompleteReady = true;
     completeWhenCameraReady();
     emit changed();
@@ -1046,11 +1065,14 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
     return;
   }
   if (code != 0 || exitStatus != QProcess::NormalExit) {
+    // The recorder's own words are for the log, not the window.
+    qWarning().noquote() << "Recorder failed (exit code" << code
+                         << (exitStatus == QProcess::NormalExit ? "normal exit"
+                                                                : "crashed")
+                         << "):" << m_error.simplified().right(500);
     const bool discarded = discardEmpty(m_path);
-    fail("Recording failed. " + m_error.simplified().right(500) +
-         (discarded ? " No file was kept."
-          : QFileInfo::exists(m_path) ? " The partial file is " + m_path
-                                      : QString()));
+    fail(Recording::failureReason(code, exitStatus, m_error, m_frameTimedOut) +
+         (discarded ? " No file was kept." : QString()));
     return;
   }
   m_state = "stopping";
@@ -1064,7 +1086,7 @@ void Recorder::validateResult(int code, QProcess::ExitStatus exitStatus) {
     const QString error = watcher->result();
     watcher->deleteLater();
     if (!error.isEmpty()) {
-      fail(error + (QFileInfo::exists(m_path) ? " The file is " + m_path : QString()));
+      fail(error);
       return;
     }
     m_screenReady = true;
@@ -1146,15 +1168,19 @@ void Recorder::completeWhenCameraReady() {
   if (published.isEmpty()) {
     if (!incomplete) {
       m_state = "failed";
-      m_status = "Could not publish the recording. The hidden part was retained at " + m_path;
+      m_status = "Could not publish the recording. The unfinished file is "
+                 "still in the recording folder.";
       emit setupRequested();
+    } else if (QFileInfo::exists(m_path)) {
+      m_status += " It could not be renamed and is still in the recording "
+                  "folder.";
     }
     emit changed();
     return;
   }
   m_path = published;
   if (incomplete) {
-    m_status += " Incomplete recording kept at " + m_path;
+    m_status += " " + Recording::keptNote(m_path);
     emit changed();
     return;
   }

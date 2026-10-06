@@ -118,6 +118,7 @@ Click an active tool again to return to **Select**. With **Crop**, drag over the
 area to keep; the crop applies and returns to Select. Choose Crop again to trim
 the cropped image further. **Ctrl+Z** restores each previous crop in turn.
 Hold Shift while drawing or dragging an endpoint for 45-degree lines and arrows.
+The readout shows the angle counterclockwise from the right, so up-right is 45°.
 Hold Shift while drawing shapes for squares and circles. Hold Shift while dragging
 a shape corner to keep its original proportions.
 Drag marks to move them, or hold Shift to move straight. Side handles resize
