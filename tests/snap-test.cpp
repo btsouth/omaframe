@@ -71,6 +71,8 @@ class SnapTest : public QObject {
   Q_OBJECT
 private slots:
   void sectorsAndClockwiseTies() {
+    // Sectors step clockwise on screen; labels read counterclockwise from the
+    // right like a protractor (screen-down-right is 315, up is 90).
     const QSizeF size(1920, 1080);
     for (int sector = 0; sector < 8; ++sector) {
       for (double offset : {-22.49, 0., 22.49, 22.5}) {
@@ -83,10 +85,28 @@ private slots:
             MarkConstraints::resolve("arrow", {.5, .5}, pointer, size, true);
         QVERIFY(result.valid);
         const int expected = (sector + (offset == 22.5 ? 1 : 0)) % 8;
-        QCOMPARE(result.label, QString::number(expected * 45) + QChar(0x00b0));
+        QCOMPARE(result.label,
+                 QString::number((8 - expected) % 8 * 45) + QChar(0x00b0));
         const auto v = pixels(result.point - result.anchor, size);
         QVERIFY(near(std::hypot(v.x(), v.y()), 100));
       }
+    }
+  }
+  void labelsReadLikeAProtractor() {
+    const QSizeF size(1000, 1000);
+    const struct {
+      QPointF to;
+      const char *label;
+    } cases[] = {{{.7, .5}, "0°"},   {{.7, .3}, "45°"},  {{.5, .3}, "90°"},
+                 {{.3, .3}, "135°"}, {{.3, .5}, "180°"}, {{.3, .7}, "225°"},
+                 {{.5, .7}, "270°"}, {{.7, .7}, "315°"}};
+    for (const auto &c : cases) {
+      const auto result =
+          MarkConstraints::resolve("arrow", {.5, .5}, c.to, size, true);
+      QCOMPARE(result.label, QString::fromUtf8(c.label));
+      const auto line =
+          MarkConstraints::resolve("line", {.5, .5}, c.to, size, true);
+      QCOMPARE(line.label, QString::fromUtf8(c.label));
     }
   }
   void boundsAndDegenerate() {
@@ -195,7 +215,7 @@ private slots:
       const auto result = MarkConstraints::resolve(
           "arrow", (globalAnchor - origin) / 400,
           (globalPointer - origin) / 400, {400, 400}, true);
-      QCOMPARE(result.label, QString("45°"));
+      QCOMPARE(result.label, QString("315°"));
     }
     QVERIFY(
         !MarkConstraints::resolve("box", {}, {1e308, 1e308}, {1920, 1080}, true)
@@ -294,7 +314,7 @@ private slots:
     scene.move({240, 180});
     QTest::keyPress(&scene.window, Qt::Key_Shift);
     QTRY_COMPARE(scene.canvas->property("constraintLabel").toString(),
-                 QString("45°"));
+                 QString("315°"));
     auto *readout = scene.canvas->findChild<QQuickItem *>("constraintReadout");
     QVERIFY(readout);
     QVERIFY(readout->isVisible());

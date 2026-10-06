@@ -41,6 +41,14 @@ Placement placeStop(const QList<Display> &displays,
 Placement placeCountdown(const QList<Display> &displays,
                          const QString &capturedDisplay,
                          QSize size = {420, 48});
+/** A short plain reason for a recorder that ended without finishing its
+ *  file. The recorder's own output (`output`) only picks the wording of a few
+ *  known causes; it is never shown, and belongs in the log. */
+QString failureReason(int exitCode, QProcess::ExitStatus status,
+                      const QString &output, bool noFrames);
+/** The sentence that says where a kept recording is: its file name, never the
+ *  hidden part file or a long path. */
+QString keptNote(const QString &path);
 QString partPath(const QString &final);
 QString publishPart(const QString &part, const QString &final, bool incomplete);
 void recoverParts(const QString &folder, qint64 minimumAgeSeconds = 3600);
