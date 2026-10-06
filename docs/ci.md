@@ -6,7 +6,7 @@ a GitHub-hosted runner, builds the app and every test binary, and checks the
 CMake install layout and desktop entry. It uploads CTest results and the test
 log, including when tests fail. It does not publish packages or releases.
 
-Eleven CTest suites have the `headless` label:
+Seventeen CTest suites have the `headless` label:
 
 | Suite | Coverage |
 | --- | --- |
@@ -21,6 +21,12 @@ Eleven CTest suites have the `headless` label:
 | webcam | Bounded FFmpeg camera encoding, pause-aware timestamps, aspect ratio and encoder failures using fixture frames |
 | scroll-capture | Alignment, repeated content, full-width headers and footers, scrollbar cleanup and preservation of textured edges, automatic/manual handoff, interruptions and image-size limits |
 | scroll-studio | Control placement, tall-image previews, draft validation, result handoff and shutdown with active preview jobs |
+| snap | Shift angle snapping and shape constraints in screen pixels, crops, tall images, zoom, readouts and draft round trips |
+| delay | Delay timer requests, countdown states, cancellation, compositor dismissal through a fake transport and the Shift+Print shortcut |
+| history | History folder scanning, draft links and previews, thumbnails, recording publication and crash recovery |
+| audio-levels | Meter level math, states and stream lifecycle for every surface and recorder state, with a fake backend |
+| audio-meter-ui | Meter layout in the capture bar, recording control and Options |
+| file-picker | System file chooser requests, filters, start folders, window export and the fallback dialog |
 
 Qt GUI tests in this group use CTest's offscreen setting. No compositor,
 session bus or GPU capture is required. The theme suite's installed Omarchy
@@ -34,8 +40,10 @@ text depends on the desktop's system fonts and runs in the local suite, not
 hosted CI. No recognition assertions are removed from that suite.
 
 The `pipelines` suite has the `desktop` label because it exercises native
-Wayland capture and clipboard handoff. It is not run in hosted CI. Run all
-thirteen suites locally inside omabox:
+Wayland capture and clipboard handoff. It is not run in hosted CI. The
+`audio-pulse` suite has the `audio-server` label and starts a private
+PulseAudio server with synthetic sources (`tests/run-audio-pulse.sh`). Run the
+other suites locally inside omabox:
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
