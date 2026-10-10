@@ -33,9 +33,8 @@ sets up Print, Alt+Print and Alt+Shift+Print when they are free or still use
 Omarchy's stock capture actions. It backs up your bindings first and leaves
 custom keys alone.
 
-Version 0.10.0 adds a screenshot delay timer, capture history, Shift angle
-snapping and live microphone and computer sound meters, and uses the system
-file chooser for Open. See [the release notes](docs/release-notes-0.10.0.md).
+Version 0.11.0 pins screenshots to your screen and opens a screenshot again
+when you click its notification. See [the release notes](docs/release-notes-0.11.0.md).
 
 ## Take a screenshot
 
