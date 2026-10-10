@@ -82,6 +82,27 @@ also set up the optional **Shift+Print** shortcut. During the countdown, click
 **Cancel** or press either screenshot shortcut again. Ordinary Print stays
 immediate. The badge may appear in an ongoing recording.
 
+## Pin a screenshot
+
+Want to keep a screenshot in view while you work? Press **P** on the finish
+chooser, or **Pin** (Ctrl+P) in the editor. The pin lifts off the place you
+captured and settles in the corner farthest from it, at its own size or
+smaller when it is large. It stays above your windows on every workspace
+until you close it. A pin is the screenshot itself with your marks and crop,
+without the finish. To show it framed, on a call say, press Shift+P instead.
+Pinning doesn't copy or save anything.
+
+- Drag a pin to move it, onto another display too, or drag its corners to
+  resize it.
+- Scroll over it to zoom, or Ctrl+scroll to fade it.
+- Double-click, middle-click or Esc closes it.
+- Right-click for Copy, Save, Actual size, Click through, opacity and Close.
+
+**Click through** lets clicks reach the window under the pin. Only a small pin
+badge in its corner still takes clicks: click the badge to hold the pin again.
+To pin a saved screenshot, open History, then press **Pin** or **P**. Omaframe
+keeps running while pins are open, and exits when the last one closes.
+
 ## Capture a scrolling page
 
 Press S in the screenshot selector, or run `omaframe --scroll`. Click the window
@@ -178,7 +199,7 @@ keeps your edits open.
 
 Find saved captures and editable drafts in History from the toolbar, with Ctrl+H, or with `omaframe --history`. Filter by type, search filenames, and refresh to see folder changes. Previously used save folders are scanned too; forget them in Settings. Only matching files directly in those folders appear.
 
-Copy again uses the saved PNG bytes or a video file link. Open captures in the editor, resume linked drafts, reveal files, or move one file to Trash after confirmation. Incomplete recordings carry an Incomplete badge.
+Copy again uses the saved PNG bytes or a video file link. Pin a screenshot to keep it on screen. Open captures in the editor, resume linked drafts, reveal files, or move one file to Trash after confirmation. Incomplete recordings carry an Incomplete badge.
 
 Clipboard-only copies add no history item. Editable drafts may remain. Screenshot draft previews apply the saved edits and finish. Video previews use a bounded private JPEG cache; history keeps no extra full captures.
 
@@ -200,6 +221,7 @@ Clipboard-only copies add no history item. Editable drafts may remain. Screensho
 | Picking a finish | Ctrl+C | Copy the selected finish without saving |
 | Picking a finish | Esc | Cancel |
 | Picking a finish | E / R | Mark up the selected finish / retake |
+| Picking a finish | P / Shift+P | Pin the screenshot to the screen / pin it with the selected finish |
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
 | Marking up or video | Shift+drag | Constrain angles, draw squares or circles, keep corner proportions, or move straight |
@@ -208,12 +230,17 @@ Clipboard-only copies add no history item. Editable drafts may remain. Screensho
 | Marking up | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Marking up | Delete, Ctrl+D, F2 | Delete, duplicate, rewrite the selected label |
 | Marking up | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste the selected mark. Never copies or closes the screenshot |
+| Marking up | Ctrl+P | Pin the screenshot to the screen |
 | Marking up | Ctrl+Enter | Finish: after a capture, copy and save a file only when automatic saving is on; in the studio, copy and save |
 | Reviewing a video | Space, I / O, Delete | Play, set start / end, remove the selected part |
 | Reviewing a video | C V G R A B T N | Crop, select, blur, redact, arrow, box, label, step. With a mark selected, I / O set when it shows |
 | Reviewing a video | Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y | Undo / redo trim, cuts and marks |
 | Reviewing a video | Ctrl+C / Ctrl+X / Ctrl+V, Ctrl+D | Copy / cut / paste the selected mark at the playhead, duplicate it |
 | In the window | Ctrl+H | Open capture history |
+| History | P | Pin the selected screenshot |
+| A clicked pin | Esc / Ctrl+C / Ctrl+S | Close / copy / save it |
+| A clicked pin | Ctrl+0, Ctrl+= / Ctrl+- | Actual size, zoom in / out |
+| A clicked pin | T, arrow keys | Click through, nudge it (Shift: ten pixels) |
 | In the window | Ctrl+S | Copy and save, even when automatic saving is off |
 
 ## Good to know

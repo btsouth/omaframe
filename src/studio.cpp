@@ -1,5 +1,6 @@
 #include "history.hpp"
 #include "studio.hpp"
+#include "pins.hpp"
 #include "file-picker.hpp"
 #include "capture-session.hpp"
 #include "capture.hpp"
@@ -489,6 +490,8 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
   m_original = std::move(image);
   m_workingSize = m_original.size();
   m_edgeRoom = {};
+  m_sourceMonitor.clear();
+  m_sourceArea = {};
   m_name = std::move(name);
   m_demo = demo;
   m_marks.reset(m_original);
@@ -746,6 +749,8 @@ void Studio::resumeDraft(const QString &id) {
   m_original = std::move(image);
   m_workingSize = m_original.size();
   m_edgeRoom = {};
+  m_sourceMonitor.clear();
+  m_sourceArea = {};
   m_marks.restore(m_original, std::move(edits),
                   document.value("selected").toInt(-1));
   m_options.style = std::clamp(document.value("style").toInt(), 0, 8);
@@ -803,8 +808,8 @@ void Studio::clearOriginals() {
   emit changed();
 }
 
-static bool writePng(const QString &path, const QImage &image, QString &error,
-                     bool privateFile = false) {
+bool writePng(const QString &path, const QImage &image, QString &error,
+              bool privateFile) {
   QSaveFile file(path);
   if (!file.open(QIODevice::WriteOnly)) {
     error = file.errorString();
@@ -827,7 +832,7 @@ static bool writePng(const QString &path, const QImage &image, QString &error,
   }
   return true;
 }
-static bool copyPngBytes(const QByteArray &png, QString &error) {
+bool copyPngBytes(const QByteArray &png, QString &error) {
   QProcess clipboard;
   clipboard.start("wl-copy", {"--type", "image/png"});
   if (!clipboard.waitForStarted(3000)) {
@@ -1165,9 +1170,11 @@ void Studio::acquireCapture(bool region, int monitor, bool repeat,
   // Only wait for dismissal animations when this process has a visible UI.
   // A fresh shortcut launch has nothing of its own to hide.
   const auto windows = QGuiApplication::allWindows();
+  // Pins stay on screen, and in the capture, so they are not waited for.
   const bool wasVisible =
-      std::any_of(windows.cbegin(), windows.cend(),
-                  [](QWindow *w) { return w->isVisible(); });
+      std::any_of(windows.cbegin(), windows.cend(), [](QWindow *w) {
+        return w->isVisible() && w->title() != PinBoard::overlayTitle;
+      });
   emit changed();
   emit hideStudio();
   QStringList requested, screens;
@@ -1251,6 +1258,8 @@ void Studio::acquireCapture(bool region, int monitor, bool repeat,
                     loadImage(repeat ? repeated : frame.value(),
                               repeat ? "Repeated area capture" : "Screen capture",
                               false);
+                    m_sourceMonitor = frame.key();
+                    m_sourceArea = repeat ? lastArea : QRectF(0, 0, 1, 1);
                     m_quickState = "choosing";
                     emit changed();
                     emit chooserRequested();
@@ -1370,6 +1379,8 @@ void Studio::finishSelection(const QString &monitor, double x1, double y1,
   const bool whole = m_lastArea.left() <= 0.001 && m_lastArea.top() <= 0.001 &&
                      m_lastArea.right() >= 0.999 && m_lastArea.bottom() >= 0.999;
   loadImage(result, whole ? "Display capture" : "Region capture", false);
+  m_sourceMonitor = monitor;
+  m_sourceArea = m_lastArea;
   m_quickState = "choosing";
   emit changed();
   emit chooserRequested();
@@ -1514,7 +1525,7 @@ void Studio::saveQuick() {
 }
 void Studio::finishQuick(int value, bool save) {
   if (!m_quickMode || (m_quickState != "choosing" && m_quickState != "failed" &&
-                       m_quickState != "copy-failed"))
+                       m_quickState != "copy-failed" && m_quickState != "pin-failed"))
     return;
   if (m_busy || m_pendingFinish >= 0 || value < 0 || value > 8)
     return;
@@ -1562,7 +1573,8 @@ void Studio::copyQuick() {
   if (!m_quickMode || m_busy || m_pendingFinish >= 0 || m_original.isNull() ||
       !recoveryAction().isEmpty() ||
       (m_quickState != "choosing" && m_quickState != "editing" &&
-       m_quickState != "copy-failed" && m_quickState != "failed"))
+       m_quickState != "copy-failed" && m_quickState != "failed" &&
+       m_quickState != "pin-failed"))
     return;
   cancelTextCopy();
   m_busy = true;
@@ -1647,6 +1659,92 @@ void Studio::copyQuick() {
           file.write(png) == png.size() && file.commit())
         result.preview = file.fileName();
     }
+    return result;
+  }));
+}
+void Studio::pin(bool withFinish) {
+  if (m_busy || m_pendingFinish >= 0 || m_original.isNull() ||
+      !recoveryAction().isEmpty())
+    return;
+  if (m_quickMode && m_quickState != "choosing" && m_quickState != "editing" &&
+      m_quickState != "copy-failed" && m_quickState != "failed" &&
+      m_quickState != "pin-failed")
+    return;
+  cancelTextCopy();
+  const bool quick = m_quickMode;
+  m_busy = true;
+  if (quick) {
+    m_quickState = "pinning";
+    m_draftTimer.stop();
+  }
+  m_status = "Pinning…";
+  emit changed();
+  struct PinResult {
+    QImage image;
+    QString error;
+  };
+  auto *watcher = new QFutureWatcher<PinResult>(this);
+  // Where the visible part came from, so the pin opens over it. A crop in
+  // the editor narrows the area to what is left.
+  QRectF area;
+  if (!m_sourceArea.isEmpty()) {
+    const QRect crop = Frame::cropPixels(m_original.size(), m_marks.visibleEdits());
+    const double w = m_original.width(), h = m_original.height();
+    area = QRectF(m_sourceArea.x() + crop.x() / w * m_sourceArea.width(),
+                  m_sourceArea.y() + crop.y() / h * m_sourceArea.height(),
+                  crop.width() / w * m_sourceArea.width(),
+                  crop.height() / h * m_sourceArea.height());
+  }
+  const QString monitor = m_sourceMonitor.isEmpty() ? m_captureMonitor : m_sourceMonitor;
+  const double displayWidth =
+      m_sourceArea.isEmpty() ? 0 : m_original.width() / m_sourceArea.width();
+  connect(watcher, &QFutureWatcher<PinResult>::finished, this,
+          [this, watcher, quick, monitor, area, displayWidth] {
+            const auto result = watcher->result();
+            watcher->deleteLater();
+            m_busy = false;
+            if (!result.error.isEmpty()) {
+              if (quick)
+                m_quickState = "pin-failed";
+              m_status = "Could not pin it: " + result.error;
+              emit changed();
+              return;
+            }
+            m_status = "Pinned to the screen.";
+            emit pinRequested(result.image, monitor, area, displayWidth);
+            if (!quick) {
+              emit changed();
+              return;
+            }
+            // Like a clipboard-only copy: nothing is saved, and the draft is
+            // left as it was.
+            m_draftDirty = false;
+            m_quickState = "pinned";
+            emit changed();
+            emit dismissRequested();
+          });
+  watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_marks.edits(),
+                                        options = m_options, withFinish] {
+    // The screenshot itself with its marks and crop. A finish is for
+    // sharing, so it is only kept when asked for.
+    PinResult result;
+    QString renderError;
+    const QImage edited = Frame::applyEdits(source, edits, true, &renderError);
+    if (edited.isNull()) {
+      result.error = renderError;
+      return result;
+    }
+    if (!withFinish) {
+      result.image = edited.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+      return result;
+    }
+    const QSize output = Frame::outputSize(edited.size(), options, Frame::edgeRoom(edited));
+    if (qint64(output.width()) * output.height() > 80000000) {
+      result.error = "it would exceed 80 megapixels.";
+      return result;
+    }
+    result.image = Frame::compose(edited, options)
+                       .convertToFormat(QImage::Format_ARGB32_Premultiplied);
     return result;
   }));
 }

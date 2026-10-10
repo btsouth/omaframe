@@ -1,0 +1,177 @@
+#pragma once
+#include <QAbstractListModel>
+#include <QHash>
+#include <QImage>
+#include <QMutex>
+#include <QQuickImageProvider>
+#include <QRectF>
+#include <QTimer>
+#include <functional>
+
+class QQmlEngine;
+class QQuickWindow;
+class QScreen;
+
+/** Geometry for screenshots pinned to the screen, in logical pixels. These
+ *  helpers work relative to one display's top left; pins themselves are kept
+ *  in desktop layout coordinates so one can straddle two displays. */
+namespace Pins {
+/** The smallest a pin gets along its short edge, and how far it can grow
+ *  past its natural size. */
+constexpr double minEdge = 48;
+constexpr double maxZoom = 8;
+/** Space a pin keeps from the display's edges, and more at the top for the
+ *  bar. */
+constexpr double margin = 24;
+constexpr double topMargin = 56;
+/** Where a new pin of `image` (logical pixels) comes to rest on a display of
+ *  `display` size: out of the way in a corner, at its natural size unless
+ *  that would take more than about 40% of the display. `area` is the part of
+ *  the display it was captured from, as fractions; the pin goes to the corner
+ *  farthest from it, so it never covers what was just captured. Without an
+ *  area it goes bottom right. */
+QRectF place(QSizeF display, QSizeF image, const QRectF &area = {});
+/** `rect` stepped in from its corner until it no longer sits on a corner of
+ *  one of `others`, so a new pin never hides one already there. */
+QRectF cascade(QRectF rect, QSizeF display, const QList<QRectF> &others);
+/** `area` (fractions of a display of `display` size) in logical pixels: where
+ *  a new pin starts before it moves to its corner. Empty without an area. */
+QRectF origin(QSizeF display, const QRectF &area);
+/** `rect` scaled by `factor` around `anchor`, keeping its shape, between
+ *  minEdge and maxZoom times `natural`. */
+QRectF zoom(const QRectF &rect, double factor, QPointF anchor, QSizeF natural);
+/** `rect` resized from the corner opposite `fixed` towards `pointer`,
+ *  keeping its shape, within the same limits as zoom(). */
+QRectF resize(const QRectF &rect, QPointF fixed, QPointF pointer, QSizeF natural);
+/** Moves `rect` the least distance that keeps at least `keep` pixels of it
+ *  on a display of `display` size, so a pin cannot be lost off an edge. */
+QRectF keepReachable(const QRectF &rect, QSizeF display, double keep = 40);
+/** Where the badge of a click-through pin sits; the only part of it that
+ *  still takes the pointer. */
+QRectF badge(const QRectF &rect);
+} // namespace Pins
+
+class PinImages final : public QQuickImageProvider {
+public:
+  PinImages() : QQuickImageProvider(Image) {}
+  QImage requestImage(const QString &id, QSize *size, const QSize &) override;
+  void put(int id, const QImage &image);
+  void remove(int id);
+
+private:
+  QMutex mutex;
+  QHash<int, QImage> images;
+};
+
+/** Screenshots pinned to the screen. Every display a pin touches gets one
+ *  transparent overlay that draws the pins on it and only takes the pointer
+ *  where they are, so moving and resizing never wait on the compositor. A pin
+ *  across two displays shows on both, like a window. Positions are in the
+ *  desktop layout, in logical pixels. */
+class PinBoard final : public QAbstractListModel {
+  Q_OBJECT
+  Q_PROPERTY(int count READ count NOTIFY countChanged)
+public:
+  enum Role {
+    PinId = Qt::UserRole + 1,
+    Screen,
+    PinX,
+    PinY,
+    PinWidth,
+    PinHeight,
+    PinOpacity,
+    ClickThrough,
+    Stack,
+    Source,
+    ZoomPercent,
+    Created,
+    Origin
+  };
+  /** `directory` is where Save writes, the screenshot folder. */
+  PinBoard(PinImages *images, std::function<QString()> directory,
+           QObject *parent = nullptr);
+  ~PinBoard() override;
+  /** The overlays' window title, so other code can tell them apart. */
+  static constexpr const char *overlayTitle = "Omaframe pins";
+  int rowCount(const QModelIndex &parent = {}) const override;
+  QVariant data(const QModelIndex &index, int role) const override;
+  QHash<int, QByteArray> roleNames() const override;
+  int count() const { return m_pins.size(); }
+  /** Creates the overlays with this engine; call once before add(). */
+  void setEngine(QQmlEngine *engine) { m_engine = engine; }
+  /** Pins `image` on display `monitor` (or the first one), over `area`
+   *  when it came from there. It shows at one image pixel per display pixel:
+   *  `scale` is the display's pixels per logical pixel, which can be
+   *  fractional. Zero uses the display's own whole-number scale. */
+  void add(QImage image, const QString &monitor, const QRectF &area = {},
+           double scale = 0);
+  Q_INVOKABLE void move(int id, double x, double y);
+  Q_INVOKABLE void zoomBy(int id, double factor, double anchorX, double anchorY);
+  Q_INVOKABLE void resizeTo(int id, double fixedX, double fixedY,
+                            double pointerX, double pointerY);
+  Q_INVOKABLE void actualSize(int id);
+  Q_INVOKABLE void setOpacity(int id, double opacity);
+  Q_INVOKABLE void setClickThrough(int id, bool on);
+  Q_INVOKABLE void raise(int id);
+  /** A drag or resize started on `screen`'s overlay. That overlay keeps the
+   *  pointer until dropped(), even once the pin has left its display. */
+  Q_INVOKABLE void hold(const QString &screen);
+  /** A drag or resize ended: the pin now belongs to the display under its
+   *  middle, and stays within reach there. */
+  Q_INVOKABLE void dropped(int id);
+  Q_INVOKABLE void copy(int id);
+  Q_INVOKABLE void save(int id);
+  Q_INVOKABLE void close(int id);
+  Q_INVOKABLE void closeAll();
+  /** While a menu is open its overlay takes every click, so one outside
+   *  closes the menu instead of reaching the window below. */
+  Q_INVOKABLE void setMenuOpen(const QString &screen, bool open);
+  /** Lets `screen`'s overlay take the keyboard, after a pin there is
+   *  clicked, or gives it back. A new pin never takes it by itself. */
+  Q_INVOKABLE void setKeyboard(const QString &screen, bool on);
+signals:
+  void countChanged();
+  /** A short note to show on the pin, such as "Copied". */
+  void notice(int id, const QString &text);
+  /** Save wrote a PNG into the screenshot folder. */
+  void saved(const QString &path);
+  /** The last pin closed. */
+  void emptied();
+
+private:
+  struct Pin {
+    int id = 0;
+    QImage image;
+    QString screen;
+    QRectF rect;
+    double opacity = 1;
+    bool clickThrough = false;
+    int stack = 0;
+    /** Image pixels per logical pixel at 100%. */
+    double scale = 1;
+    qint64 created = 0;
+    /** Where it was captured from, for its first move; may be empty. */
+    QRectF origin;
+    bool busy = false;
+  };
+  int row(int id) const;
+  void changedAt(int row, const QList<int> &roles);
+  QScreen *screen(const QString &name) const;
+  bool showOverlay(const QString &screen);
+  /** Keeps the pin within reach of its display. */
+  void keepReachable(Pin &pin);
+  void screenAdded(QScreen *screen);
+  /** Moves pins whose display is gone (or is `gone`) to `to`. */
+  void rehome(QScreen *to, QScreen *gone = nullptr);
+  void syncOverlays();
+  void screenRemoved(QScreen *screen);
+  PinImages *m_images;
+  std::function<QString()> m_directory;
+  QQmlEngine *m_engine = nullptr;
+  QList<Pin> m_pins;
+  QHash<QString, QQuickWindow *> m_overlays;
+  QStringList m_menus;
+  QString m_held;
+  QTimer m_sync;
+  int m_nextId = 1, m_nextStack = 1;
+};

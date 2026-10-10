@@ -99,10 +99,13 @@ public:
   Q_INVOKABLE bool canEditAt(int row) const;
   Q_INVOKABLE bool hasDraftAt(int row) const;
   Q_INVOKABLE QString nameAt(int row) const;
+  Q_INVOKABLE QString kindAt(int row) const;
 signals:
   void changed();
   void navigate(const QString &command, const QUrl &path);
   void deleteDraft(const QString &kind, const QString &id);
+  /** A saved screenshot should be pinned to the screen. */
+  void pin(const QImage &image);
 
 private:
   void rebuild();

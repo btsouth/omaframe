@@ -16,6 +16,13 @@
 #include <atomic>
 #include <memory>
 
+/** Writes `image` as a PNG through a temporary file. */
+bool writePng(const QString &path, const QImage &image, QString &error,
+              bool privateFile = false);
+/** Puts PNG bytes on the clipboard with wl-copy, which keeps serving them
+ *  after Omaframe exits. */
+bool copyPngBytes(const QByteArray &png, QString &error);
+
 class ImageStore final : public QQuickImageProvider {
 public:
   ImageStore() : QQuickImageProvider(QQuickImageProvider::Image) {}
@@ -313,6 +320,11 @@ public:
   /** Copy the capture with its edits and chosen finish, without saving it. */
   Q_INVOKABLE void copyQuick();
   Q_INVOKABLE void dismissQuick();
+  /** Pins the image with its edits to the screen, from the place it was
+   *  captured from. `withFinish` keeps the chosen finish, for showing it to
+   *  others; a reference is better without. A quick capture then closes without copying or
+   *  saving; the open editor stays. */
+  Q_INVOKABLE void pin(bool withFinish = false);
   /** Redacts every possible secret that is not covered yet. */
   Q_INVOKABLE void hideSecrets();
   /** Copies the text in the image, once it has been read. */
@@ -346,6 +358,11 @@ signals:
   /** The selector switched to video; recording options should load. */
   void recordModeEntered();
   void recordOptionsRequested();
+  /** `image` should be pinned on `monitor`, over `area` (fractions of the
+   *  display) when it is known. `displayWidth` is that display's width in
+   *  pixels as captured, or zero. */
+  void pinRequested(const QImage &image, const QString &monitor, const QRectF &area,
+                    double displayWidth);
 
 private:
   friend class DelayTest;
@@ -381,6 +398,10 @@ private:
   QRectF m_lastArea;
   QSize m_lastAreaPixels;
   QString m_lastAreaMonitor;
+  /** The display and part of it the current image was captured from, while
+   *  that is known; a pin opens there. */
+  QString m_sourceMonitor;
+  QRectF m_sourceArea;
   QSize m_workingSize;
   QRectF m_previewCropBounds;
   QMargins m_edgeRoom;

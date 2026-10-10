@@ -707,6 +707,9 @@ void CaptureHistoryModel::setVisibleRange(int first, int last) {
     }));
   }
 }
+QString CaptureHistoryModel::kindAt(int row) const {
+  return row >= 0 && row < m_rows.size() ? m_rows[row].kind : QString();
+}
 QString CaptureHistoryModel::nameAt(int row) const {
   return row >= 0 && row < m_rows.size() ? m_rows[row].name : QString();
 }
@@ -764,6 +767,15 @@ bool CaptureHistoryModel::action(int row, const QString &action,
       ok = QFile::moveToTrash(e.path);
       if (ok)
         refresh();
+    } else if (action == "pin" && e.kind == "Screenshot") {
+      QImage image;
+      if (!image.loadFromData(readFile(e.path, e.identity, 256 * 1024 * 1024))) {
+        m_status = "Could not read the saved image. It may have changed.";
+        emit changed();
+        return false;
+      }
+      emit pin(image);
+      ok = true;
     } else if (action == "copy") {
       auto *mime = new QMimeData;
       if (e.kind == "Screenshot") {
@@ -781,7 +793,7 @@ bool CaptureHistoryModel::action(int row, const QString &action,
       ok = true;
     }
   }
-  m_status = ok ? (action == "copy" ? "Copied again." : QString())
+  m_status = ok ? (action == "copy" ? "Copied again." : action == "pin" ? "Pinned to the screen." : QString())
                 : "Could not complete that action.";
   emit changed();
   return ok;

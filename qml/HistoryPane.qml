@@ -107,6 +107,7 @@ ColumnLayout {
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) pane.openRow();
             else if (event.key === Qt.Key_C && (event.modifiers & Qt.ControlModifier)) pane.act("copy");
             else if (event.key === Qt.Key_Delete) pane.confirmDelete();
+            else if (event.key === Qt.Key_P && !event.modifiers && !history.isDraftAt(currentIndex) && history.kindAt(currentIndex) === "Screenshot") pane.act("pin");
             else if (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)) actions.showFor(currentIndex);
             else if (event.key === Qt.Key_Escape) { currentIndex = -1; pane.homeRequested(); }
             else return;
@@ -179,6 +180,7 @@ ColumnLayout {
                         spacing: 6
                         StudioButton { text: "Copy"; primary: true; visible: !card.draft; Accessible.name: "Copy " + card.captureName; onClicked: { pane.select(card.index); pane.act("copy"); } }
                         StudioButton { text: card.draft ? "Resume" : "Open"; quiet: true; visible: card.canEdit; onClicked: { pane.select(card.index); pane.openRow(); } }
+                        StudioButton { text: "Pin"; glyph: "pin"; quiet: true; visible: !card.draft && card.kind === "Screenshot"; hint: "Keep it on screen to refer to · P"; Accessible.name: "Pin " + card.captureName; onClicked: { pane.select(card.index); pane.act("pin"); } }
                         StudioButton { text: "Actions"; quiet: true; Accessible.name: "Actions for " + card.captureName; onClicked: { pane.select(card.index); actions.showFor(card.index); } }
                     }
                     Item { Layout.fillHeight: true }
@@ -201,15 +203,18 @@ ColumnLayout {
         property bool draft: false
         property bool hasDraft: false
         property bool canEdit: false
+        property bool screenshot: false
         function showFor(index) {
             if (index < 0) return;
             row = index; key = history.keyAt(index); path = history.pathAt(index); draft = history.isDraftAt(index); hasDraft = history.hasDraftAt(index); canEdit = history.canEditAt(index);
+            screenshot = !draft && history.kindAt(index) === "Screenshot";
             popup(pane, Math.max(0, pane.width - width - 20), 130);
         }
         function act(action) { history.action(row, action, key); }
         MenuItem { text: actions.draft ? "Resume" : "Open in editor"; visible: actions.canEdit; height: visible ? implicitHeight : 0; onTriggered: actions.act("edit") }
         MenuItem { text: "Resume draft"; visible: !actions.draft && actions.hasDraft; height: visible ? implicitHeight : 0; onTriggered: actions.act("resume") }
         MenuItem { text: "Copy again"; enabled: !actions.draft; onTriggered: actions.act("copy") }
+        MenuItem { text: "Pin to screen"; visible: actions.screenshot; height: visible ? implicitHeight : 0; onTriggered: actions.act("pin") }
         MenuItem { text: "Open externally"; enabled: !actions.draft; onTriggered: actions.act("external") }
         MenuItem { text: "Reveal in folder"; enabled: !actions.draft; onTriggered: actions.act("reveal") }
         MenuItem { text: actions.draft ? "Delete draft…" : "Move to Trash…"; onTriggered: pane.confirmDelete(actions.row, actions.key, actions.path, actions.draft) }
