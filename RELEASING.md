@@ -14,9 +14,14 @@ release blockers.
 
 `packaging/build-package.sh` requires a clean checkout at the tag matching
 `CMakeLists.txt`, currently `v0.11.0`. It archives that tag, computes the
-source SHA-256, fills `packaging/PKGBUILD.in`, and runs `makepkg` without
-installing dependencies or changing the host package database. The output
-contains the source archive, a resolved PKGBUILD, and an Arch package.
+source SHA-256, fills `packaging/PKGBUILD.in`, and runs `makepkg` in a clean
+`archlinux` Docker container synced to Omarchy's stable mirror. The host
+package database is not touched. The output contains the source archive, a
+resolved PKGBUILD, and an Arch package.
+
+Building on stable matters: a package built against newer Qt than stable
+ships fails to start there, as 0.11.0 did with Qt 6.12. The package requires
+the Qt it was built against, so pacman refuses such an install instead.
 
 For a disposable package from current uncommitted work:
 

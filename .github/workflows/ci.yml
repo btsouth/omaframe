@@ -19,17 +19,26 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: Arch build and headless tests
+    name: Arch build and headless tests (${{ matrix.packages }})
     runs-on: ubuntu-latest
     container: archlinux:base
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Releases build on Omarchy stable; current Arch catches newer Qt early.
+        packages: [omarchy-stable, arch]
     defaults:
       run:
         shell: bash
     steps:
+      - name: Use Omarchy stable packages
+        if: matrix.packages == 'omarchy-stable'
+        run: echo 'Server = https://stable-mirror.omarchy.org/$repo/os/$arch' > /etc/pacman.d/mirrorlist
       - name: Install dependencies
+        # -uu lets the stable snapshot downgrade packages newer than it.
         run: |
-          pacman -Syu --noconfirm --needed \
+          pacman -Syyuu --noconfirm --needed \
             base-devel cmake ninja pkgconf git python \
             qt6-base qt6-declarative qt6-multimedia qt6-wayland qt6-imageformats bash \
             layer-shell-qt wayland wayland-protocols libpulse \
@@ -70,7 +79,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: test-results
+          name: test-results-${{ matrix.packages }}
           path: |
             build/test-results.xml
             build/ocr-patterns.xml

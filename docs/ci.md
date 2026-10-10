@@ -5,6 +5,8 @@ to `main`, and manual dispatch. It uses a disposable Arch Linux container on
 a GitHub-hosted runner, builds the app and every test binary, and checks the
 CMake install layout and desktop entry. It uploads CTest results and the test
 log, including when tests fail. It does not publish packages or releases.
+It runs twice: once on Omarchy's stable mirror, which releases build against,
+and once on current Arch to catch newer Qt early.
 
 Eighteen CTest suites have the `headless` label:
 
