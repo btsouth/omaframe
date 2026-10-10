@@ -1794,7 +1794,7 @@ ApplicationWindow {
                     glyph: "pin"
                     quiet: true
                     implicitHeight: 44
-                    hint: "Keep it on screen to refer to. Nothing is copied or saved · Ctrl+P"
+                    hint: "Keep the screenshot on screen to refer to, without a finish. Nothing is copied or saved · Ctrl+P"
                     enabled: !root.working
                     onClicked: root.pinCurrent()
                 }

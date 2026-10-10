@@ -12,8 +12,9 @@ class QQmlEngine;
 class QQuickWindow;
 class QScreen;
 
-/** Geometry for screenshots pinned to the screen. Rectangles are logical
- *  pixels relative to their display's top left. */
+/** Geometry for screenshots pinned to the screen, in logical pixels. These
+ *  helpers work relative to one display's top left; pins themselves are kept
+ *  in desktop layout coordinates so one can straddle two displays. */
 namespace Pins {
 /** The smallest a pin gets along its short edge, and how far it can grow
  *  past its natural size. */
@@ -51,9 +52,11 @@ private:
   QHash<int, QImage> images;
 };
 
-/** Screenshots pinned to the screen. Every display with a pin gets one
- *  transparent overlay that draws all of its pins and only takes the pointer
- *  where they are, so moving and resizing never waits on the compositor. */
+/** Screenshots pinned to the screen. Every display a pin touches gets one
+ *  transparent overlay that draws the pins on it and only takes the pointer
+ *  where they are, so moving and resizing never wait on the compositor. A pin
+ *  across two displays shows on both, like a window. Positions are in the
+ *  desktop layout, in logical pixels. */
 class PinBoard final : public QAbstractListModel {
   Q_OBJECT
   Q_PROPERTY(int count READ count NOTIFY countChanged)
@@ -69,7 +72,8 @@ public:
     ClickThrough,
     Stack,
     Source,
-    ZoomPercent
+    ZoomPercent,
+    Created
   };
   /** `directory` is where Save writes, the screenshot folder. */
   PinBoard(PinImages *images, std::function<QString()> directory,
@@ -97,9 +101,12 @@ public:
   Q_INVOKABLE void setOpacity(int id, double opacity);
   Q_INVOKABLE void setClickThrough(int id, bool on);
   Q_INVOKABLE void raise(int id);
-  /** A drag ended with the pointer at `x, y` on `screen`'s overlay. A pin
-   *  dropped mostly on another display moves there. */
-  Q_INVOKABLE void dropped(int id, const QString &screen, double x, double y);
+  /** A drag or resize started on `screen`'s overlay. That overlay keeps the
+   *  pointer until dropped(), even once the pin has left its display. */
+  Q_INVOKABLE void hold(const QString &screen);
+  /** A drag or resize ended: the pin now belongs to the display under its
+   *  middle, and stays within reach there. */
+  Q_INVOKABLE void dropped(int id);
   Q_INVOKABLE void copy(int id);
   Q_INVOKABLE void save(int id);
   Q_INVOKABLE void close(int id);
@@ -130,12 +137,15 @@ private:
     int stack = 0;
     /** Image pixels per logical pixel at 100%. */
     double scale = 1;
+    qint64 created = 0;
     bool busy = false;
   };
   int row(int id) const;
   void changedAt(int row, const QList<int> &roles);
   QScreen *screen(const QString &name) const;
   bool showOverlay(const QString &screen);
+  /** Keeps the pin within reach of its display. */
+  void keepReachable(Pin &pin);
   void screenAdded(QScreen *screen);
   /** Moves pins whose display is gone (or is `gone`) to `to`. */
   void rehome(QScreen *to, QScreen *gone = nullptr);
@@ -147,6 +157,7 @@ private:
   QList<Pin> m_pins;
   QHash<QString, QQuickWindow *> m_overlays;
   QStringList m_menus;
+  QString m_held;
   QTimer m_sync;
   int m_nextId = 1, m_nextStack = 1;
 };

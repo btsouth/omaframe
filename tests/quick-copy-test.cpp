@@ -151,14 +151,12 @@ private slots:
     QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
     QCOMPARE(pinned.count(), 1);
     QCOMPARE(studio.quickState(), QString("pinned"));
-    // The pin shows what a copy would paste: edits and the chosen finish.
-    Frame::Options options;
-    options.style = 3;
-    options.padding = studio.padding();
-    options.aspect = studio.aspect();
-    const QImage expected =
-        Frame::compose(Frame::applyEdits(captureImage(), studio.marks()->edits()), options);
-    QCOMPARE(pinned[0][0].value<QImage>().size(), expected.size());
+    // The pin shows the screenshot with its marks, without the finish.
+    const QImage expected = Frame::applyEdits(captureImage(), studio.marks()->edits());
+    const QImage pin = pinned[0][0].value<QImage>();
+    QCOMPARE(pin.size(), expected.size());
+    QCOMPARE(pin.pixelColor(80, 80), expected.pixelColor(80, 80));
+    QCOMPARE(pin.pixelColor(5, 5), expected.pixelColor(5, 5));
     // A scrolling capture has no place on screen to open over.
     QVERIFY(pinned[0][2].toRectF().isEmpty());
     QVERIFY(!QFileInfo::exists(clipboard()));

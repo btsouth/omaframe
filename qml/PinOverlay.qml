@@ -4,12 +4,17 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Effects
 
-// One display's pinned screenshots. The window covers the display but only
-// takes the pointer over its pins (PinBoard sets the mask), so everything
-// else reaches the desktop below. Moving and resizing happen in here.
+// The pinned screenshots on one display. The window covers the display but
+// only takes the pointer over its pins (PinBoard sets the mask), so
+// everything else reaches the desktop below. Pins are placed in the desktop
+// layout: one across two displays is drawn by both of their overlays.
 Window {
     id: overlay
     required property string screenName
+    // This display's top left in the desktop layout.
+    property real originX: 0
+    property real originY: 0
+    function global(item, x, y) { const p = item.mapToItem(null, x, y); return Qt.point(p.x + originX, p.y + originY); }
     color: "transparent"
     flags: Qt.FramelessWindowHint
     title: "Omaframe pins"
@@ -75,19 +80,25 @@ Window {
             required property int stack
             required property string source
             required property int zoomPercent
+            required property real created
             readonly property bool active: overlay.targetPin === pinId
             readonly property bool interacting: body.pressed || corners.resizing
             property real appear: 0
             property bool closing: false
-            visible: screen === overlay.screenName
-            x: pinX
-            y: pinY
+            readonly property bool held: body.pressed || corners.resizing
+            // A pin being dragged stays here until it is let go, even off
+            // this display: the drag belongs to this overlay.
+            visible: held || pinX < overlay.originX + overlay.width && pinX + pinWidth > overlay.originX
+                     && pinY < overlay.originY + overlay.height && pinY + pinHeight > overlay.originY
+            x: pinX - overlay.originX
+            y: pinY - overlay.originY
             width: pinWidth
             height: pinHeight
             z: stack
             opacity: pinOpacity * appear
             scale: 0.97 + 0.03 * appear
-            Component.onCompleted: appearing.start()
+            // Only a new pin fades in, not one dragged onto this display.
+            Component.onCompleted: { if (Date.now() - created < 500) appearing.start(); else appear = 1; }
             NumberAnimation on appear { id: appearing; running: false; from: 0; to: 1; duration: 160; easing.type: Easing.OutCubic }
             NumberAnimation { id: leaving; target: pin; property: "appear"; to: 0; duration: 120; easing.type: Easing.InCubic; onFinished: pins.close(pin.pinId) }
             function dismiss() { if (!closing) { closing = true; if (overlay.hoveredPin === pinId) overlay.hoveredPin = -1; leaving.start(); } }
@@ -156,20 +167,19 @@ Window {
                 }
                 onPressed: function(mouse) {
                     pin.activate();
-                    grab = mapToItem(null, mouse.x, mouse.y);
+                    if (mouse.button === Qt.LeftButton) pins.hold(overlay.screenName);
+                    grab = overlay.global(this, mouse.x, mouse.y);
                     start = Qt.point(pin.pinX, pin.pinY);
                     if (mouse.button === Qt.RightButton) menu.showFor(pin, mouse.x, mouse.y);
                     else if (mouse.button === Qt.MiddleButton) pin.dismiss();
                 }
                 onPositionChanged: function(mouse) {
                     if (!(pressedButtons & Qt.LeftButton)) return;
-                    const at = mapToItem(null, mouse.x, mouse.y);
+                    const at = overlay.global(this, mouse.x, mouse.y);
                     pins.move(pin.pinId, start.x + at.x - grab.x, start.y + at.y - grab.y);
                 }
                 onReleased: function(mouse) {
-                    if (mouse.button !== Qt.LeftButton) return;
-                    const at = mapToItem(null, mouse.x, mouse.y);
-                    pins.dropped(pin.pinId, overlay.screenName, at.x, at.y);
+                    if (mouse.button === Qt.LeftButton) pins.dropped(pin.pinId);
                 }
                 onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) pin.dismiss(); }
                 onWheel: function(wheel) {
@@ -179,8 +189,9 @@ Window {
                         pins.setOpacity(pin.pinId, pin.pinOpacity + notches * 0.05);
                         hud.show("Opacity " + Math.round(Math.max(0.15, Math.min(1, pin.pinOpacity + notches * 0.05)) * 100) + "%");
                     } else {
-                        const at = mapToItem(null, wheel.x, wheel.y);
+                        const at = overlay.global(this, wheel.x, wheel.y);
                         pins.zoomBy(pin.pinId, Math.pow(1.1, notches), at.x, at.y);
+                        pins.dropped(pin.pinId);
                         hud.show(pin.zoomPercent + "%");
                     }
                 }
@@ -205,16 +216,17 @@ Window {
                         onContainsMouseChanged: if (containsMouse) overlay.hoveredPin = pin.pinId
                         onPressed: {
                             pin.activate();
+                            pins.hold(overlay.screenName);
                             corners.resizing = true;
                             fixed = Qt.point(modelData.right ? pin.pinX : pin.pinX + pin.pinWidth, modelData.bottom ? pin.pinY : pin.pinY + pin.pinHeight);
                         }
                         onPositionChanged: function(mouse) {
                             if (!pressed) return;
-                            const at = mapToItem(null, mouse.x, mouse.y);
+                            const at = overlay.global(this, mouse.x, mouse.y);
                             pins.resizeTo(pin.pinId, fixed.x, fixed.y, at.x, at.y);
                             hud.show(pin.zoomPercent + "%");
                         }
-                        onReleased: { corners.resizing = false; pins.dropped(pin.pinId, overlay.screenName, pin.pinX + pin.pinWidth / 2, pin.pinY + pin.pinHeight / 2); }
+                        onReleased: { corners.resizing = false; pins.dropped(pin.pinId); }
                     }
                 }
             }

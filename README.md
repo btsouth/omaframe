@@ -88,9 +88,11 @@ Want to keep a screenshot in view while you work? Press **P** on the finish
 chooser, or **Pin** (Ctrl+P) in the editor. It stays on screen above your
 windows on every workspace, until you close it. A pin opens right over the
 place you captured, so it looks like that part of the screen froze. Drag it
-aside. Pinning doesn't copy or save anything.
+aside. A pin is the screenshot itself with your marks and crop, without the
+finish. Pinning doesn't copy or save anything.
 
-- Drag a pin to move it, or drag its corners to resize it.
+- Drag a pin to move it, onto another display too, or drag its corners to
+  resize it.
 - Scroll over it to zoom, or Ctrl+scroll to fade it.
 - Double-click, middle-click or Esc closes it.
 - Right-click for Copy, Save, Actual size, Click through, opacity and Close.

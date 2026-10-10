@@ -320,8 +320,8 @@ public:
   /** Copy the capture with its edits and chosen finish, without saving it. */
   Q_INVOKABLE void copyQuick();
   Q_INVOKABLE void dismissQuick();
-  /** Pins the image with its edits and finish to the screen, over the place
-   *  it was captured from. A quick capture then closes without copying or
+  /** Pins the image with its edits, but without a finish, to the screen,
+   *  over the place it was captured from. A quick capture then closes without copying or
    *  saving; the open editor stays. */
   Q_INVOKABLE void pin();
   /** Redacts every possible secret that is not covered yet. */

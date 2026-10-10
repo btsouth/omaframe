@@ -131,7 +131,7 @@ QHash<int, QByteArray> PinBoard::roleNames() const {
           {PinWidth, "pinWidth"},   {PinHeight, "pinHeight"},
           {PinOpacity, "pinOpacity"}, {ClickThrough, "clickThrough"},
           {Stack, "stack"},         {Source, "source"},
-          {ZoomPercent, "zoomPercent"}};
+          {ZoomPercent, "zoomPercent"}, {Created, "created"}};
 }
 QVariant PinBoard::data(const QModelIndex &index, int role) const {
   if (!index.isValid() || index.row() >= m_pins.size())
@@ -148,6 +148,7 @@ QVariant PinBoard::data(const QModelIndex &index, int role) const {
   case ClickThrough: return pin.clickThrough;
   case Stack: return pin.stack;
   case Source: return QString("image://pins/%1").arg(pin.id);
+  case Created: return double(pin.created);
   case ZoomPercent: {
     const double natural = pin.image.width() / pin.scale;
     return natural > 0 ? qRound(pin.rect.width() / natural * 100) : 100;
@@ -194,7 +195,9 @@ void PinBoard::add(QImage image, const QString &monitor, const QRectF &area,
   // Qt reports a fractional display scale rounded up, so the caller's
   // measured scale wins when it has one.
   pin.scale = scale > 0 ? scale : std::max(1.0, target->devicePixelRatio());
-  pin.rect = Pins::place(target->geometry().size(), natural(image, pin.scale), area);
+  pin.rect = Pins::place(target->geometry().size(), natural(image, pin.scale), area)
+                 .translated(target->geometry().topLeft());
+  pin.created = QDateTime::currentMSecsSinceEpoch();
   pin.image = std::move(image);
   m_images->put(pin.id, pin.image);
   beginInsertRows({}, m_pins.size(), m_pins.size());
@@ -243,8 +246,7 @@ void PinBoard::actualSize(int id) {
   const QPointF centre = pin.rect.center();
   pin.rect.setSize(natural(pin.image, pin.scale));
   pin.rect.moveCenter(centre);
-  if (auto *s = screen(pin.screen))
-    pin.rect = Pins::keepReachable(pin.rect, s->geometry().size());
+  keepReachable(pin);
   changedAt(r, {PinX, PinY, PinWidth, PinHeight, ZoomPercent});
 }
 void PinBoard::setOpacity(int id, double opacity) {
@@ -268,32 +270,36 @@ void PinBoard::raise(int id) {
   m_pins[r].stack = m_nextStack++;
   changedAt(r, {Stack});
 }
-void PinBoard::dropped(int id, const QString &screenName, double x, double y) {
+void PinBoard::keepReachable(Pin &pin) {
+  if (auto *s = screen(pin.screen); usable(s)) {
+    const QPointF origin = s->geometry().topLeft();
+    pin.rect = Pins::keepReachable(pin.rect.translated(-origin), s->geometry().size())
+                   .translated(origin);
+  }
+}
+void PinBoard::hold(const QString &screen) {
+  m_held = screen;
+}
+void PinBoard::dropped(int id) {
+  m_held.clear();
+  m_sync.start();
   const int r = row(id);
-  auto *from = screen(screenName);
-  if (r < 0 || !from)
+  if (r < 0)
     return;
   Pin &pin = m_pins[r];
-  // Overlays are per display, so a pin cannot cross while it is dragged.
-  // Where the pointer lets go decides which display it belongs to.
-  const QPointF global = from->geometry().topLeft() + QPointF(x, y);
-  QScreen *to = from;
-  if (!from->geometry().contains(global.toPoint()))
-    for (auto *s : QGuiApplication::screens())
-      if (usable(s) && s->geometry().contains(global.toPoint()))
-        to = s;
-  if (to != from) {
-    const QPointF grab = QPointF(x, y) - pin.rect.topLeft();
-    // It keeps its size in pixels, like a window moved between displays.
-    const double ratio = from->devicePixelRatio() / to->devicePixelRatio();
-    pin.scale = std::max(0.25, pin.scale / ratio);
-    pin.rect = QRectF(global - to->geometry().topLeft() - grab * ratio,
-                      pin.rect.size() * ratio);
+  QScreen *from = screen(pin.screen), *to = from;
+  for (auto *s : QGuiApplication::screens())
+    if (usable(s) && QRectF(s->geometry()).contains(pin.rect.center()))
+      to = s;
+  if (to && to != from) {
+    // Its 100% follows the display it is on now. Qt's whole-number scales
+    // are only good for the ratio between two displays.
+    if (from)
+      pin.scale = std::max(0.25, pin.scale * to->devicePixelRatio() / from->devicePixelRatio());
     pin.screen = to->name();
-    showOverlay(pin.screen);
   }
-  pin.rect = Pins::keepReachable(pin.rect, to->geometry().size());
-  changedAt(r, {Screen, PinX, PinY, PinWidth, PinHeight, ZoomPercent});
+  keepReachable(pin);
+  changedAt(r, {Screen, PinX, PinY, ZoomPercent});
 }
 static QByteArray encodePng(const QImage &image, QString &error) {
   QByteArray png;
@@ -411,8 +417,10 @@ bool PinBoard::showOverlay(const QString &name) {
   if (!m_engine || !usable(target))
     return false;
   QQmlComponent component(m_engine, QUrl("qrc:/qml/PinOverlay.qml"));
-  auto *overlay = qobject_cast<QQuickWindow *>(
-      component.createWithInitialProperties({{"screenName", name}}));
+  auto *overlay = qobject_cast<QQuickWindow *>(component.createWithInitialProperties(
+      {{"screenName", name},
+       {"originX", target->geometry().x()},
+       {"originY", target->geometry().y()}}));
   if (!overlay) {
     qWarning("Could not create the pin overlay: %s", qPrintable(component.errorString()));
     return false;
@@ -435,45 +443,59 @@ bool PinBoard::showOverlay(const QString &name) {
   m_overlays.insert(name, overlay);
   // A display that changes size keeps its pins within reach.
   connect(target, &QScreen::geometryChanged, overlay, [this, name](const QRect &geometry) {
-    if (auto *o = m_overlays.value(name))
+    if (auto *o = m_overlays.value(name)) {
+      o->setProperty("originX", geometry.x());
+      o->setProperty("originY", geometry.y());
       o->resize(geometry.size());
+    }
     for (int i = 0; i < m_pins.size(); ++i)
       if (m_pins[i].screen == name) {
-        m_pins[i].rect = Pins::keepReachable(m_pins[i].rect, geometry.size());
+        keepReachable(m_pins[i]);
         changedAt(i, {PinX, PinY});
       }
   });
-  syncOverlays();
   return true;
 }
 void PinBoard::syncOverlays() {
-  for (auto it = m_overlays.begin(); it != m_overlays.end();) {
-    const QString name = it.key();
-    QQuickWindow *overlay = it.value();
+  for (auto *display : QGuiApplication::screens()) {
+    const QString name = display->name();
+    const QRectF bounds = display->geometry();
     QRegion region;
     bool any = false;
     for (const auto &pin : std::as_const(m_pins)) {
-      if (pin.screen != name)
+      if (!usable(display) || !pin.rect.intersects(bounds))
         continue;
       any = true;
-      region += (pin.clickThrough ? Pins::badge(pin.rect) : pin.rect).toAlignedRect();
+      const QRectF part = pin.clickThrough ? Pins::badge(pin.rect) : pin.rect;
+      region += part.intersected(bounds).translated(-bounds.topLeft()).toAlignedRect();
+    }
+    QQuickWindow *overlay = m_overlays.value(name);
+    // The overlay a pin is dragged from keeps its grab on the pointer.
+    if (name == m_held && overlay) {
+      if (overlay->mask() != region && !region.isEmpty())
+        overlay->setMask(region);
+      continue;
     }
     if (!any) {
       // Nothing left on this display: its overlay goes, so no invisible
       // surface stays on top of the desktop.
       m_menus.removeAll(name);
-      overlay->hide();
-      overlay->deleteLater();
-      it = m_overlays.erase(it);
+      if (overlay) {
+        m_overlays.remove(name);
+        overlay->hide();
+        overlay->deleteLater();
+      }
       continue;
     }
+    if (!overlay && !showOverlay(name))
+      continue;
+    overlay = m_overlays.value(name);
     if (m_menus.contains(name))
       region = QRegion(QRect(QPoint(), overlay->size()));
     if (overlay->mask() != region)
       overlay->setMask(region);
     if (!overlay->isVisible())
       overlay->show();
-    ++it;
   }
 }
 void PinBoard::screenRemoved(QScreen *removed) {
@@ -508,10 +530,11 @@ void PinBoard::rehome(QScreen *added, QScreen *gone) {
       continue;
     Pin &pin = m_pins[i];
     pin.screen = added->name();
-    pin.rect = Pins::place(added->geometry().size(), pin.rect.size());
+    pin.rect = Pins::place(added->geometry().size(), pin.rect.size())
+                   .translated(added->geometry().topLeft());
     changedAt(i, {Screen, PinX, PinY, PinWidth, PinHeight, ZoomPercent});
     moved = true;
   }
   if (moved)
-    showOverlay(added->name());
+    m_sync.start();
 }

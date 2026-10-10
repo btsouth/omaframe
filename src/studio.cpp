@@ -1723,9 +1723,10 @@ void Studio::pin() {
             emit changed();
             emit dismissRequested();
           });
-  watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_marks.edits(),
-                                        options = m_options] {
-    // The same image a copy would get: edits and the chosen finish.
+  watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_marks.edits()] {
+    // The screenshot itself with its marks and crop. A finish is for
+    // sharing; a pin is a reference, and only the bare pixels can sit
+    // exactly over the place they came from.
     PinResult result;
     QString renderError;
     const QImage edited = Frame::applyEdits(source, edits, true, &renderError);
@@ -1733,13 +1734,7 @@ void Studio::pin() {
       result.error = renderError;
       return result;
     }
-    const QSize output = Frame::outputSize(edited.size(), options, Frame::edgeRoom(edited));
-    if (qint64(output.width()) * output.height() > 80000000) {
-      result.error = "it would exceed 80 megapixels.";
-      return result;
-    }
-    result.image = Frame::compose(edited, options)
-                       .convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    result.image = edited.convertToFormat(QImage::Format_ARGB32_Premultiplied);
     return result;
   }));
 }
