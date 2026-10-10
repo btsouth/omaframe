@@ -480,12 +480,12 @@ void Studio::scheduleRender() {
         return result;
       }));
 }
-void Studio::loadImage(QImage image, QString name, bool demo) {
+bool Studio::loadImage(QImage image, QString name, bool demo) {
   cancelPendingAccept();
   if (image.isNull())
-    return;
+    return false;
   if (!saveDraftNow())
-    return;
+    return false;
   image.setDevicePixelRatio(1);
   m_original = std::move(image);
   m_workingSize = m_original.size();
@@ -504,6 +504,7 @@ void Studio::loadImage(QImage image, QString name, bool demo) {
   startReading();
   scheduleRender();
   emit sourceChanged();
+  return true;
 }
 void Studio::closeImage() {
   cancelPendingAccept();
@@ -1566,6 +1567,33 @@ Studio::Notice Studio::finishNotice() const {
             "Saved in " + QFileInfo(m_savedPath).absolutePath().replace(QDir::homePath(), "~"),
             m_savedPath};
   return {};
+}
+Studio::Snapshot Studio::snapshot() const {
+  return {m_original, m_marks.edits(), m_options, m_name, m_captureMonitor,
+          m_sourceMonitor, m_sourceArea};
+}
+bool Studio::reopen(const Snapshot &snapshot) {
+  if (m_busy || m_quickMode || snapshot.original.isNull())
+    return false;
+  const auto open = QGuiApplication::allWindows();
+  const bool fromStudio = std::any_of(open.cbegin(), open.cend(), [](QWindow *w) {
+    return w->isVisible() && w->title() == "Omaframe";
+  });
+  if (!loadImage(snapshot.original, snapshot.name, false))
+    return false;
+  m_marks.restore(m_original, snapshot.edits, -1);
+  // Its own finish, for this screenshot only: the remembered one stays.
+  m_options = snapshot.options;
+  m_captureMonitor = snapshot.monitor;
+  m_sourceMonitor = snapshot.sourceMonitor;
+  m_sourceArea = snapshot.sourceArea;
+  m_returnToStudio = fromStudio;
+  m_quickMode = true;
+  m_quickState = "editing";
+  scheduleRender();
+  emit changed();
+  emit editorRequested();
+  return true;
 }
 void Studio::copyQuick() {
   // Complete a partially saved screenshot through retryOutput(), preserving

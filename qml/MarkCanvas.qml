@@ -26,7 +26,9 @@ Item {
     readonly property bool constraintActive: drawArea.interaction !== "none"
         && (drawArea.moved || (drawArea.interaction === "resize" && drawArea.resizeDragged))
         && !typing && constraintFeedback.valid === true && !!constraintFeedback.label
-    readonly property string constraintLabel: constraintActive ? constraintFeedback.label : ""
+    // The feedback can change before constraintActive catches up, so read
+    // the label defensively.
+    readonly property string constraintLabel: constraintActive ? (constraintFeedback.label || "") : ""
     readonly property bool typing: textEditor.active
     readonly property bool dragging: drawArea.pressed
     readonly property bool hovered: drawArea.containsMouse

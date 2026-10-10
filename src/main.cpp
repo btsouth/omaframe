@@ -256,6 +256,8 @@ int main(int argc, char **argv) {
   auto *pinImages = new PinImages;
   engine.addImageProvider("pins", pinImages);
   PinBoard pins(pinImages, [&] { return studio.outputDirectory(); });
+  // Screenshot notifications still waiting for a click to edit.
+  int pendingNotices = 0;
   pins.setEngine(&engine);
   engine.rootContext()->setContextProperty("pins", &pins);
   QObject::connect(&pins, &PinBoard::saved, &history, &CaptureHistoryModel::foldersChanged);
@@ -516,8 +518,9 @@ int main(int argc, char **argv) {
       showStudioWindow();
       return;
     }
-    if (pins.count()) {
-      // Stay for the pins, ready for the next shortcut like a fresh start.
+    if (pins.count() || pendingNotices) {
+      // Stay for the pins or a notification that can still be clicked,
+      // ready for the next shortcut like a fresh start.
       studio.leaveQuickMode();
       studio.closeImage();
       return;
@@ -783,7 +786,7 @@ int main(int argc, char **argv) {
     const bool returning = studio.takeReturnToStudio();
     studio.leaveQuickMode();
     const bool quitting = !returning && pendingReview.isEmpty() && !recorder.active() &&
-                          !pins.count();
+                          !pins.count() && !pendingNotices;
     const auto request = studio.beginDelayCleanup();
     dismissal.cancel([&, quitting, request](bool restored) {
       studio.finishDelayCleanup(request, restored);
@@ -827,13 +830,63 @@ int main(int argc, char **argv) {
     if (!wasVisible)
       adjustWindow(window, studio.quickMode());
   });
+  // Quit once nothing of Omaframe is left: no window, pin, capture,
+  // recording or notification waiting for a click.
+  auto quitIfIdle = [&] {
+    QTimer::singleShot(0, &app, [&] {
+      const auto windows = QGuiApplication::allWindows();
+      const bool open = std::any_of(windows.cbegin(), windows.cend(), [](QWindow *w) {
+        return w->isVisible() && w->title() != PinBoard::overlayTitle;
+      });
+      if (!open && !pins.count() && !pendingNotices && !studio.quickMode() &&
+          !studio.busy() && !studio.delayedCapture() && !video.busy() &&
+          !recorder.active() && pendingReview.isEmpty())
+        QCoreApplication::quit();
+    });
+  };
+  // A finished screenshot's notification opens it in the editor again when
+  // clicked, as it was: its marks and finish still editable, not the flat
+  // PNG. Omaframe waits for that while the notification is up, at most a
+  // minute.
+  auto notifyEditable = [&](const Studio::Notice &notice) {
+    if (!QSettings().value("notifications", true).toBool() ||
+        QStandardPaths::findExecutable("notify-send").isEmpty())
+      return;
+    const auto snapshot = std::make_shared<Studio::Snapshot>(studio.snapshot());
+    auto *process = new QProcess(&app);
+    QStringList args{"--app-name=Omaframe", "--action=default=Edit"};
+    if (!notice.image.isEmpty())
+      args << "--icon" << notice.image;
+    args << notice.summary << notice.body + ". Click to edit.";
+    ++pendingNotices;
+    auto done = std::make_shared<bool>(false);
+    auto finish = [&, process, snapshot, done](bool clicked) {
+      if (*done)
+        return;
+      *done = true;
+      process->deleteLater();
+      --pendingNotices;
+      if (!clicked || !studio.reopen(*snapshot))
+        quitIfIdle();
+    };
+    QObject::connect(process, &QProcess::finished, &app, [process, finish] {
+      finish(process->readAllStandardOutput().trimmed() == "default");
+    });
+    QObject::connect(process, &QProcess::errorOccurred, &app,
+                     [finish](QProcess::ProcessError error) {
+                       if (error == QProcess::FailedToStart)
+                         finish(false);
+                     });
+    QTimer::singleShot(60000, process, [process] { process->kill(); });
+    process->start("notify-send", args);
+  };
   QObject::connect(&studio, &Studio::dismissRequested, &app, [&] {
     delayedEditorOrigin = false;
     // Read it before returning to the studio clears the quick state.
     const Studio::Notice notice = studio.finishNotice();
     const auto notifyScreenshot = [&] {
       if (!notice.summary.isEmpty())
-        notify(notice.summary, notice.body, notice.image);
+        notifyEditable(notice);
     };
     hideCaptureSurfaces();
     const bool returning = !recorder.active() && studio.takeReturnToStudio();
@@ -919,18 +972,7 @@ int main(int argc, char **argv) {
   });
   // The last pin closed. Quit when nothing else of Omaframe is open, as a
   // finished capture would have.
-  QObject::connect(&pins, &PinBoard::emptied, &app, [&] {
-    QTimer::singleShot(0, &app, [&] {
-      const auto windows = QGuiApplication::allWindows();
-      const bool open = std::any_of(windows.cbegin(), windows.cend(), [](QWindow *w) {
-        return w->isVisible() && w->title() != PinBoard::overlayTitle;
-      });
-      if (!open && !pins.count() && !studio.quickMode() && !studio.busy() &&
-          !studio.delayedCapture() && !video.busy() && !recorder.active() &&
-          pendingReview.isEmpty())
-        QCoreApplication::quit();
-    });
-  });
+  QObject::connect(&pins, &PinBoard::emptied, &app, quitIfIdle);
   QObject::connect(&history, &CaptureHistoryModel::navigate, &app,
                    [&](const QString &cmd, const QUrl &path) {
                      requestNavigation(cmd, path);
@@ -948,8 +990,9 @@ int main(int argc, char **argv) {
                      }
                      if (!(cmd == "capture" && seconds > 0))
                        quickRecordingReview = false;
-                     if (cmd == "quit" && pins.count()) {
-                       // Closing the window leaves the pins on screen.
+                     if (cmd == "quit" && (pins.count() || pendingNotices)) {
+                       // Closing the window leaves the pins on screen, and a
+                       // screenshot notification clickable.
                        studio.closeImage();
                        if (window)
                          window->hide();
