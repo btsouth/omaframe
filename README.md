@@ -85,11 +85,12 @@ immediate. The badge may appear in an ongoing recording.
 ## Pin a screenshot
 
 Want to keep a screenshot in view while you work? Press **P** on the finish
-chooser, or **Pin** (Ctrl+P) in the editor. It stays on screen above your
-windows on every workspace, until you close it. A pin opens right over the
-place you captured, so it looks like that part of the screen froze. Drag it
-aside. A pin is the screenshot itself with your marks and crop, without the
-finish. Pinning doesn't copy or save anything.
+chooser, or **Pin** (Ctrl+P) in the editor. The pin lifts off the place you
+captured and settles in the corner farthest from it, at its own size or
+smaller when it is large. It stays above your windows on every workspace
+until you close it. A pin is the screenshot itself with your marks and crop,
+without the finish. To show it framed, on a call say, press Shift+P instead.
+Pinning doesn't copy or save anything.
 
 - Drag a pin to move it, onto another display too, or drag its corners to
   resize it.
@@ -220,7 +221,7 @@ Clipboard-only copies add no history item. Editable drafts may remain. Screensho
 | Picking a finish | Ctrl+C | Copy the selected finish without saving |
 | Picking a finish | Esc | Cancel |
 | Picking a finish | E / R | Mark up the selected finish / retake |
-| Picking a finish | P | Pin the selected finish to the screen |
+| Picking a finish | P / Shift+P | Pin the screenshot to the screen / pin it with the selected finish |
 | Picking a finish | H / T | Hide possible secrets / copy the text |
 | Marking up | V C A L B O H R G P N T | Select, crop, arrow, line, box, oval, highlight, redact, blur, pen, steps, text |
 | Marking up or video | Shift+drag | Constrain angles, draw squares or circles, keep corner proportions, or move straight |

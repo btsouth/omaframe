@@ -81,6 +81,7 @@ Window {
             required property string source
             required property int zoomPercent
             required property real created
+            required property rect origin
             readonly property bool active: overlay.targetPin === pinId
             readonly property bool interacting: body.pressed || corners.resizing
             property real appear: 0
@@ -90,20 +91,35 @@ Window {
             // this display: the drag belongs to this overlay.
             visible: held || pinX < overlay.originX + overlay.width && pinX + pinWidth > overlay.originX
                      && pinY < overlay.originY + overlay.height && pinY + pinHeight > overlay.originY
-            x: pinX - overlay.originX
-            y: pinY - overlay.originY
-            width: pinWidth
-            height: pinHeight
+            // A new pin starts over the place it was captured from and lifts
+            // off to its corner, so it is plain what was pinned and where it
+            // went. `flight` runs from 0 there to 1 at rest.
+            property real flight: 1
+            function between(from, to) { return from + (to - from) * flight; }
+            x: between(origin.x, pinX) - overlay.originX
+            y: between(origin.y, pinY) - overlay.originY
+            width: between(origin.width, pinWidth)
+            height: between(origin.height, pinHeight)
             z: stack
             opacity: pinOpacity * appear
-            scale: 0.97 + 0.03 * appear
-            // Only a new pin fades in, not one dragged onto this display.
-            Component.onCompleted: { if (Date.now() - created < 500) appearing.start(); else appear = 1; }
+            scale: flight < 1 ? 1 : 0.97 + 0.03 * appear
+            // Only a new pin arrives like this, not one dragged onto this
+            // display.
+            Component.onCompleted: {
+                if (Date.now() - created >= 500) appear = 1;
+                else if (origin.width > 0 && origin.height > 0) { appear = 1; flight = 0; lifting.start(); }
+                else appearing.start();
+            }
             NumberAnimation on appear { id: appearing; running: false; from: 0; to: 1; duration: 160; easing.type: Easing.OutCubic }
+            SequentialAnimation {
+                id: lifting
+                PauseAnimation { duration: 90 }
+                NumberAnimation { target: pin; property: "flight"; to: 1; duration: 380; easing.type: Easing.InOutCubic }
+            }
             NumberAnimation { id: leaving; target: pin; property: "appear"; to: 0; duration: 120; easing.type: Easing.InCubic; onFinished: pins.close(pin.pinId) }
             function dismiss() { if (!closing) { closing = true; if (overlay.hoveredPin === pinId) overlay.hoveredPin = -1; leaving.start(); } }
             function zoomCentred(factor) { pins.zoomBy(pinId, factor, pinX + pinWidth / 2, pinY + pinHeight / 2); hud.show(zoomPercent + "%"); }
-            function activate() { overlay.activePin = pinId; pins.raise(pinId); pins.setKeyboard(overlay.screenName, true); keyboard.forceActiveFocus(); }
+            function activate() { lifting.stop(); flight = 1; overlay.activePin = pinId; pins.raise(pinId); pins.setKeyboard(overlay.screenName, true); keyboard.forceActiveFocus(); }
 
             RectangularShadow {
                 anchors.fill: parent
@@ -111,7 +127,7 @@ Window {
                 blur: 22
                 offset.y: 6
                 spread: 0
-                color: Qt.rgba(0, 0, 0, pin.active || pin.interacting ? 0.42 : 0.3)
+                color: Qt.rgba(0, 0, 0, pin.active || pin.interacting || pin.flight < 1 ? 0.42 : 0.3)
             }
             Item {
                 id: picture
@@ -148,7 +164,7 @@ Window {
                 radius: Math.min(theme.radius, 8, pin.width / 4, pin.height / 4)
                 color: "transparent"
                 border.width: 1
-                border.color: pin.active && !pin.clickThrough ? theme.accent : theme.alpha(theme.frame, 0.7)
+                border.color: pin.active && !pin.clickThrough ? theme.accent : theme.alpha(theme.accent, 0.5)
                 Behavior on border.color { ColorAnimation { duration: 90 } }
             }
 

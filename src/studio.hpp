@@ -320,10 +320,11 @@ public:
   /** Copy the capture with its edits and chosen finish, without saving it. */
   Q_INVOKABLE void copyQuick();
   Q_INVOKABLE void dismissQuick();
-  /** Pins the image with its edits, but without a finish, to the screen,
-   *  over the place it was captured from. A quick capture then closes without copying or
+  /** Pins the image with its edits to the screen, from the place it was
+   *  captured from. `withFinish` keeps the chosen finish, for showing it to
+   *  others; a reference is better without. A quick capture then closes without copying or
    *  saving; the open editor stays. */
-  Q_INVOKABLE void pin();
+  Q_INVOKABLE void pin(bool withFinish = false);
   /** Redacts every possible secret that is not covered yet. */
   Q_INVOKABLE void hideSecrets();
   /** Copies the text in the image, once it has been read. */

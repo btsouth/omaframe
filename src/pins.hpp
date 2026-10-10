@@ -20,12 +20,23 @@ namespace Pins {
  *  past its natural size. */
 constexpr double minEdge = 48;
 constexpr double maxZoom = 8;
-/** Where a new pin of `image` (logical pixels) opens on a display of
- *  `display` size. `area` is the part of the display it was captured from,
- *  as fractions; the pin covers it exactly, so the screen looks frozen there.
- *  A larger finished image stays centred on that area. Without an area it
- *  opens centred, at most half the display. Either way it fits the display. */
+/** Space a pin keeps from the display's edges, and more at the top for the
+ *  bar. */
+constexpr double margin = 24;
+constexpr double topMargin = 56;
+/** Where a new pin of `image` (logical pixels) comes to rest on a display of
+ *  `display` size: out of the way in a corner, at its natural size unless
+ *  that would take more than about 40% of the display. `area` is the part of
+ *  the display it was captured from, as fractions; the pin goes to the corner
+ *  farthest from it, so it never covers what was just captured. Without an
+ *  area it goes bottom right. */
 QRectF place(QSizeF display, QSizeF image, const QRectF &area = {});
+/** `rect` stepped in from its corner until it no longer sits on a corner of
+ *  one of `others`, so a new pin never hides one already there. */
+QRectF cascade(QRectF rect, QSizeF display, const QList<QRectF> &others);
+/** `area` (fractions of a display of `display` size) in logical pixels: where
+ *  a new pin starts before it moves to its corner. Empty without an area. */
+QRectF origin(QSizeF display, const QRectF &area);
 /** `rect` scaled by `factor` around `anchor`, keeping its shape, between
  *  minEdge and maxZoom times `natural`. */
 QRectF zoom(const QRectF &rect, double factor, QPointF anchor, QSizeF natural);
@@ -73,7 +84,8 @@ public:
     Stack,
     Source,
     ZoomPercent,
-    Created
+    Created,
+    Origin
   };
   /** `directory` is where Save writes, the screenshot folder. */
   PinBoard(PinImages *images, std::function<QString()> directory,
@@ -138,6 +150,8 @@ private:
     /** Image pixels per logical pixel at 100%. */
     double scale = 1;
     qint64 created = 0;
+    /** Where it was captured from, for its first move; may be empty. */
+    QRectF origin;
     bool busy = false;
   };
   int row(int id) const;

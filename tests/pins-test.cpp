@@ -13,35 +13,46 @@ class PinsTest : public QObject {
            std::abs(a.height() - b.height()) < 0.01;
   }
 private slots:
-  void opensExactlyOverItsArea() {
-    const QRectF area(0.25, 0.5, 600.0 / 1920, 400.0 / 1080);
-    QVERIFY(near(Pins::place(display, {600, 400}, area), QRectF(480, 540, 600, 400)));
-    // Rounding in the crop still covers the area exactly.
-    QVERIFY(near(Pins::place(display, {601, 399}, area), QRectF(480, 540, 600, 400)));
+  void restsInTheCornerFarthestFromItsArea() {
+    using Pins::margin, Pins::topMargin;
+    // Captured top left: it goes bottom right, at its own size.
+    const QRectF topLeft = Pins::place(display, {400, 300}, QRectF(0.1, 0.1, 0.2, 0.2));
+    QVERIFY(near(topLeft, QRectF(1920 - margin - 400, 1080 - margin - 300, 400, 300)));
+    // Captured bottom right: top left, below the bar.
+    const QRectF bottomRight = Pins::place(display, {400, 300}, QRectF(0.7, 0.7, 0.2, 0.2));
+    QVERIFY(near(bottomRight, QRectF(margin, topMargin, 400, 300)));
+    // Captured top right: bottom left.
+    const QRectF topRight = Pins::place(display, {400, 300}, QRectF(0.7, 0.1, 0.2, 0.2));
+    QCOMPARE(topRight.topLeft(), QPointF(margin, 1080 - margin - 300));
   }
-  void framedImageCentresOnItsArea() {
-    const QRectF area(0.25, 0.25, 600.0 / 1920, 400.0 / 1080);
-    const QRectF rect = Pins::place(display, {720, 520}, area);
-    QCOMPARE(rect.size(), QSizeF(720, 520));
-    QCOMPARE(rect.center(), QPointF(480 + 300, 270 + 200));
+  void withoutAreaRestsBottomRight() {
+    QVERIFY(near(Pins::place(display, {400, 300}),
+                 QRectF(1920 - Pins::margin - 400, 1080 - Pins::margin - 300, 400, 300)));
+    // A whole display ties, and goes bottom right too.
+    QCOMPARE(Pins::place(display, {400, 300}, QRectF(0, 0, 1, 1)).bottomRight(),
+             QPointF(1920 - Pins::margin, 1080 - Pins::margin));
   }
-  void staysOnTheDisplay() {
-    const QRectF rect = Pins::place(display, {720, 520}, QRectF(0, 0, 0.2, 0.2));
-    QCOMPARE(rect.topLeft(), QPointF(0, 0));
-    const QRectF corner = Pins::place(display, {720, 520}, QRectF(0.9, 0.9, 0.1, 0.1));
-    QCOMPARE(corner.bottomRight(), QPointF(1920, 1080));
+  void largeCapturesRestSmaller() {
+    const QRectF whole = Pins::place(display, {1920, 1080}, QRectF(0, 0, 1, 1));
+    QVERIFY(whole.width() <= 1920 * 0.4 + 0.01);
+    QCOMPARE(whole.width() / whole.height(), 1920.0 / 1080);
+    const QRectF tall = Pins::place(display, {800, 6000});
+    QVERIFY(tall.height() <= 1080 * 0.45 + 0.01);
+    QCOMPARE(tall.width() / tall.height(), 800.0 / 6000);
   }
-  void wholeDisplayOpensSmaller() {
-    const QRectF rect = Pins::place(display, {1920, 1080}, QRectF(0, 0, 1, 1));
-    QVERIFY(rect.width() <= 1920 * 0.6 + 0.01);
-    QCOMPARE(rect.center(), QPointF(960, 540));
-    QCOMPARE(rect.width() / rect.height(), 1920.0 / 1080);
+  void newPinsStepInFromOnesInTheCorner() {
+    const QRectF first = Pins::place(display, {400, 300});
+    const QRectF second = Pins::cascade(first, display, {first});
+    QCOMPARE(second.topLeft(), first.topLeft() - QPointF(28, 28));
+    const QRectF third = Pins::cascade(first, display, {first, second});
+    QCOMPARE(third.topLeft(), first.topLeft() - QPointF(56, 56));
+    // A pin elsewhere is no reason to move.
+    QCOMPARE(Pins::cascade(first, display, {QRectF(0, 0, 50, 50)}), first);
   }
-  void withoutAreaOpensCentred() {
-    QVERIFY(near(Pins::place(display, {400, 300}), QRectF(760, 390, 400, 300)));
-    const QRectF big = Pins::place(display, {4000, 1000});
-    QVERIFY(big.width() <= 960.01);
-    QCOMPARE(big.width() / big.height(), 4.0);
+  void startsOverItsArea() {
+    QVERIFY(near(Pins::origin(display, QRectF(0.25, 0.5, 0.5, 0.25)),
+                 QRectF(480, 540, 960, 270)));
+    QVERIFY(Pins::origin(display, {}).isEmpty());
   }
   void zoomKeepsThePointUnderTheCursor() {
     const QRectF rect(100, 100, 400, 200);

@@ -32,31 +32,46 @@ static QSizeF limits(QSizeF size, QSizeF natural, double *factor) {
 QRectF place(QSizeF display, QSizeF image, const QRectF &area) {
   if (display.isEmpty() || image.isEmpty())
     return {};
-  QRectF rect;
-  const bool covering = image.width() > display.width() * 0.8 ||
-                        image.height() > display.height() * 0.8;
-  if (area.isValid() && !covering) {
-    const QRectF target(area.x() * display.width(), area.y() * display.height(),
-                        area.width() * display.width(),
-                        area.height() * display.height());
-    rect = QRectF(QPointF(), image);
-    rect.moveCenter(target.center());
-    // The same pixels as the area, give or take rounding: cover it exactly.
-    if (std::abs(image.width() - target.width()) < 1.5 &&
-        std::abs(image.height() - target.height()) < 1.5)
-      rect = target;
-  } else {
-    // A whole display (or a page taller than one) would hide everything
-    // else, so it opens smaller in the middle instead.
-    const double fit = area.isValid() ? 0.6 : 0.5;
-    const double scale = std::min({1.0, display.width() * fit / image.width(),
-                                   display.height() * fit / image.height()});
-    rect = QRectF(QPointF(), image * scale);
-    rect.moveCenter(QPointF(display.width() / 2, display.height() / 2));
-  }
-  rect.moveLeft(std::clamp(rect.left(), 0.0, std::max(0.0, display.width() - rect.width())));
-  rect.moveTop(std::clamp(rect.top(), 0.0, std::max(0.0, display.height() - rect.height())));
+  const double room = std::max(1.0, display.width() - 2 * margin);
+  const double scale = std::min({1.0, display.width() * 0.4 / image.width(),
+                                 display.height() * 0.45 / image.height(),
+                                 room / image.width()});
+  QRectF rect(QPointF(), image * scale);
+  // The corner farthest from the capture. Ties (a whole display) and no
+  // capture at all go bottom right.
+  const QRectF source = origin(display, area);
+  const QPointF centre = source.isEmpty() ? QPointF() : source.center();
+  const bool right = centre.x() <= display.width() / 2;
+  const bool bottom = centre.y() <= display.height() / 2;
+  rect.moveLeft(right ? display.width() - margin - rect.width() : margin);
+  rect.moveTop(bottom ? display.height() - margin - rect.height() : topMargin);
+  rect.moveTop(std::max(0.0, std::min(rect.top(), display.height() - rect.height())));
   return rect;
+}
+QRectF cascade(QRectF rect, QSizeF display, const QList<QRectF> &others) {
+  const auto close = [](QPointF a, QPointF b) {
+    return std::abs(a.x() - b.x()) < 8 && std::abs(a.y() - b.y()) < 8;
+  };
+  // Towards the middle of the display, from whichever corner it is in.
+  const QPointF step(rect.center().x() > display.width() / 2 ? -28 : 28,
+                     rect.center().y() > display.height() / 2 ? -28 : 28);
+  for (int tries = 0; tries < 12; ++tries) {
+    const bool taken = std::any_of(others.cbegin(), others.cend(), [&](const QRectF &o) {
+      return close(o.topLeft(), rect.topLeft()) || close(o.topRight(), rect.topRight()) ||
+             close(o.bottomLeft(), rect.bottomLeft()) ||
+             close(o.bottomRight(), rect.bottomRight());
+    });
+    if (!taken)
+      break;
+    rect.translate(step);
+  }
+  return rect;
+}
+QRectF origin(QSizeF display, const QRectF &area) {
+  if (!area.isValid() || area.isEmpty())
+    return {};
+  return QRectF(area.x() * display.width(), area.y() * display.height(),
+                area.width() * display.width(), area.height() * display.height());
 }
 QRectF zoom(const QRectF &rect, double factor, QPointF anchor, QSizeF natural) {
   if (rect.isEmpty() || natural.isEmpty() || !(factor > 0))
@@ -131,7 +146,8 @@ QHash<int, QByteArray> PinBoard::roleNames() const {
           {PinWidth, "pinWidth"},   {PinHeight, "pinHeight"},
           {PinOpacity, "pinOpacity"}, {ClickThrough, "clickThrough"},
           {Stack, "stack"},         {Source, "source"},
-          {ZoomPercent, "zoomPercent"}, {Created, "created"}};
+          {ZoomPercent, "zoomPercent"}, {Created, "created"},
+          {Origin, "origin"}};
 }
 QVariant PinBoard::data(const QModelIndex &index, int role) const {
   if (!index.isValid() || index.row() >= m_pins.size())
@@ -149,6 +165,7 @@ QVariant PinBoard::data(const QModelIndex &index, int role) const {
   case Stack: return pin.stack;
   case Source: return QString("image://pins/%1").arg(pin.id);
   case Created: return double(pin.created);
+  case Origin: return pin.origin;
   case ZoomPercent: {
     const double natural = pin.image.width() / pin.scale;
     return natural > 0 ? qRound(pin.rect.width() / natural * 100) : 100;
@@ -195,8 +212,14 @@ void PinBoard::add(QImage image, const QString &monitor, const QRectF &area,
   // Qt reports a fractional display scale rounded up, so the caller's
   // measured scale wins when it has one.
   pin.scale = scale > 0 ? scale : std::max(1.0, target->devicePixelRatio());
-  pin.rect = Pins::place(target->geometry().size(), natural(image, pin.scale), area)
+  QList<QRectF> others;
+  for (const auto &other : std::as_const(m_pins))
+    others << other.rect.translated(-target->geometry().topLeft());
+  pin.rect = Pins::cascade(Pins::place(target->geometry().size(), natural(image, pin.scale), area),
+                           target->geometry().size(), others)
                  .translated(target->geometry().topLeft());
+  pin.origin = Pins::origin(target->geometry().size(), area)
+                   .translated(target->geometry().topLeft());
   pin.created = QDateTime::currentMSecsSinceEpoch();
   pin.image = std::move(image);
   m_images->put(pin.id, pin.image);

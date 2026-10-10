@@ -163,6 +163,23 @@ private slots:
     QVERIFY(!QDir(temp.filePath("output")).exists());
     QVERIFY(studio.finishNotice().summary.isEmpty());
   }
+  void pinCanKeepTheFinish() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.setStyle(3);
+    QSignalSpy pinned(&studio, &Studio::pinRequested);
+    studio.pin(true);
+    QTRY_COMPARE_WITH_TIMEOUT(pinned.count(), 1, 15000);
+    Frame::Options options;
+    options.style = 3;
+    options.padding = studio.padding();
+    options.aspect = studio.aspect();
+    const QImage expected =
+        Frame::compose(Frame::applyEdits(captureImage(), studio.marks()->edits()), options);
+    QCOMPARE(pinned[0][0].value<QImage>().size(), expected.size());
+    QVERIFY(expected.size() != captureImage().size());
+  }
   void pinIsRefusedWhileBusy() {
     ImageStore store;
     Studio studio(&store, false);
