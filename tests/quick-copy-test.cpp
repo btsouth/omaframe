@@ -138,6 +138,44 @@ private slots:
       for (int x = 0; x < copied.width(); ++x)
         QCOMPARE(copied.pixelColor(x, y), expected.pixelColor(x, y));
   }
+  void pinKeepsClipboardAndFolderUntouched() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.setStyle(3);
+    studio.marks()->edit("redact", .1, .1, .4, .4);
+    QSignalSpy pinned(&studio, &Studio::pinRequested);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    studio.pin();
+    QCOMPARE(studio.quickState(), QString("pinning"));
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    QCOMPARE(pinned.count(), 1);
+    QCOMPARE(studio.quickState(), QString("pinned"));
+    // The pin shows what a copy would paste: edits and the chosen finish.
+    Frame::Options options;
+    options.style = 3;
+    options.padding = studio.padding();
+    options.aspect = studio.aspect();
+    const QImage expected =
+        Frame::compose(Frame::applyEdits(captureImage(), studio.marks()->edits()), options);
+    QCOMPARE(pinned[0][0].value<QImage>().size(), expected.size());
+    // A scrolling capture has no place on screen to open over.
+    QVERIFY(pinned[0][2].toRectF().isEmpty());
+    QVERIFY(!QFileInfo::exists(clipboard()));
+    QVERIFY(!QDir(temp.filePath("output")).exists());
+    QVERIFY(studio.finishNotice().summary.isEmpty());
+  }
+  void pinIsRefusedWhileBusy() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    QSignalSpy pinned(&studio, &Studio::pinRequested);
+    studio.copyQuick();
+    studio.pin();
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy(), 15000);
+    QCOMPARE(pinned.count(), 0);
+    QCOMPARE(studio.quickState(), QString("copied"));
+  }
   void pendingAcceptCanBeCancelled_data() {
     QTest::addColumn<QString>("action");
     for (const auto *action : {"dismiss", "finishes", "close", "navigation"})

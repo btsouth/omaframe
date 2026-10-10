@@ -121,6 +121,11 @@ ApplicationWindow {
         root.contentItem.forceActiveFocus();
         studio.copyQuick();
     }
+    function pinCurrent() {
+        if (markCanvas.typing)
+            markCanvas.commitText();
+        studio.pin();
+    }
     // In the editor Ctrl+C, Ctrl+X and Ctrl+V work on marks, never on the
     // screenshot, so they cannot close it.
     function copyMark(cut) {
@@ -289,6 +294,11 @@ ApplicationWindow {
         sequence: "Ctrl+C"
         enabled: root.shortcutsAllowed && !root.videoMode && studio.hasImage && !root.working
         onActivated: root.editing ? root.copyMark(false) : root.acceptCurrent()
+    }
+    Shortcut {
+        sequence: "Ctrl+P"
+        enabled: root.shortcutsAllowed && !root.videoMode && studio.hasImage && !root.working && !studio.recoveryAction.length
+        onActivated: root.pinCurrent()
     }
     Shortcut {
         sequence: "Ctrl+X"
@@ -1776,6 +1786,17 @@ ApplicationWindow {
                             }
                         }
                     }
+                }
+                StudioButton {
+                    objectName: "editorPinButton"
+                    visible: !root.videoMode && studio.hasImage && !studio.recoveryAction.length
+                    text: "Pin"
+                    glyph: "pin"
+                    quiet: true
+                    implicitHeight: 44
+                    hint: "Keep it on screen to refer to. Nothing is copied or saved · Ctrl+P"
+                    enabled: !root.working
+                    onClicked: root.pinCurrent()
                 }
                 StudioButton {
                     objectName: "editorSaveButton"

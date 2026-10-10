@@ -3,6 +3,7 @@
 #include "file-picker.hpp"
 #include "navigation.hpp"
 #include "omarchy-theme.hpp"
+#include "pins.hpp"
 #include "recording.hpp"
 #include "shortcuts.hpp"
 #include "studio.hpp"
@@ -251,6 +252,13 @@ int main(int argc, char **argv) {
   engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
   engine.rootContext()->setContextProperty("filePicker", &filePicker);
   engine.rootContext()->setContextProperty("captureAtStartup", captureStartup);
+  // Pinned screenshots keep this process running until the last one closes.
+  auto *pinImages = new PinImages;
+  engine.addImageProvider("pins", pinImages);
+  PinBoard pins(pinImages, [&] { return studio.outputDirectory(); });
+  pins.setEngine(&engine);
+  engine.rootContext()->setContextProperty("pins", &pins);
+  QObject::connect(&pins, &PinBoard::saved, &history, &CaptureHistoryModel::foldersChanged);
   // The capture path only creates a selection surface. Load the chooser
   // after selection, and the full editor only when explicitly requested.
   QQuickWindow *window = nullptr;
@@ -506,6 +514,12 @@ int main(int argc, char **argv) {
     if (studio.takeReturnToStudio()) {
       studio.leaveQuickMode();
       showStudioWindow();
+      return;
+    }
+    if (pins.count()) {
+      // Stay for the pins, ready for the next shortcut like a fresh start.
+      studio.leaveQuickMode();
+      studio.closeImage();
       return;
     }
     QTimer::singleShot(0, &app, &QCoreApplication::quit);
@@ -768,7 +782,8 @@ int main(int argc, char **argv) {
     hideCaptureSurfaces();
     const bool returning = studio.takeReturnToStudio();
     studio.leaveQuickMode();
-    const bool quitting = !returning && pendingReview.isEmpty() && !recorder.active();
+    const bool quitting = !returning && pendingReview.isEmpty() && !recorder.active() &&
+                          !pins.count();
     const auto request = studio.beginDelayCleanup();
     dismissal.cancel([&, quitting, request](bool restored) {
       studio.finishDelayCleanup(request, restored);
@@ -882,6 +897,30 @@ int main(int argc, char **argv) {
                      if (studio.quickState() == "selecting")
                        studio.cancelSelection();
                    });
+  QObject::connect(&studio, &Studio::pinRequested, &app,
+                   [&](const QImage &image, const QString &monitor, const QRectF &area) {
+                     // Without a capture area, it opens where the editor is.
+                     const bool here = area.isEmpty() && window && window->isVisible() &&
+                                       window->screen();
+                     pins.add(image, here ? window->screen()->name() : monitor, area);
+                   });
+  QObject::connect(&history, &CaptureHistoryModel::pin, &app, [&](const QImage &image) {
+    pins.add(image, window && window->screen() ? window->screen()->name() : QString());
+  });
+  // The last pin closed. Quit when nothing else of Omaframe is open, as a
+  // finished capture would have.
+  QObject::connect(&pins, &PinBoard::emptied, &app, [&] {
+    QTimer::singleShot(0, &app, [&] {
+      const auto windows = QGuiApplication::allWindows();
+      const bool open = std::any_of(windows.cbegin(), windows.cend(), [](QWindow *w) {
+        return w->isVisible() && w->title() != PinBoard::overlayTitle;
+      });
+      if (!open && !pins.count() && !studio.quickMode() && !studio.busy() &&
+          !studio.delayedCapture() && !video.busy() && !recorder.active() &&
+          pendingReview.isEmpty())
+        QCoreApplication::quit();
+    });
+  });
   QObject::connect(&history, &CaptureHistoryModel::navigate, &app,
                    [&](const QString &cmd, const QUrl &path) {
                      requestNavigation(cmd, path);
@@ -899,7 +938,12 @@ int main(int argc, char **argv) {
                      }
                      if (!(cmd == "capture" && seconds > 0))
                        quickRecordingReview = false;
-                     if (cmd == "quit") {
+                     if (cmd == "quit" && pins.count()) {
+                       // Closing the window leaves the pins on screen.
+                       studio.closeImage();
+                       if (window)
+                         window->hide();
+                     } else if (cmd == "quit") {
                        if (window)
                          window->setProperty("closingApproved", true);
                        QTimer::singleShot(0, &app, &QCoreApplication::quit);

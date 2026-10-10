@@ -26,8 +26,9 @@ Window {
     flags: Qt.FramelessWindowHint
     title: "Omaframe finishes"
     property bool captureError: studio.quickState === "capture-error"
-    property bool accepting: studio.quickState === "saving" || copying
+    property bool accepting: studio.quickState === "saving" || copying || pinning
     property bool copying: studio.quickState === "copying"
+    property bool pinning: studio.quickState === "pinning"
     property bool ready: !studio.busy && !captureError
     property bool canChoose: ready && !studio.recoveryAction.length
     readonly property bool inlineFolderDialog: "popupType" in saveFolder
@@ -43,6 +44,7 @@ Window {
     function save() { if (canChoose) {useSelected(); studio.saveQuick()} }
     function copy() { if (canChoose) {useSelected(); studio.copyQuick()} }
     function edit() { if (canChoose) {useSelected(); studio.openEditor()} }
+    function pin() { if (canChoose) {useSelected(); studio.pin()} }
     function changeFolder() {
         // A popup inside the overlay stays above the capture. Older Qt
         // versions can change the folder from the regular editor window.
@@ -85,6 +87,7 @@ Window {
             if (event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {chooser.choose(event.key - Qt.Key_1); event.accepted = true}
             else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && keyboard.activeFocus) {chooser.finish(); event.accepted = true}
             else if (event.key === Qt.Key_E) {chooser.edit(); event.accepted = true}
+            else if (event.key === Qt.Key_P) {chooser.pin(); event.accepted = true}
             else if (event.key === Qt.Key_R) {if(!studio.busy) studio.capture(true); event.accepted = true}
             else if (event.key === Qt.Key_H) {if(chooser.canChoose) studio.hideSecrets(); event.accepted = true}
             else if (event.key === Qt.Key_T) {if(chooser.ready) studio.copyText(); event.accepted = true}
@@ -112,7 +115,7 @@ Window {
                     ColumnLayout {
                         spacing: 3
                         Layout.fillWidth: true
-                    Text {text: chooser.captureError ? "Capture needs attention" : chooser.accepting ? "Finishing your screenshot…" : studio.recoveryAction.length ? "Screenshot saved" : "Choose a finish"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 20; font.weight: Font.Medium; Layout.fillWidth: true; elide: Text.ElideRight}
+                    Text {text: chooser.captureError ? "Capture needs attention" : chooser.pinning ? "Pinning your screenshot…" : chooser.accepting ? "Finishing your screenshot…" : studio.recoveryAction.length ? "Screenshot saved" : "Choose a finish"; color: theme.text; font.family: theme.fontFamily; font.pixelSize: 20; font.weight: Font.Medium; Layout.fillWidth: true; elide: Text.ElideRight}
                     Text {text: chooser.captureError ? "Your clipboard is unchanged." : studio.recoveryAction.length ? "Retry the unfinished step before continuing." : studio.dimensions + "   ·   Click to select a finish. Double-click, Enter or 1–9 uses it. Press E to edit first."; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight}
                     }
                     StudioButton {text: "Edit"; glyph: "crop"; enabled: chooser.canChoose; hint: "Crop, annotate, redact the selected finish · E"; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.edit(); Keys.onEnterPressed: chooser.edit(); onClicked: chooser.edit()}
@@ -192,7 +195,7 @@ Window {
                     }
                 }
                 Text {
-                    visible: studio.quickState === "failed" || studio.quickState === "copy-failed" || chooser.captureError
+                    visible: studio.quickState === "failed" || studio.quickState === "copy-failed" || studio.quickState === "pin-failed" || chooser.captureError
                     Layout.fillWidth: true
                     text: studio.status
                     color: theme.urgent
@@ -214,8 +217,9 @@ Window {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text {text: chooser.copying ? "Copying. One moment…" : chooser.accepting ? "Saving and copying. One moment…" : studio.recoveryAction.length ? "The finished PNG is already saved" : studio.autoSaveScreenshots ? "Copies and saves to " + studio.outputDirectory.replace(/^\/home\/[^/]+/, "~") : "Copies to clipboard without saving a screenshot file"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideMiddle}
+                    Text {text: chooser.pinning ? "Pinning. One moment…" : chooser.copying ? "Copying. One moment…" : chooser.accepting ? "Saving and copying. One moment…" : studio.recoveryAction.length ? "The finished PNG is already saved" : studio.autoSaveScreenshots ? "Copies and saves to " + studio.outputDirectory.replace(/^\/home\/[^/]+/, "~") : "Copies to clipboard without saving a screenshot file"; color: theme.muted; font.family: theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideMiddle}
                     StudioButton {text: "Copy text"; glyph: "text"; visible: studio.canReadText && !chooser.captureError; quiet: true; enabled: chooser.ready; hint: "Copy text recognized in this screenshot · T"; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: studio.copyText(); Keys.onEnterPressed: studio.copyText(); onClicked: studio.copyText()}
+                    StudioButton {objectName: "pinButton"; visible: !chooser.captureError; text: "Pin"; glyph: "pin"; quiet: true; enabled: chooser.canChoose; hint: "Keep it on screen to refer to. Nothing is copied or saved · P"; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.pin(); Keys.onEnterPressed: chooser.pin(); onClicked: chooser.pin()}
                     StudioButton {objectName: "clipboardButton"; visible: !chooser.captureError; text: "Clipboard"; glyph: "copy"; quiet: true; enabled: chooser.canChoose; hint: "Copy to the clipboard without saving · Ctrl+C"; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.copy(); Keys.onEnterPressed: chooser.copy(); onClicked: chooser.copy()}
                     StudioButton {visible: studio.quickState === "failed" && !studio.recoveryAction.length; text: chooser.inlineFolderDialog ? "Change folder" : "Edit to change folder"; glyph: "folder"; enabled: chooser.ready; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: chooser.changeFolder(); Keys.onEnterPressed: chooser.changeFolder(); onClicked: chooser.changeFolder()}
                     StudioButton {visible: studio.recoveryAction.length > 0; text: studio.recoveryAction; glyph: "copy"; primary: true; enabled: !studio.busy; implicitHeight: 32; Keys.forwardTo: [keyboard]; Keys.onReturnPressed: studio.retryOutput(); Keys.onEnterPressed: studio.retryOutput(); onClicked: studio.retryOutput()}

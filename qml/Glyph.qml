@@ -123,6 +123,15 @@ Canvas {
             c.rect(8, 8, 12, 13);
             line(15, 4, 4, 4);
             line(4, 4, 4, 16);
+        } else if (name === "pin") {
+            line(8.5, 3, 15.5, 3);
+            line(10, 3, 10, 9);
+            line(14, 3, 14, 9);
+            c.moveTo(10, 9);
+            c.lineTo(6, 14);
+            c.lineTo(18, 14);
+            c.lineTo(14, 9);
+            line(12, 14, 12, 21);
         } else if (name === "check") {
             line(5, 12, 10, 17);
             line(10, 17, 20, 6);
