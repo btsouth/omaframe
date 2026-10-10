@@ -66,6 +66,20 @@ Item {
     function pause() {
         player.pause();
     }
+    // Where the editor last put the player, in milliseconds. Qt 6.12 reports
+    // a late position of 0 just after a video loads, which would undo a seek
+    // made in that moment, so the player is sent back here instead.
+    property real heldPosition: -1
+    function place(ms) {
+        heldPosition = ms;
+        player.position = ms;
+    }
+    function restoreHeld() {
+        if (player.playbackState === MediaPlayer.PlayingState || player.position !== 0 || heldPosition <= 0)
+            return false;
+        player.position = heldPosition;
+        return true;
+    }
     function seek(seconds) {
         let target = Math.max(0, Math.min(video.duration, seconds));
         for (const cut of cuts) {
@@ -74,7 +88,7 @@ Item {
                 break;
             }
         }
-        player.position = Math.min(video.duration, target) * 1000;
+        place(Math.min(video.duration, target) * 1000);
     }
     function togglePlay() {
         if (!editable)
@@ -106,7 +120,7 @@ Item {
         muted = state.muted || false;
         cuts = state.cuts || [];
         player.pause();
-        player.position = clipStart * 1000;
+        place(clipStart * 1000);
         head = clipStart;
         undoStack = [];
         redoStack = [];
@@ -404,12 +418,14 @@ Item {
         audioOutput: AudioOutput {
             muted: pane.muted
         }
-        onPositionChanged: {
+        onPositionChanged: function() {
+            if (pane.restoreHeld())
+                return;
             if (playbackState === MediaPlayer.PlayingState && pane.skipRemoved(position / 1000))
                 return;
             if (playbackState === MediaPlayer.PlayingState && position >= pane.clipEnd * 1000) {
                 pause();
-                position = pane.clipStart * 1000;
+                pane.place(pane.clipStart * 1000);
             }
             pane.anchorTime = position / 1000;
             pane.anchorClock = Date.now();
@@ -417,6 +433,11 @@ Item {
                 pane.head = pane.anchorTime;
         }
         onPlaybackStateChanged: {
+            // Playing moves on from wherever the editor last put it.
+            if (playbackState === MediaPlayer.PlayingState)
+                pane.heldPosition = -1;
+            else if (pane.restoreHeld())
+                return;
             pane.anchorTime = position / 1000;
             pane.anchorClock = Date.now();
             pane.head = pane.anchorTime;
@@ -1387,7 +1408,7 @@ Item {
                         if (dragging) {
                             const at = track.secondsAt(mouse.x);
                             pane.select(anchor, at);
-                            player.position = Math.max(pane.clipStart, Math.min(pane.clipEnd, at)) * 1000;
+                            pane.place(Math.max(pane.clipStart, Math.min(pane.clipEnd, at)) * 1000);
                         }
                     }
                     onReleased: mouse => {
