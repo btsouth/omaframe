@@ -84,9 +84,11 @@ public:
   /** Creates the overlays with this engine; call once before add(). */
   void setEngine(QQmlEngine *engine) { m_engine = engine; }
   /** Pins `image` on display `monitor` (or the first one), over `area`
-   *  when it came from there. The image's device pixel ratio is ignored: it
-   *  shows at one image pixel per display pixel. */
-  void add(QImage image, const QString &monitor, const QRectF &area = {});
+   *  when it came from there. It shows at one image pixel per display pixel:
+   *  `scale` is the display's pixels per logical pixel, which can be
+   *  fractional. Zero uses the display's own whole-number scale. */
+  void add(QImage image, const QString &monitor, const QRectF &area = {},
+           double scale = 0);
   Q_INVOKABLE void move(int id, double x, double y);
   Q_INVOKABLE void zoomBy(int id, double factor, double anchorX, double anchorY);
   Q_INVOKABLE void resizeTo(int id, double fixedX, double fixedY,
@@ -126,12 +128,17 @@ private:
     double opacity = 1;
     bool clickThrough = false;
     int stack = 0;
+    /** Image pixels per logical pixel at 100%. */
+    double scale = 1;
     bool busy = false;
   };
   int row(int id) const;
   void changedAt(int row, const QList<int> &roles);
   QScreen *screen(const QString &name) const;
-  void showOverlay(const QString &screen);
+  bool showOverlay(const QString &screen);
+  void screenAdded(QScreen *screen);
+  /** Moves pins whose display is gone (or is `gone`) to `to`. */
+  void rehome(QScreen *to, QScreen *gone = nullptr);
   void syncOverlays();
   void screenRemoved(QScreen *screen);
   PinImages *m_images;

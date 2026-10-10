@@ -358,8 +358,10 @@ signals:
   void recordModeEntered();
   void recordOptionsRequested();
   /** `image` should be pinned on `monitor`, over `area` (fractions of the
-   *  display) when it is known. */
-  void pinRequested(const QImage &image, const QString &monitor, const QRectF &area);
+   *  display) when it is known. `displayWidth` is that display's width in
+   *  pixels as captured, or zero. */
+  void pinRequested(const QImage &image, const QString &monitor, const QRectF &area,
+                    double displayWidth);
 
 private:
   friend class DelayTest;

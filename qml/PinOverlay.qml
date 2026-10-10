@@ -41,7 +41,8 @@ Window {
             if (!pin) return;
             const ctrl = event.modifiers & Qt.ControlModifier;
             const step = event.modifiers & Qt.ShiftModifier ? 10 : 1;
-            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) pin.dismiss();
+            // Closing one hands the keyboard back to the window being used.
+            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) { pin.dismiss(); pins.setKeyboard(overlay.screenName, false); }
             else if (ctrl && event.key === Qt.Key_C) pins.copy(pin.pinId);
             else if (ctrl && event.key === Qt.Key_S) pins.save(pin.pinId);
             else if (ctrl && event.key === Qt.Key_0) pins.actualSize(pin.pinId);

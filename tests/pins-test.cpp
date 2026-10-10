@@ -77,6 +77,20 @@ private slots:
     const QRectF inside(10, 10, 100, 100);
     QCOMPARE(Pins::keepReachable(inside, display), inside);
   }
+  void fractionalScaleShowsOnePixelPerPixel() {
+    auto *images = new PinImages;
+    PinBoard board(images, [] { return QString(); });
+    QImage image(300, 150, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::blue);
+    board.add(image, QGuiApplication::primaryScreen()->name(), {}, 1.5);
+    QCOMPARE(board.data(board.index(0), PinBoard::PinWidth).toDouble(), 200.0);
+    QCOMPARE(board.data(board.index(0), PinBoard::ZoomPercent).toInt(), 100);
+    const int id = board.data(board.index(0), PinBoard::PinId).toInt();
+    board.zoomBy(id, 3, 0, 0);
+    board.actualSize(id);
+    QCOMPARE(board.data(board.index(0), PinBoard::PinHeight).toDouble(), 100.0);
+    delete images;
+  }
   void boardKeepsPinsUntilClosed() {
     auto *images = new PinImages;
     PinBoard board(images, [] { return QString(); });
@@ -96,8 +110,7 @@ private slots:
     board.setOpacity(first, 0);
     QCOMPARE(board.data(board.index(0), PinBoard::PinOpacity).toDouble(), 0.15);
     board.zoomBy(first, 2, 12, 34);
-    QCOMPARE(board.data(board.index(0), PinBoard::ZoomPercent).toInt(),
-             qRound(200 * QGuiApplication::primaryScreen()->devicePixelRatio()));
+    QCOMPARE(board.data(board.index(0), PinBoard::ZoomPercent).toInt(), 200);
     board.actualSize(first);
     QCOMPARE(board.data(board.index(0), PinBoard::ZoomPercent).toInt(), 100);
     board.raise(first);

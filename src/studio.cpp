@@ -1696,8 +1696,10 @@ void Studio::pin() {
                   crop.height() / h * m_sourceArea.height());
   }
   const QString monitor = m_sourceMonitor.isEmpty() ? m_captureMonitor : m_sourceMonitor;
+  const double displayWidth =
+      m_sourceArea.isEmpty() ? 0 : m_original.width() / m_sourceArea.width();
   connect(watcher, &QFutureWatcher<PinResult>::finished, this,
-          [this, watcher, quick, monitor, area] {
+          [this, watcher, quick, monitor, area, displayWidth] {
             const auto result = watcher->result();
             watcher->deleteLater();
             m_busy = false;
@@ -1709,7 +1711,7 @@ void Studio::pin() {
               return;
             }
             m_status = "Pinned to the screen.";
-            emit pinRequested(result.image, monitor, area);
+            emit pinRequested(result.image, monitor, area, displayWidth);
             if (!quick) {
               emit changed();
               return;

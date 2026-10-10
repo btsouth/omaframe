@@ -116,6 +116,7 @@ PinBoard::PinBoard(PinImages *images, std::function<QString()> directory,
   m_sync.setInterval(0);
   connect(&m_sync, &QTimer::timeout, this, &PinBoard::syncOverlays);
   connect(qGuiApp, &QGuiApplication::screenRemoved, this, &PinBoard::screenRemoved);
+  connect(qGuiApp, &QGuiApplication::screenAdded, this, &PinBoard::screenAdded);
 }
 PinBoard::~PinBoard() {
   for (auto *overlay : std::as_const(m_overlays))
@@ -148,8 +149,7 @@ QVariant PinBoard::data(const QModelIndex &index, int role) const {
   case Stack: return pin.stack;
   case Source: return QString("image://pins/%1").arg(pin.id);
   case ZoomPercent: {
-    const auto *s = screen(pin.screen);
-    const double natural = pin.image.width() / (s ? s->devicePixelRatio() : 1.0);
+    const double natural = pin.image.width() / pin.scale;
     return natural > 0 ? qRound(pin.rect.width() / natural * 100) : 100;
   }
   }
@@ -171,30 +171,42 @@ QScreen *PinBoard::screen(const QString &name) const {
       return s;
   return nullptr;
 }
-static QSizeF natural(const QImage &image, QScreen *screen) {
-  return QSizeF(image.size()) / (screen ? screen->devicePixelRatio() : 1.0);
+static QSizeF natural(const QImage &image, double scale) {
+  return QSizeF(image.size()) / scale;
 }
-void PinBoard::add(QImage image, const QString &monitor, const QRectF &area) {
+static bool usable(QScreen *screen) {
+  return screen && !screen->geometry().isEmpty();
+}
+void PinBoard::add(QImage image, const QString &monitor, const QRectF &area,
+                   double scale) {
   if (image.isNull())
     return;
   QScreen *target = screen(monitor);
-  if (!target)
+  if (!usable(target))
     target = QGuiApplication::primaryScreen();
-  if (!target)
+  if (!usable(target))
     return;
   image.setDevicePixelRatio(1);
   Pin pin;
   pin.id = m_nextId++;
   pin.stack = m_nextStack++;
   pin.screen = target->name();
-  pin.rect = Pins::place(target->geometry().size(), natural(image, target), area);
+  // Qt reports a fractional display scale rounded up, so the caller's
+  // measured scale wins when it has one.
+  pin.scale = scale > 0 ? scale : std::max(1.0, target->devicePixelRatio());
+  pin.rect = Pins::place(target->geometry().size(), natural(image, pin.scale), area);
   pin.image = std::move(image);
   m_images->put(pin.id, pin.image);
   beginInsertRows({}, m_pins.size(), m_pins.size());
   m_pins.append(std::move(pin));
   endInsertRows();
   emit countChanged();
-  showOverlay(target->name());
+  if (m_engine && !showOverlay(target->name())) {
+    // Without an overlay it could never be seen or closed, and would keep
+    // Omaframe running.
+    close(m_pins.last().id);
+    return;
+  }
   m_sync.start();
 }
 void PinBoard::move(int id, double x, double y) {
@@ -210,7 +222,7 @@ void PinBoard::zoomBy(int id, double factor, double anchorX, double anchorY) {
     return;
   Pin &pin = m_pins[r];
   pin.rect = Pins::zoom(pin.rect, factor, {anchorX, anchorY},
-                        natural(pin.image, screen(pin.screen)));
+                        natural(pin.image, pin.scale));
   changedAt(r, {PinX, PinY, PinWidth, PinHeight, ZoomPercent});
 }
 void PinBoard::resizeTo(int id, double fixedX, double fixedY, double pointerX,
@@ -220,7 +232,7 @@ void PinBoard::resizeTo(int id, double fixedX, double fixedY, double pointerX,
     return;
   Pin &pin = m_pins[r];
   pin.rect = Pins::resize(pin.rect, {fixedX, fixedY}, {pointerX, pointerY},
-                          natural(pin.image, screen(pin.screen)));
+                          natural(pin.image, pin.scale));
   changedAt(r, {PinX, PinY, PinWidth, PinHeight, ZoomPercent});
 }
 void PinBoard::actualSize(int id) {
@@ -229,7 +241,7 @@ void PinBoard::actualSize(int id) {
     return;
   Pin &pin = m_pins[r];
   const QPointF centre = pin.rect.center();
-  pin.rect.setSize(natural(pin.image, screen(pin.screen)));
+  pin.rect.setSize(natural(pin.image, pin.scale));
   pin.rect.moveCenter(centre);
   if (auto *s = screen(pin.screen))
     pin.rect = Pins::keepReachable(pin.rect, s->geometry().size());
@@ -268,11 +280,13 @@ void PinBoard::dropped(int id, const QString &screenName, double x, double y) {
   QScreen *to = from;
   if (!from->geometry().contains(global.toPoint()))
     for (auto *s : QGuiApplication::screens())
-      if (s->geometry().contains(global.toPoint()))
+      if (usable(s) && s->geometry().contains(global.toPoint()))
         to = s;
   if (to != from) {
     const QPointF grab = QPointF(x, y) - pin.rect.topLeft();
+    // It keeps its size in pixels, like a window moved between displays.
     const double ratio = from->devicePixelRatio() / to->devicePixelRatio();
+    pin.scale = std::max(0.25, pin.scale / ratio);
     pin.rect = QRectF(global - to->geometry().topLeft() - grab * ratio,
                       pin.rect.size() * ratio);
     pin.screen = to->name();
@@ -390,18 +404,18 @@ void PinBoard::setKeyboard(const QString &screen, bool on) {
         on ? LayerShellQt::Window::KeyboardInteractivityOnDemand
            : LayerShellQt::Window::KeyboardInteractivityNone);
 }
-void PinBoard::showOverlay(const QString &name) {
-  if (m_overlays.contains(name) || !m_engine)
-    return;
+bool PinBoard::showOverlay(const QString &name) {
+  if (m_overlays.contains(name))
+    return true;
   QScreen *target = screen(name);
-  if (!target)
-    return;
+  if (!m_engine || !usable(target))
+    return false;
   QQmlComponent component(m_engine, QUrl("qrc:/qml/PinOverlay.qml"));
   auto *overlay = qobject_cast<QQuickWindow *>(
       component.createWithInitialProperties({{"screenName", name}}));
   if (!overlay) {
     qWarning("Could not create the pin overlay: %s", qPrintable(component.errorString()));
-    return;
+    return false;
   }
   // The top layer: above windows like the bar, below a fullscreen video
   // and below Omaframe's own capture surfaces, which are overlays.
@@ -430,6 +444,7 @@ void PinBoard::showOverlay(const QString &name) {
       }
   });
   syncOverlays();
+  return true;
 }
 void PinBoard::syncOverlays() {
   for (auto it = m_overlays.begin(); it != m_overlays.end();) {
@@ -463,30 +478,40 @@ void PinBoard::syncOverlays() {
 }
 void PinBoard::screenRemoved(QScreen *removed) {
   const QString name = removed->name();
-  QScreen *fallback = nullptr;
-  for (auto *s : QGuiApplication::screens())
-    if (s != removed) {
-      fallback = s;
-      break;
-    }
   if (auto *overlay = m_overlays.take(name)) {
     overlay->hide();
     overlay->deleteLater();
   }
   m_menus.removeAll(name);
-  for (int i = m_pins.size() - 1; i >= 0; --i) {
-    if (m_pins[i].screen != name)
-      continue;
-    if (!fallback) {
-      close(m_pins[i].id);
-      continue;
+  QScreen *fallback = nullptr;
+  for (auto *s : QGuiApplication::screens())
+    if (s != removed && usable(s)) {
+      fallback = s;
+      break;
     }
-    // Its pins move to a display that is still there, in the middle.
-    Pin &pin = m_pins[i];
-    pin.screen = fallback->name();
-    pin.rect = Pins::place(fallback->geometry().size(), pin.rect.size());
-    changedAt(i, {Screen, PinX, PinY, PinWidth, PinHeight, ZoomPercent});
-  }
+  // With no display left (a dock or KVM switch), pins wait for one to come
+  // back; screenAdded() places them then.
   if (fallback)
-    showOverlay(fallback->name());
+    rehome(fallback, removed);
+}
+void PinBoard::screenAdded(QScreen *added) {
+  rehome(added);
+}
+void PinBoard::rehome(QScreen *added, QScreen *gone) {
+  if (!usable(added))
+    return;
+  // Pins whose display is gone move to the middle of this one.
+  bool moved = false;
+  for (int i = 0; i < m_pins.size(); ++i) {
+    QScreen *current = screen(m_pins[i].screen);
+    if (current != gone && usable(current))
+      continue;
+    Pin &pin = m_pins[i];
+    pin.screen = added->name();
+    pin.rect = Pins::place(added->geometry().size(), pin.rect.size());
+    changedAt(i, {Screen, PinX, PinY, PinWidth, PinHeight, ZoomPercent});
+    moved = true;
+  }
+  if (moved)
+    showOverlay(added->name());
 }

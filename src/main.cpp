@@ -898,14 +898,24 @@ int main(int argc, char **argv) {
                        studio.cancelSelection();
                    });
   QObject::connect(&studio, &Studio::pinRequested, &app,
-                   [&](const QImage &image, const QString &monitor, const QRectF &area) {
+                   [&](const QImage &image, const QString &monitor, const QRectF &area,
+                       double displayWidth) {
                      // Without a capture area, it opens where the editor is.
-                     const bool here = area.isEmpty() && window && window->isVisible() &&
-                                       window->screen();
-                     pins.add(image, here ? window->screen()->name() : monitor, area);
+                     // The window knows the display's fractional scale; the
+                     // screen only knows it rounded up.
+                     if (area.isEmpty() && window && window->isVisible() && window->screen()) {
+                       pins.add(image, window->screen()->name(), {}, window->devicePixelRatio());
+                       return;
+                     }
+                     auto *screen = screenFor(monitor);
+                     const double logical = screen ? screen->geometry().width() : 0;
+                     pins.add(image, monitor, area,
+                              logical > 0 && displayWidth > 0 ? displayWidth / logical : 0);
                    });
   QObject::connect(&history, &CaptureHistoryModel::pin, &app, [&](const QImage &image) {
-    pins.add(image, window && window->screen() ? window->screen()->name() : QString());
+    const bool here = window && window->isVisible() && window->screen();
+    pins.add(image, here ? window->screen()->name() : QString(), {},
+             here ? window->devicePixelRatio() : 0);
   });
   // The last pin closed. Quit when nothing else of Omaframe is open, as a
   // finished capture would have.
