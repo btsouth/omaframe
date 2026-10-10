@@ -27,6 +27,8 @@ inline QJsonObject editToJson(const Frame::Edit &edit) {
           {"start", edit.start},
           {"end", edit.end},
           {"number", edit.number},
+          // Steps count in the order they were placed, not stacked.
+          {"stepOrder", edit.stepOrder},
           {"textBoxWidth", edit.textBox.width()},
           {"textBoxHeight", edit.textBox.height()},
           {"outline", edit.outline}, {"arrowHead", edit.arrowHead},
@@ -93,6 +95,7 @@ inline std::optional<Frame::Edit> editFromJson(const QJsonObject &item) {
   edit.start = item.value("start").toDouble(0);
   edit.end = item.value("end").toDouble(-1);
   edit.number = item.value("number").toInt(0);
+  edit.stepOrder = std::max(0, item.value("stepOrder").toInt(0));
   if (!std::isfinite(edit.start) || edit.start < 0 ||
       !std::isfinite(edit.end) || (edit.end != -1 && edit.end < edit.start) ||
       edit.number < 0)

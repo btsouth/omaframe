@@ -180,6 +180,32 @@ private slots:
     QCOMPARE(pinned[0][0].value<QImage>().size(), expected.size());
     QVERIFY(expected.size() != captureImage().size());
   }
+  void finishedScreenshotReopensWithItsMarks() {
+    ImageStore store;
+    Studio studio(&store, false);
+    prepare(studio);
+    studio.setStyle(3);
+    studio.marks()->edit("box", .1, .1, .4, .4);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    studio.copyQuick();
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    const Studio::Snapshot snapshot = studio.snapshot();
+    // Another capture under way: the click does nothing.
+    QVERIFY(!studio.reopen(snapshot));
+    studio.leaveQuickMode();
+    studio.closeImage();
+    studio.setStyle(5);
+    QSignalSpy editor(&studio, &Studio::editorRequested);
+    QVERIFY(studio.reopen(snapshot));
+    QCOMPARE(editor.count(), 1);
+    QVERIFY(studio.quickMode());
+    QCOMPARE(studio.quickState(), QString("editing"));
+    QCOMPARE(studio.marks()->edits().size(), 1);
+    QCOMPARE(studio.marks()->edits().first().type, QString("box"));
+    // Its own finish comes back, but the remembered one is not changed.
+    QCOMPARE(studio.style(), 3);
+    QCOMPARE(QSettings().value("style").toInt(), 5);
+  }
   void pinIsRefusedWhileBusy() {
     ImageStore store;
     Studio studio(&store, false);

@@ -181,6 +181,19 @@ public:
     QString summary, body, image;
   };
   Notice finishNotice() const;
+  /** Everything needed to open a finished screenshot in the editor again,
+   *  as it was: the capture, its marks and its finish. */
+  struct Snapshot {
+    QImage original;
+    QVector<Frame::Edit> edits;
+    Frame::Options options;
+    QString name, monitor, sourceMonitor;
+    QRectF sourceArea;
+  };
+  Snapshot snapshot() const;
+  /** Opens `snapshot` in the quick editor, as if E had been pressed on its
+   *  finish chooser. False while another capture is under way. */
+  bool reopen(const Snapshot &snapshot);
   QString recoveryAction() const;
   QString originalsSummary() const { return m_originalsSummary; }
   int originalsCount() const { return m_originalsCount; }
@@ -374,7 +387,8 @@ private:
   void beginDelayedCapture(int seconds, bool fromSelection);
   void acquireCapture(bool region, int monitor, bool repeat,
                       quint64 delayGeneration);
-  void loadImage(QImage image, QString name, bool demo);
+  /** False when the current draft could not be saved first. */
+  bool loadImage(QImage image, QString name, bool demo);
   void scheduleRender();
   void persistOptions();
   void refreshDrafts();

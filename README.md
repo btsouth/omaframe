@@ -60,7 +60,8 @@ are autosaved while you edit. A final clipboard-only copy does not update
 the draft with your latest edits.
 
 Paste it anywhere. Crops, marks and redactions you made in the editor are kept
-either way. If copying fails, the panel stays open. In the chooser, Ctrl+C
+either way. Click the **Screenshot copied** notification to open it in the
+editor again, with its marks and finish still editable. If copying fails, the panel stays open. In the chooser, Ctrl+C
 retries a clipboard-only copy; in the editor, use Ctrl+Enter or **Copy**.
 A saved screenshot offers a retry for its unfinished step. The close button
 still cancels, and Esc while choosing an area still cancels the capture. Clicking outside the panel does nothing.
