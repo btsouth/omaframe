@@ -667,9 +667,7 @@ bool Studio::saveDraftNow() {
   }
   QJsonArray edits;
   for (const auto &edit : m_marks.edits()) {
-    auto item = Frame::editToJson(edit);
-    if (edit.type == "step") item.insert("stepOrder", edit.stepOrder);
-    edits.append(item);
+    edits.append(Frame::editToJson(edit));
   }
   const QJsonObject document{{"version", 1}, {"name", m_name},
                              {"style", m_options.style},
@@ -725,7 +723,6 @@ void Studio::resumeDraft(const QString &id) {
       emit changed();
       return;
     }
-    edit->stepOrder = std::max(0, value.toObject().value("stepOrder").toInt());
     edits.append(*edit);
   }
   QImageReader reader(directory + "/" + id + ".png");
