@@ -1,13 +1,13 @@
 # Omaframe release and MatteShot parity tracker
 
-Current release: **0.11.0**. This tracks shipped behavior and possible future
+Current release: **0.11.1**. This tracks shipped behavior and possible future
 work. It is not a release checklist. See [RELEASING.md](../RELEASING.md) for
 the current release policy and [ci.md](ci.md) for automated coverage.
 
 Reference: local MatteShot `01f16a2` (0.21.1) README and source, reviewed on
 2026-09-27. The apps use different capture APIs and operating systems.
 
-| Workflow | Omaframe 0.11.0 | Future work |
+| Workflow | Omaframe 0.11.1 | Future work |
 | --- | --- | --- |
 | First run | Start screen, one-time explanation and optional Print/Alt+Print setup that preserves custom bindings | Custom key recorder in Settings |
 | Capture and finish | Window, area or display; delay timer (Shift+Print, T or --delay); capture history (Ctrl+H or --history); automatic window scrolling capture with manual takeover; movable and hideable capture bar; click selects a finish; double-click, Enter or 1 to 9 copies; E edits; copy/save; system file chooser for Open; repeat last area; powered-off display handling | Cross-monitor areas, size presets |
@@ -88,6 +88,8 @@ after annotation edits.
 
 Version 0.11.0 pins screenshots to the screen and opens a screenshot again
 from its notification. See the [0.11.0 release notes](release-notes-0.11.0.md).
+Version 0.11.1 is built against Omarchy stable's Qt so it starts on stable and
+rc. See the [0.11.1 release notes](release-notes-0.11.1.md).
 
 ## Possible next work
 
