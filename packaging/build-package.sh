@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Builds the Omaframe Arch package in a clean archlinux container synced to
+# Omarchy's stable mirror, a dated Arch snapshot. Qt binaries need the Qt
+# release they were built against or newer, so building against the oldest Qt
+# users have keeps the package working on stable, rc and edge. Needs Docker.
+# OMAFRAME_ARCH_MIRROR and OMAFRAME_BUILD_IMAGE override the mirror and image.
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -49,11 +54,26 @@ checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
 sed -e "s/@VERSION@/$version/g" -e "s/@SHA256@/$checksum/g" \
   "$repo_dir/packaging/PKGBUILD.in" > "$output_dir/PKGBUILD"
 
-(
-  cd "$output_dir"
-  BUILDDIR="$temp_dir/build" PKGDEST="$output_dir" \
-    makepkg --force --noconfirm
-)
+image=${OMAFRAME_BUILD_IMAGE:-archlinux:latest}
+mirror=${OMAFRAME_ARCH_MIRROR:-https://stable-mirror.omarchy.org/\$repo/os/\$arch}
+echo "Building in $image against $mirror"
+docker pull "$image" >/dev/null
+docker run --rm --network host -v "$output_dir:/out" \
+  -e mirror="$mirror" -e version="$version" -e owner="$(id -u):$(id -g)" \
+  "$image" bash -euo pipefail -c '
+    printf "Server = %s\n" "$mirror" >/etc/pacman.d/mirrorlist
+    # The snapshot can be older than the image, so allow downgrades.
+    pacman -Syyuu --noconfirm >/dev/null
+    pacman -S --noconfirm --needed base-devel >/dev/null
+    useradd -m build
+    install -d -o build /build
+    install -o build /out/PKGBUILD "/out/omaframe-$version.tar.gz" /build/
+    cd /build
+    source PKGBUILD
+    pacman -S --noconfirm --needed --asdeps "${depends[@]}" "${makedepends[@]}" >/dev/null
+    runuser -u build -- makepkg --force --noconfirm
+    install -o "${owner%:*}" -g "${owner#*:}" -m 644 /build/omaframe-*.pkg.tar.zst /out/
+  '
 echo "Source archive: $archive"
 echo "Source SHA-256: $checksum"
 if $working_tree; then
