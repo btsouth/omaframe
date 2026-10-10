@@ -6,11 +6,12 @@ a GitHub-hosted runner, builds the app and every test binary, and checks the
 CMake install layout and desktop entry. It uploads CTest results and the test
 log, including when tests fail. It does not publish packages or releases.
 
-Seventeen CTest suites have the `headless` label:
+Eighteen CTest suites have the `headless` label:
 
 | Suite | Coverage |
 | --- | --- |
 | quick-copy | Finish chooser actions, clipboard-only copies, failure retry and guards for busy, empty or cancelled captures |
+| pins | Pin placement over the captured area, zoom, corner resize, edge limits and the pin list |
 | navigation | Unsaved-edit decisions, repeated commands, save completion, failed-save retry and cancellation |
 | recording | Recorder lifecycle, readiness, pause/resume, failure handling, stop placement and shortcut setup that preserves custom bindings, with stub tools |
 | displays | Display geometry, window targets and powered-off display filtering from fixtures |
