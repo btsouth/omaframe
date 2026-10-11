@@ -11,7 +11,7 @@ ColumnLayout {
     Component.onCompleted: if (!shortcuts.available && !shortcuts.checking) shortcuts.refresh()
     function describe(key, state, action) {
         if (key.length)
-            return key === (action === "screenshot" ? "Print" : action === "delay" ? "Shift+Print" : action === "pause" ? "Alt+Shift+Print" : "Alt+Print") ? "Ready" : "Ready on " + key;
+            return key === (action === "screenshot" ? "Print" : action === "delay" ? "Shift+Print" : action === "chooser" ? "Ctrl+Print" : action === "pause" ? "Alt+Shift+Print" : "Alt+Print") ? "Ready" : "Ready on " + key;
         if (state === "stock")
             return "Omarchy's own tool for now";
         if (state === "none")
@@ -110,6 +110,20 @@ ColumnLayout {
         enabled: !shortcuts.checking
         onClicked: shortcuts.setUpDelay()
     }
+    ShortcutRow {
+        key: shortcuts.chooserKey || "Ctrl+Print"
+        label: "Screenshot with the finish chooser (optional)"
+        ready: shortcuts.chooserKey.length > 0
+        status: panel.describe(shortcuts.chooserKey, shortcuts.chooserState, "chooser")
+    }
+    StudioButton {
+        objectName: "setupChooserShortcut"
+        visible: shortcuts.available && !shortcuts.chooserKey.length && shortcuts.chooserState === "none"
+        text: "Use Ctrl+Print for the chooser"
+        glyph: "keyboard"
+        enabled: !shortcuts.checking
+        onClicked: shortcuts.setUpChooser()
+    }
     Text {
         Layout.fillWidth: true
         visible: text.length > 0
@@ -117,6 +131,7 @@ ColumnLayout {
             : !shortcuts.available && !shortcuts.checking ? "Hyprland did not answer, so shortcuts cannot be checked here."
             : shortcuts.canSetUp ? "Use these keys for capture. Custom shortcuts are kept, and a backup is saved first."
             : !shortcuts.ready && (shortcuts.screenshotState === "custom" || shortcuts.recordState === "custom" || shortcuts.pauseState === "custom") ? "A key already runs something else, so Omaframe left it alone."
+            : studio.skipChooser && !shortcuts.chooserKey.length && shortcuts.chooserState === "custom" ? "Ctrl+Print already runs something else, so Omaframe left it alone. Bind omaframe --capture --chooser to another key to reach the finish chooser."
             : ""
         color: theme.muted
         font.family: theme.fontFamily

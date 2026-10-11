@@ -63,9 +63,9 @@ ApplicationWindow {
     }
     function home(path) { return filePicker.abbreviate(path) }
     function requestNavigation(command, file) {
-        requestCaptureNavigation(command, file, -1);
+        requestCaptureNavigation(command, file, -1, "");
     }
-    function requestCaptureNavigation(command, file, delaySeconds) {
+    function requestCaptureNavigation(command, file, delaySeconds, chooser) {
         if (studio.busy || video.busy || navigation.saving || (command === "history" && recorder.active)) return;
         studio.cancelTextCopy();
         studio.cancelPendingAccept();
@@ -85,7 +85,7 @@ ApplicationWindow {
             videoPane.syncDraft();
             video.saveDraftNow();
         } else studio.saveDraftNow();
-        navigation.request(command, file || "", delaySeconds === undefined ? -1 : delaySeconds);
+        navigation.request(command, file || "", delaySeconds === undefined ? -1 : delaySeconds, chooser || "");
     }
     Binding { target: navigation; property: "dirty"; value: root.videoLoaded
         ? !root.videoUnchanged && !root.videoSavedCurrent && video.draftSignature !== videoPane.signature
@@ -671,6 +671,22 @@ ApplicationWindow {
                     Text {
                         Layout.fillWidth: true
                         text: "Using a finish, or Copy in the editor, copies the screenshot and saves a file. Turn this off to only copy. Copy and save always keeps a file, and Ctrl+C in the finish chooser copies without saving once."
+                        color: theme.muted
+                        font.family: theme.fontFamily
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                    RecordToggle {
+                        objectName: "skipChooserToggle"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        text: "Skip the finish chooser"
+                        checked: studio.skipChooser
+                        onToggled: studio.skipChooser = checked
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "A window, area or display screenshot finishes as soon as it is selected, in Raw, without a frame. Click its notification to pick a finish or edit it. The chooser's prompt to hide possible secrets is skipped too. Scrolling captures always show the chooser."
                         color: theme.muted
                         font.family: theme.fontFamily
                         font.pixelSize: 11

@@ -88,6 +88,10 @@ int main(int argc, char **argv) {
                                      "Use the remembered screenshot delay.");
   rememberedDelay.setFlags(QCommandLineOption::HiddenFromHelp);
   parser.addOption(rememberedDelay);
+  parser.addOption({"direct",
+                    "Finish this screenshot without the finish chooser."});
+  parser.addOption({"chooser",
+                    "End this screenshot in the finish chooser."});
   parser.addOption({"repeat", "Capture the last selected screen area again."});
   parser.addOption({"screen", "Capture the active monitor immediately."});
   parser.addOption({"scroll",
@@ -99,6 +103,12 @@ int main(int argc, char **argv) {
   QString delayError;
   if (!CaptureRequest::cliDelay(parser, delaySeconds, delayError)) {
     fprintf(stderr, "%s\n", qPrintable(delayError));
+    return 1;
+  }
+  CaptureRequest::ChooserOverride chooserOverride;
+  QString chooserError;
+  if (!CaptureRequest::cliOverride(parser, chooserOverride, chooserError)) {
+    fprintf(stderr, "%s\n", qPrintable(chooserError));
     return 1;
   }
   if (parser.isSet("delayed-capture")) {
@@ -153,11 +163,12 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Omaframe is already starting. Try again in a moment.\n");
       return 1;
     }
-    client.write(QJsonDocument(QJsonObject{{"command", command},
-                                           {"file", file},
-                                           {"delaySeconds", delaySeconds}})
-                     .toJson(QJsonDocument::Compact) +
-                 '\n');
+    QJsonObject request{{"command", command},
+                        {"file", file},
+                        {"delaySeconds", delaySeconds}};
+    if (chooserOverride != CaptureRequest::ChooserOverride::Default)
+      request.insert("chooser", CaptureRequest::chooserName(chooserOverride));
+    client.write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
     client.waitForBytesWritten(1000);
     if (client.bytesAvailable() == 0 && !client.waitForReadyRead(4000))
       return 1;
@@ -294,13 +305,15 @@ int main(int argc, char **argv) {
     return chooser != nullptr;
   };
   auto requestNavigation = [&](const QString &cmd, const QUrl &path = QUrl(),
-                               int seconds = -1) {
+                               int seconds = -1,
+                               CaptureRequest::ChooserOverride override = {}) {
+    const QString chooser = CaptureRequest::chooserName(override);
     if (window)
       QMetaObject::invokeMethod(window, "requestCaptureNavigation",
                                 Q_ARG(QVariant, cmd), Q_ARG(QVariant, path),
-                                Q_ARG(QVariant, seconds));
+                                Q_ARG(QVariant, seconds), Q_ARG(QVariant, chooser));
     else
-      navigation.request(cmd, path, seconds);
+      navigation.request(cmd, path, seconds, chooser);
   };
   QList<QQuickWindow *> selections;
   auto screenFor = [](const QString &name) {
@@ -978,7 +991,8 @@ int main(int argc, char **argv) {
                      requestNavigation(cmd, path);
                    });
   QObject::connect(&navigation, &Navigation::proceed, &app,
-                   [&](const QString &cmd, const QUrl &path, int seconds) {
+                   [&](const QString &cmd, const QUrl &path, int seconds,
+                       const QString &chooser) {
                      if (window && !(cmd == "capture" && seconds > 0)) {
                        if (cmd != "open") window->setProperty("historyMode", false);
                        // Keep the current editor alive while an open is
@@ -1012,13 +1026,18 @@ int main(int argc, char **argv) {
                        showStudioWindow();
                      } else if (cmd == "record")
                        studio.captureVideo();
-                     else if (cmd == "repeat")
-                       studio.repeatLastArea();
-                     else if (cmd == "capture" && seconds > 0)
-                       studio.delayCapture(seconds);
-                     else if (cmd == "capture" || cmd == "screen")
-                       studio.capture(cmd == "capture");
-                     else if (cmd == "scroll")
+                     else if (cmd == "capture" || cmd == "screen" ||
+                              cmd == "repeat") {
+                       auto override = CaptureRequest::ChooserOverride::Default;
+                       CaptureRequest::parseChooser(chooser, override);
+                       studio.setChooserOverride(override);
+                       if (cmd == "repeat")
+                         studio.repeatLastArea();
+                       else if (cmd == "capture" && seconds > 0)
+                         studio.delayCapture(seconds);
+                       else
+                         studio.capture(cmd == "capture");
+                     } else if (cmd == "scroll")
                        studio.captureScroll();
                      else if (cmd == "review")
                        openReview(path, pendingReviewReturnsToStudio);
@@ -1052,7 +1071,8 @@ int main(int argc, char **argv) {
             QJsonDocument::fromJson(client->readLine()).object();
         QString cmd;
         int seconds;
-        if (!CaptureRequest::decode(request, cmd, seconds)) {
+        CaptureRequest::ChooserOverride override;
+        if (!CaptureRequest::decode(request, cmd, seconds, override)) {
           client->write("invalid\n");
           client->disconnectFromServer();
           return;
@@ -1095,9 +1115,9 @@ int main(int argc, char **argv) {
         if (recorder.active()) {
           if (!studio.busy() && !video.busy() && !studio.quickMode()) {
             if (cmd == "repeat")
-              requestNavigation(cmd, {}, seconds);
+              requestNavigation(cmd, {}, seconds, override);
             else if (cmd == "capture" || cmd == "screen" || cmd == "scroll")
-              requestNavigation(cmd, {}, seconds);
+              requestNavigation(cmd, {}, seconds, override);
           }
           return;
         }
@@ -1122,7 +1142,7 @@ int main(int argc, char **argv) {
               cmd, QUrl::fromLocalFile(request.value("file").toString()));
         else if (cmd == "record" || cmd == "repeat" || cmd == "capture" ||
                  cmd == "screen" || cmd == "scroll" || cmd == "history")
-          requestNavigation(cmd, {}, seconds);
+          requestNavigation(cmd, {}, seconds, override);
         else
           showStudioWindow();
       });
@@ -1148,12 +1168,14 @@ int main(int argc, char **argv) {
     QTimer::singleShot(0, &studio, [&] {
       if (command == "record")
         studio.captureVideo();
-      else if (command == "repeat")
-        studio.repeatLastArea();
       else if (command == "scroll")
         studio.captureScroll();
-      else {
+      else if (command == "repeat") {
+        studio.setChooserOverride(chooserOverride);
+        studio.repeatLastArea();
+      } else {
         mark("capture requested");
+        studio.setChooserOverride(chooserOverride);
         if (delaySeconds > 0)
           studio.delayCapture(delaySeconds);
         else

@@ -19,6 +19,7 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -87,6 +88,21 @@ class QuickCopyTest : public QObject {
     studio.scrollFinished(captureImage(), false, true);
     QCOMPARE(studio.quickState(), QString("choosing"));
     QVERIFY(studio.quickMode());
+  }
+  // A window, area or display selection, through the same entry point the
+  // selector uses. The capture is supplied in memory.
+  void select(Studio &studio, const QRectF &area = {.1, .1, .5, .5}) {
+    studio.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("output")));
+    studio.m_captureGrab = [](const QString &, QImage &image, QString &) {
+      image = captureImage();
+      return true;
+    };
+    QSignalSpy ready(&studio, &Studio::selectionReady);
+    studio.capture(true);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 5000);
+    QCOMPARE(studio.quickState(), QString("selecting"));
+    studio.finishSelection(ready[0][0].toStringList().first(), area.left(),
+                           area.top(), area.right(), area.bottom());
   }
 private slots:
   void initTestCase() {
@@ -179,6 +195,213 @@ private slots:
         Frame::compose(Frame::applyEdits(captureImage(), studio.marks()->edits()), options);
     QCOMPARE(pinned[0][0].value<QImage>().size(), expected.size());
     QVERIFY(expected.size() != captureImage().size());
+  }
+  void skipChooserSettingPersists() {
+    {
+      ImageStore store;
+      Studio studio(&store, false);
+      QVERIFY(!studio.skipChooser());
+      studio.setSkipChooser(true);
+      QVERIFY(studio.skipChooser());
+    }
+    QVERIFY(QSettings().value("screenshot/skipChooser").toBool());
+    ImageStore store;
+    Studio restarted(&store, false);
+    QVERIFY(restarted.skipChooser());
+  }
+  void directCaptureFinishesWithoutChooser_data() {
+    QTest::addColumn<bool>("autoSave");
+    QTest::newRow("auto-save-off") << false;
+    QTest::newRow("auto-save-on") << true;
+  }
+  void directCaptureFinishesWithoutChooser() {
+    QFETCH(bool, autoSave);
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.setAutoSaveScreenshots(autoSave);
+    studio.setSkipChooser(true);
+    studio.setStyle(3); // The finish picked last in the chooser.
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    select(studio);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    QCOMPARE(chooser.count(), 0);
+    QCOMPARE(studio.quickState(), autoSave ? QString("done") : QString("copied"));
+    QCOMPARE(studio.finishNotice().summary, QString("Screenshot copied"));
+    // A direct screenshot is Raw: exactly the selection, no frame.
+    QCOMPARE(studio.style(), 8);
+    const QImage copied(clipboard());
+    QCOMPARE(copied.size(), studio.sourceSize());
+    // The chooser's remembered finish is untouched.
+    QCOMPARE(QSettings().value("style").toInt(), 3);
+    studio.leaveQuickMode();
+    QCOMPARE(studio.style(), 3);
+    if (autoSave) {
+      QVERIFY(QFileInfo::exists(studio.savedPath()));
+      QCOMPARE(QImage(studio.savedPath()).size(), copied.size());
+      QCOMPARE(contents(clipboard()), contents(studio.savedPath()));
+    } else
+      QVERIFY(!QDir(temp.filePath("output")).exists());
+  }
+  void chooserOverridesApplyToOneCapture() {
+    ImageStore store;
+    Studio studio(&store, false);
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    // --chooser beats the setting.
+    studio.setSkipChooser(true);
+    studio.setChooserOverride(CaptureRequest::ChooserOverride::Chooser);
+    select(studio);
+    QCOMPARE(chooser.count(), 1);
+    QCOMPARE(studio.quickState(), QString("choosing"));
+    studio.leaveQuickMode();
+    // --direct beats the setting being off.
+    studio.setSkipChooser(false);
+    studio.setChooserOverride(CaptureRequest::ChooserOverride::Direct);
+    select(studio);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    QCOMPARE(chooser.count(), 1);
+    studio.leaveQuickMode();
+    // The next capture follows the setting again.
+    select(studio);
+    QCOMPARE(chooser.count(), 2);
+    QCOMPARE(studio.quickState(), QString("choosing"));
+    // A capture under way keeps its override.
+    studio.leaveQuickMode();
+    studio.setChooserOverride(CaptureRequest::ChooserOverride::Direct);
+    studio.m_captureGrab = [](const QString &, QImage &image, QString &) {
+      image = captureImage();
+      return true;
+    };
+    QSignalSpy ready(&studio, &Studio::selectionReady);
+    studio.capture(true);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 5000);
+    studio.setChooserOverride(CaptureRequest::ChooserOverride::Chooser);
+    studio.finishSelection(ready[0][0].toStringList().first(), 0, 0, 1, 1);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 2, 15000);
+    QCOMPARE(chooser.count(), 2);
+  }
+  void directScreenCaptureFinishesWithoutChooser() {
+    // --screen and --repeat finish without a selection. Answer the active
+    // display query for this test only.
+    const QString stub = temp.filePath("bin/hyprctl");
+    QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), stub));
+    qputenv("HYPRCTL_TEST_MONITOR", QGuiApplication::primaryScreen()->name().toUtf8());
+    // Other tests rely on there being no hyprctl.
+    const auto cleanup = qScopeGuard([&] {
+      QFile::remove(stub);
+      qunsetenv("HYPRCTL_TEST_MONITOR");
+    });
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.setOutputDirectory(QUrl::fromLocalFile(temp.filePath("output")));
+    studio.setAutoSaveScreenshots(false);
+    studio.setSkipChooser(true);
+    studio.m_captureGrab = [](const QString &, QImage &image, QString &) {
+      image = captureImage();
+      return true;
+    };
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    studio.capture(false);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    QCOMPARE(chooser.count(), 0);
+    QCOMPARE(studio.quickState(), QString("copied"));
+    QCOMPARE(studio.sourceSize(), captureImage().size());
+  }
+  void scrollAndFinishesKeepTheChooser() {
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.setSkipChooser(true);
+    studio.setChooserOverride(CaptureRequest::ChooserOverride::Direct);
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    prepare(studio);
+    QCOMPARE(chooser.count(), 1);
+    studio.openEditor();
+    studio.showFinishes();
+    QCOMPARE(chooser.count(), 2);
+    QTest::qWait(200);
+    QCOMPARE(dismissed.count(), 0);
+    QVERIFY(!QFileInfo::exists(clipboard()));
+  }
+  void directFailureShowsTheChooser_data() {
+    QTest::addColumn<QString>("failure");
+    QTest::newRow("copy") << QString("copy");
+    QTest::newRow("saved-copy") << QString("saved-copy");
+    QTest::newRow("save") << QString("save");
+  }
+  void directFailureShowsTheChooser() {
+    QFETCH(QString, failure);
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.setAutoSaveScreenshots(failure != "copy");
+    studio.setSkipChooser(true);
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    QFile blocker(temp.filePath("output"));
+    const auto cleanup = qScopeGuard([&] { blocker.remove(); });
+    if (failure == "save") {
+      // A file where the folder belongs: the PNG cannot be saved.
+      QVERIFY(blocker.open(QIODevice::WriteOnly));
+      blocker.close();
+    } else
+      qputenv("COPY_TEST_FAIL", "1");
+    select(studio);
+    const QString state = failure == "copy" ? "copy-failed" : "failed";
+    QTRY_COMPARE_WITH_TIMEOUT(studio.quickState(), state, 15000);
+    QCOMPARE(chooser.count(), 1);
+    QCOMPARE(dismissed.count(), 0);
+    QVERIFY(studio.quickMode());
+    QVERIFY(studio.hasImage());
+    if (failure == "saved-copy")
+      QCOMPARE(studio.recoveryAction(), QString("Retry copy"));
+    qunsetenv("COPY_TEST_FAIL");
+    if (failure == "save")
+      QVERIFY(blocker.remove());
+    // Each retry the chooser offers completes normally, without showing it
+    // again.
+    if (failure == "copy")
+      studio.copyQuick(); // Ctrl+C
+    else if (failure == "saved-copy")
+      studio.retryOutput();
+    else
+      studio.chooseFinish(studio.style());
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    QCOMPARE(chooser.count(), 1);
+    QCOMPARE(studio.quickState(), failure == "copy" ? QString("copied") : QString("done"));
+    QVERIFY(!QImage(clipboard()).isNull());
+    QCOMPARE(studio.style(), 8);
+    studio.leaveQuickMode();
+    QCOMPARE(studio.style(), 0); // The remembered default, not Raw.
+  }
+  void directCaptureReopensWithItsFinish() {
+    ImageStore store;
+    Studio studio(&store, false);
+    studio.setAutoSaveScreenshots(false);
+    studio.setSkipChooser(true);
+    studio.setStyle(3);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    select(studio);
+    QTRY_COMPARE_WITH_TIMEOUT(dismissed.count(), 1, 15000);
+    // What the notification keeps for its Edit action.
+    const Studio::Snapshot snapshot = studio.snapshot();
+    studio.leaveQuickMode();
+    studio.closeImage();
+    QSignalSpy editor(&studio, &Studio::editorRequested);
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    QVERIFY(studio.reopen(snapshot));
+    QCOMPARE(editor.count(), 1);
+    QCOMPARE(chooser.count(), 0);
+    QCOMPARE(studio.quickState(), QString("editing"));
+    QCOMPARE(studio.style(), 8); // Its own finish, Raw.
+    QCOMPARE(studio.sourceSize(), snapshot.original.size());
+    // Its finish can still be changed, and Pin is available.
+    studio.setStyle(5);
+    QCOMPARE(studio.style(), 5);
+    QSignalSpy pinned(&studio, &Studio::pinRequested);
+    studio.pin();
+    QTRY_COMPARE_WITH_TIMEOUT(pinned.count(), 1, 15000);
   }
   void finishedScreenshotReopensWithItsMarks() {
     ImageStore store;
@@ -1527,6 +1750,15 @@ private slots:
 };
 
 int main(int argc, char **argv) {
+  if (QFileInfo(QString::fromLocal8Bit(argv[0])).fileName() == "hyprctl") {
+    // The active display, for an immediate capture. Nothing else answers.
+    if (argc == 3 && QByteArray(argv[1]) == "-j" && QByteArray(argv[2]) == "monitors") {
+      std::fprintf(stdout, "[{\"name\":\"%s\",\"focused\":true}]\n",
+                   qgetenv("HYPRCTL_TEST_MONITOR").constData());
+      return 0;
+    }
+    return 1;
+  }
   if (QFileInfo(QString::fromLocal8Bit(argv[0])).fileName() == "tesseract") {
     QFile input;
     if (!input.open(stdin, QIODevice::ReadOnly))

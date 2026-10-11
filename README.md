@@ -62,6 +62,18 @@ to stop keeping screenshot files. This does not disable editable drafts that
 are autosaved while you edit. A final clipboard-only copy does not update
 the draft with your latest edits.
 
+Most screenshots don't need a new finish? Turn on **Skip the finish chooser**
+in Settings, next to **Save screenshots automatically**. Press Print Screen,
+click a window, drag an area or press F, and the screenshot is copied right
+away in Raw, without a frame, and saved too when automatic saving is on. The
+finish you picked in the chooser stays remembered for the chooser. The **Screenshot copied** notification confirms it; click it to change the
+finish, pin it or mark it up in the editor. The chooser's **Hide possible
+secrets** prompt is skipped as well, so look before you paste. Scrolling
+captures still end in the chooser, and if saving or copying fails the chooser
+opens with its retry. Settings can set up the optional **Ctrl+Print**
+shortcut, which always ends in the chooser. The setting is off by default and
+never changes your key bindings.
+
 Paste it anywhere. Crops, marks and redactions you made in the editor are kept
 either way. Click the **Screenshot copied** notification to open it in the
 editor again, with its marks and finish still editable. If copying fails, the panel stays open. In the chooser, Ctrl+C
@@ -213,6 +225,7 @@ Clipboard-only copies add no history item. Editable drafts may remain. Screensho
 | Where | Key | Does |
 | --- | --- | --- |
 | Anywhere | Shift+Print | Start a delayed screenshot, when enabled in Settings |
+| Anywhere | Ctrl+Print | Take a screenshot that ends in the finish chooser, when enabled in Settings |
 | Choosing a screenshot area | T | Start the remembered screenshot delay |
 | Anywhere | Print Screen | Take a screenshot |
 | Anywhere | Alt+Print Screen | Start a recording, or stop it |
@@ -320,6 +333,11 @@ Setup keeps custom bindings and adds the new key only when it is free.
 For a menu or tooltip capture, run `omaframe --delay 5` or
 `omaframe --capture --delay 5`. The delay is integer seconds from 0 to 30;
 0 captures immediately. Other modes cannot use `--delay`.
+
+`omaframe --capture --direct` finishes one screenshot without the finish
+chooser, and `omaframe --capture --chooser` always shows it, whatever
+**Skip the finish chooser** is set to. Both also work with no option, with
+`--screen`, `--repeat` and `--delay`, but not together or with other modes.
 
 For scripts or custom keys, use `omaframe --pause-recording`,
 `omaframe --resume-recording`, or `omaframe --toggle-recording-pause`. These commands

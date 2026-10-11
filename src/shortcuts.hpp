@@ -1,8 +1,10 @@
 /** @fileoverview Omaframe's capture shortcuts on Omarchy/Hyprland.
  *
  * Print takes a screenshot, Alt+Print starts or stops recording, and
- * Alt+Shift+Print pauses or resumes. Setup changes free keys or stock capture
- * bindings only when the user asks. Custom bindings are always left alone. */
+ * Alt+Shift+Print pauses or resumes. Shift+Print (delay) and Ctrl+Print
+ * (always the finish chooser) are optional. Setup changes free keys or stock
+ * capture bindings only when the user asks. Custom bindings are always left
+ * alone. */
 #pragma once
 #include <QJsonArray>
 #include <QJsonObject>
@@ -10,15 +12,15 @@
 #include <QString>
 
 namespace Shortcuts {
-enum class Action { Screenshot, Record, Pause, Delay };
+enum class Action { Screenshot, Record, Pause, Delay, Chooser };
 /** A readable key combination, e.g. "Alt+Print" or "Super+Shift+S". */
 QString keyLabel(const QJsonObject &bind);
 /** Whether `bind` runs Omaframe for `action`. */
 bool runsOmaframe(const QJsonObject &bind, Action action);
 /** The key that runs Omaframe for `action`, or empty when none does. */
 QString omaframeKey(const QJsonArray &binds, Action action);
-/** The default key for `action`: Print, Alt+Print, Alt+Shift+Print, or
- * Shift+Print. */
+/** The default key for `action`: Print, Alt+Print, Alt+Shift+Print,
+ * Shift+Print or Ctrl+Print. */
 QString defaultKey(Action action);
 /** What the default key does now: "omaframe", "stock" (Omarchy's own
  *  action, safe to replace), "none", or "custom". */
@@ -42,6 +44,8 @@ class ShortcutSetup final : public QObject {
   Q_OBJECT
   Q_PROPERTY(QString delayKey READ delayKey NOTIFY changed)
   Q_PROPERTY(QString delayState READ delayState NOTIFY changed)
+  Q_PROPERTY(QString chooserKey READ chooserKey NOTIFY changed)
+  Q_PROPERTY(QString chooserState READ chooserState NOTIFY changed)
   Q_PROPERTY(QString screenshotKey READ screenshotKey NOTIFY changed)
   Q_PROPERTY(QString recordKey READ recordKey NOTIFY changed)
   Q_PROPERTY(QString pauseKey READ pauseKey NOTIFY changed)
@@ -57,6 +61,8 @@ public:
   explicit ShortcutSetup(QObject *parent = nullptr);
   QString delayKey() const { return m_delayKey; }
   QString delayState() const { return m_delayState; }
+  QString chooserKey() const { return m_chooserKey; }
+  QString chooserState() const { return m_chooserState; }
   QString screenshotKey() const { return m_screenshotKey; }
   QString recordKey() const { return m_recordKey; }
   QString pauseKey() const { return m_pauseKey; }
@@ -76,6 +82,9 @@ public:
   /** Binds every default key that is free or still Omarchy's stock action. */
   Q_INVOKABLE void setUp();
   Q_INVOKABLE void setUpDelay();
+  /** Binds Ctrl+Print to a capture that always ends in the finish chooser,
+   *  only when nothing else uses it. */
+  Q_INVOKABLE void setUpChooser();
   /** Binds free start/stop and pause keys, for recording setup. */
   Q_INVOKABLE void setUpRecording();
 signals:
@@ -84,6 +93,7 @@ signals:
 private:
   void run(const QList<Shortcuts::Action> &actions);
   QString m_delayKey, m_delayState = "unknown";
+  QString m_chooserKey, m_chooserState = "unknown";
   QString m_screenshotKey, m_recordKey, m_pauseKey,
       m_screenshotState = "unknown", m_recordState = "unknown",
       m_pauseState = "unknown", m_message;

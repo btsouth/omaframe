@@ -59,7 +59,7 @@ target_link_libraries(picker-core PUBLIC Qt6::Quick Qt6::DBus PRIVATE Qt6::GuiPr
 target_include_directories(picker-core PUBLIC src PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 add_library(studio-core src/history.cpp src/history.hpp src/pins.cpp src/pins.hpp src/recording-publication.cpp src/studio.cpp src/studio.hpp src/delay-capture.cpp src/delay-capture.hpp src/marks.cpp src/marks.hpp src/mark-constraints.cpp src/mark-constraints.hpp src/displays.cpp src/displays.hpp src/window-targets.cpp src/window-targets.hpp src/video.cpp src/video-drafts.cpp src/video.hpp src/recording.cpp src/recording.hpp src/audio-levels.cpp src/audio-levels.hpp src/audio-pulse.cpp src/webcam.cpp src/webcam.hpp src/shortcuts.cpp src/shortcuts.hpp src/capture.hpp src/capture-session.cpp src/capture-session.hpp src/surface-capture.cpp src/scroll-capture.cpp src/scroll-capture.hpp src/scroll-pointer.cpp src/scroll-pointer.hpp ${PROTOCOL_SOURCES})
 target_include_directories(studio-core PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(studio-core PUBLIC picker-core frame-core ocr-core stitch-core LayerShellQt::Interface Qt6::Quick Qt6::Concurrent Qt6::Network Qt6::Multimedia PkgConfig::WaylandClient PkgConfig::Pulse)
+target_link_libraries(studio-core PUBLIC navigation-core picker-core frame-core ocr-core stitch-core LayerShellQt::Interface Qt6::Quick Qt6::Concurrent Qt6::Network Qt6::Multimedia PkgConfig::WaylandClient PkgConfig::Pulse)
 add_library(navigation-core src/navigation.cpp src/navigation.hpp src/capture-request.cpp src/capture-request.hpp)
 target_link_libraries(navigation-core PUBLIC Qt6::Core)
 target_include_directories(navigation-core PUBLIC src)
@@ -125,6 +125,9 @@ if(BUILD_TESTING)
   qt_add_executable(navigation-tests tests/navigation-test.cpp)
   target_link_libraries(navigation-tests PRIVATE navigation-core Qt6::Test)
   add_test(NAME navigation COMMAND navigation-tests)
+  qt_add_executable(capture-request-tests tests/capture-request-test.cpp)
+  target_link_libraries(capture-request-tests PRIVATE navigation-core Qt6::Test)
+  add_test(NAME capture-request COMMAND capture-request-tests)
   qt_add_executable(recording-tests tests/recording-test.cpp)
   target_link_libraries(recording-tests PRIVATE studio-core Qt6::Test)
   add_test(NAME recording COMMAND recording-tests)
@@ -166,7 +169,7 @@ if(BUILD_TESTING)
   add_test(NAME scroll-studio COMMAND scroll-studio-tests)
   set_tests_properties(scroll-studio PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
   # These suites use fixtures or stub tools and need no desktop session.
-  set_tests_properties(webcam navigation recording displays renderer theme video-marks scroll-capture scroll-studio
+  set_tests_properties(webcam navigation capture-request recording displays renderer theme video-marks scroll-capture scroll-studio
     PROPERTIES LABELS "headless")
   # Rendered OCR fixtures depend on the desktop's system font choices.
   set_tests_properties(ocr PROPERTIES LABELS "recognition")

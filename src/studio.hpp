@@ -1,4 +1,5 @@
 #pragma once
+#include "capture-request.hpp"
 #include "capture-session.hpp"
 #include "delay-capture.hpp"
 #include "marks.hpp"
@@ -123,6 +124,9 @@ class Studio final : public QObject {
   Q_PROPERTY(bool draftDirty READ draftDirty NOTIFY changed)
   Q_PROPERTY(bool keepOriginals READ keepOriginals WRITE setKeepOriginals NOTIFY changed)
   Q_PROPERTY(bool autoSaveScreenshots READ autoSaveScreenshots WRITE setAutoSaveScreenshots NOTIFY changed)
+  /** Finish a window, area or display screenshot as soon as it is selected,
+   *  in Raw, instead of showing the finish chooser. */
+  Q_PROPERTY(bool skipChooser READ skipChooser WRITE setSkipChooser NOTIFY changed)
   Q_PROPERTY(bool editing READ editing WRITE setEditing NOTIFY changed)
   /** False until the first-run welcome has been seen or dismissed. */
   Q_PROPERTY(bool welcomed READ welcomed WRITE setWelcomed NOTIFY changed)
@@ -206,6 +210,14 @@ public:
   void setKeepOriginals(bool);
   bool autoSaveScreenshots() const;
   void setAutoSaveScreenshots(bool);
+  bool skipChooser() const;
+  void setSkipChooser(bool);
+  /** --direct or --chooser for the capture about to start. Ignored while a
+   *  capture is under way; leaving quick mode clears it. */
+  void setChooserOverride(CaptureRequest::ChooserOverride override) {
+    if (!m_busy)
+      m_chooserOverride = override;
+  }
   bool editing() const { return m_editing; }
   bool welcomed() const;
   /** The cropped image the editor shows, and the whole capture, in pixels. */
@@ -261,6 +273,9 @@ public:
   }
   void leaveQuickMode() {
     cancelPendingAccept();
+    m_chooserOverride = CaptureRequest::ChooserOverride::Default;
+    m_direct = false;
+    restoreRememberedStyle();
     m_quickMode = false;
     m_recordingSelection = false;
     m_scrollSelection = false;
@@ -379,6 +394,7 @@ signals:
 
 private:
   friend class DelayTest;
+  friend class QuickCopyTest;
   Capture::Grab m_captureGrab;
   quint64 m_captureRequestGeneration = 0;
   bool m_delayCleanupPending = false;
@@ -387,6 +403,17 @@ private:
   void beginDelayedCapture(int seconds, bool fromSelection);
   void acquireCapture(bool region, int monitor, bool repeat,
                       quint64 delayGeneration);
+  /** A screenshot is selected: finish it directly, in Raw, or show the
+   *  chooser. */
+  void selected();
+  /** Back to the remembered finish after a direct screenshot used Raw. */
+  void restoreRememberedStyle();
+  /** A direct screenshot that could not be saved or copied shows the chooser
+   *  once, with its error and retry. */
+  void showChooserIfDirectFailed();
+  CaptureRequest::ChooserOverride m_chooserOverride =
+      CaptureRequest::ChooserOverride::Default;
+  bool m_direct = false, m_directRaw = false;
   /** False when the current draft could not be saved first. */
   bool loadImage(QImage image, QString name, bool demo);
   void scheduleRender();

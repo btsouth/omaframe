@@ -30,14 +30,69 @@ bool CaptureRequest::cliDelay(const QCommandLineParser &parser, int &seconds,
   }
   return true;
 }
+bool CaptureRequest::skipsChooser(bool setting, ChooserOverride override) {
+  return override == ChooserOverride::Direct ||
+         (override == ChooserOverride::Default && setting);
+}
+QString CaptureRequest::chooserName(ChooserOverride override) {
+  return override == ChooserOverride::Direct    ? "direct"
+         : override == ChooserOverride::Chooser ? "chooser"
+                                                : QString();
+}
+bool CaptureRequest::parseChooser(const QString &name,
+                                  ChooserOverride &override) {
+  if (name.isEmpty())
+    override = ChooserOverride::Default;
+  else if (name == "direct")
+    override = ChooserOverride::Direct;
+  else if (name == "chooser")
+    override = ChooserOverride::Chooser;
+  else
+    return false;
+  return true;
+}
+bool CaptureRequest::cliOverride(const QCommandLineParser &parser,
+                                 ChooserOverride &override, QString &error) {
+  override = ChooserOverride::Default;
+  const bool direct = parser.isSet("direct"), chooser = parser.isSet("chooser");
+  if (!direct && !chooser)
+    return true;
+  const QString flag = direct ? "--direct" : "--chooser";
+  if (direct && chooser) {
+    error = "--direct and --chooser cannot be used together.";
+    return false;
+  }
+  for (const auto *mode :
+       {"studio", "history", "scroll", "record", "stop-recording",
+        "pause-recording", "resume-recording", "toggle-recording-pause"})
+    if (parser.isSet(mode)) {
+      error = flag + " is available with default capture, --capture, "
+                     "--screen or --repeat only.";
+      return false;
+    }
+  if (!parser.positionalArguments().isEmpty()) {
+    error = flag + " cannot open a file.";
+    return false;
+  }
+  override = direct ? ChooserOverride::Direct : ChooserOverride::Chooser;
+  return true;
+}
 bool CaptureRequest::decode(const QJsonObject &request, QString &command,
-                            int &seconds) {
+                            int &seconds, ChooserOverride &override) {
   command = request.value("command").toString();
   if (!QStringList{"capture", "screen", "repeat", "scroll", "record", "studio", "history",
                    "open", "stop-recording", "pause-recording",
                    "resume-recording", "toggle-recording-pause"}
            .contains(command))
     return false;
+  override = ChooserOverride::Default;
+  if (request.contains("chooser")) {
+    const auto chooser = request.value("chooser");
+    if (!chooser.isString() || chooser.toString().isEmpty() ||
+        !parseChooser(chooser.toString(), override) ||
+        (command != "capture" && command != "screen" && command != "repeat"))
+      return false;
+  }
   seconds = -1;
   if (!request.contains("delaySeconds"))
     return true;

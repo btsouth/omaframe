@@ -8,16 +8,17 @@ void Navigation::setDirty(bool dirty) {
   emit changed();
 }
 void Navigation::request(const QString &command, const QUrl &file,
-                         int delaySeconds) {
+                         int delaySeconds, const QString &chooser) {
   if (command.isEmpty() || pending())
     return;
   if (!m_dirty) {
-    emit proceed(command, file, delaySeconds);
+    emit proceed(command, file, delaySeconds, chooser);
     return;
   }
   m_command = command;
   m_file = file;
   m_delaySeconds = delaySeconds;
+  m_chooser = chooser;
   emit changed();
   emit confirmationRequested();
 }
@@ -27,6 +28,7 @@ void Navigation::cancel() {
   m_command.clear();
   m_file = QUrl();
   m_delaySeconds = -1;
+  m_chooser.clear();
   emit changed();
 }
 void Navigation::discard() {
@@ -55,7 +57,8 @@ void Navigation::continueRequest() {
   const QString command = std::exchange(m_command, {});
   const QUrl file = std::exchange(m_file, {});
   const int delaySeconds = std::exchange(m_delaySeconds, -1);
+  const QString chooser = std::exchange(m_chooser, {});
   m_saving = false;
   emit changed();
-  emit proceed(command, file, delaySeconds);
+  emit proceed(command, file, delaySeconds, chooser);
 }

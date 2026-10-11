@@ -8,6 +8,7 @@
 #include "shortcuts.hpp"
 #include "studio.hpp"
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -17,8 +18,10 @@
 #include <QQmlEngine>
 #include <QQuickWindow>
 #include <QSemaphore>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
@@ -95,22 +98,23 @@ private slots:
     using namespace CaptureRequest;
     QString cmd;
     int seconds;
-    QVERIFY(
-        decode({{"command", "capture"}, {"delaySeconds", 5}}, cmd, seconds));
+    ChooserOverride chooser;
+    QVERIFY(decode({{"command", "capture"}, {"delaySeconds", 5}}, cmd, seconds,
+                   chooser));
     QCOMPARE(seconds, 5);
-    QVERIFY(decode({{"command", "capture"}}, cmd, seconds));
+    QVERIFY(decode({{"command", "capture"}}, cmd, seconds, chooser));
     QCOMPARE(seconds, -1);
     for (const auto &invalid : {QJsonValue("3"), QJsonValue(1.5),
                                 QJsonValue(31), QJsonValue(-2), QJsonValue()})
       QVERIFY(!decode({{"command", "capture"}, {"delaySeconds", invalid}}, cmd,
-                      seconds));
+                      seconds, chooser));
     QVERIFY(
-        !decode({{"command", "repeat"}, {"delaySeconds", 3}}, cmd, seconds));
-    QVERIFY(decode({{"command", "history"}}, cmd, seconds));
+        !decode({{"command", "repeat"}, {"delaySeconds", 3}}, cmd, seconds, chooser));
+    QVERIFY(decode({{"command", "history"}}, cmd, seconds, chooser));
     QCOMPARE(seconds, -1);
-    QVERIFY(decode({{"command", "history"}, {"delaySeconds", -1}}, cmd, seconds));
-    QVERIFY(!decode({{"command", "history"}, {"delaySeconds", 3}}, cmd, seconds));
-    QVERIFY(!decode({{"command", "bogus"}}, cmd, seconds));
+    QVERIFY(decode({{"command", "history"}, {"delaySeconds", -1}}, cmd, seconds, chooser));
+    QVERIFY(!decode({{"command", "history"}, {"delaySeconds", 3}}, cmd, seconds, chooser));
+    QVERIFY(!decode({{"command", "bogus"}}, cmd, seconds, chooser));
     for (const auto *request : {"capture", "screen", "repeat"})
       QCOMPARE(handle(request, true, true), Handling::Cancel);
     for (const auto *request : {"scroll", "record", "open", "studio", "history"})
@@ -784,6 +788,168 @@ private slots:
     QVERIFY(all.contains(custom));
     QVERIFY(!all.contains("Delayed screenshot with Omaframe"));
     QVERIFY(all.contains("Screenshot with Omaframe"));
+  }
+  void chooserBindings_data() {
+    QTest::addColumn<QString>("arg");
+    QTest::addColumn<bool>("chooser");
+    QTest::addColumn<bool>("screenshot");
+    for (const auto *arg :
+         {"omaframe --capture --chooser", "omaframe --chooser --capture",
+          "/opt/bin/omaframe --capture --chooser",
+          "exec /opt/bin/omaframe --capture --chooser",
+          "env TEST=1 omaframe --chooser --capture",
+          "'/opt/bin/omaframe' --capture --chooser"})
+      QTest::newRow(arg) << QString(arg) << true << false;
+    for (const auto *arg :
+         {"omaframe --capture --direct", "omaframe --direct --capture",
+          "omaframe --direct", "omaframe --screen --direct", "omaframe --capture",
+          "omaframe", "'/opt/bin/omaframe' --capture --direct",
+          "sh -c 'omaframe --capture'"})
+      QTest::newRow(arg) << QString(arg) << false << true;
+    for (const auto *arg :
+         {"omaframe --chooser", "omaframe --capture --chooser --chooser",
+          "omaframe --screen --chooser", "omaframe --capture --chooser --direct",
+          "omaframe --capture --direct --chooser", "other --capture --chooser",
+          "echo omaframe --capture --chooser", "'/opt/bin/omaframe' --record"})
+      QTest::newRow(arg) << QString(arg) << false << false;
+  }
+  void chooserBindings() {
+    QFETCH(QString, arg);
+    QFETCH(bool, chooser);
+    QFETCH(bool, screenshot);
+    using Shortcuts::Action;
+    const QJsonObject bind{{"key", "Print"},
+                           {"modmask", 4},
+                           {"dispatcher", "exec"},
+                           {"arg", arg}};
+    QCOMPARE(Shortcuts::runsOmaframe(bind, Action::Chooser), chooser);
+    QCOMPARE(Shortcuts::runsOmaframe(bind, Action::Screenshot), screenshot);
+    QVERIFY(!Shortcuts::runsOmaframe(bind, Action::Delay));
+  }
+  void chooserShortcutState() {
+    using Shortcuts::Action;
+    auto bind = [](int mask, const QString &arg) {
+      return QJsonObject{{"key", "Print"}, {"modmask", mask},
+                         {"dispatcher", "exec"}, {"arg", arg}};
+    };
+    // Only the chooser binding: the screenshot key is not set.
+    const QJsonArray chooser{bind(4, "omaframe --capture --chooser")};
+    QCOMPARE(Shortcuts::omaframeKey(chooser, Action::Chooser), QString("Ctrl+Print"));
+    QCOMPARE(Shortcuts::defaultKeyState(chooser, Action::Chooser), QString("omaframe"));
+    QVERIFY(Shortcuts::omaframeKey(chooser, Action::Screenshot).isEmpty());
+    // Print running --direct still reads as Omaframe's screenshot key.
+    const QJsonArray direct{bind(0, "omaframe --capture --direct")};
+    QCOMPARE(Shortcuts::omaframeKey(direct, Action::Screenshot), QString("Print"));
+    QCOMPARE(Shortcuts::defaultKeyState(direct, Action::Screenshot), QString("omaframe"));
+    QVERIFY(Shortcuts::omaframeKey(direct, Action::Chooser).isEmpty());
+    QCOMPARE(Shortcuts::defaultKeyState(direct, Action::Chooser), QString("none"));
+    // Ctrl+Print bound to anything else is never Omaframe's to replace.
+    QCOMPARE(Shortcuts::defaultKeyState({bind(4, "hyprpicker -a")}, Action::Chooser),
+             QString("custom"));
+    QCOMPARE(Shortcuts::defaultKeyState(
+                 {QJsonObject{{"key", "PRINT"}, {"modmask", 4}, {"dispatcher", "__lua"},
+                              {"description", "Screenshot"}, {"arg", "7"}}},
+                 Action::Chooser),
+             QString("custom"));
+    QCOMPARE(Shortcuts::omaframeKey(
+                 {QJsonObject{{"key", "PRINT"}, {"modmask", 4}, {"dispatcher", "__lua"},
+                              {"description", "Screenshot and choose a finish with Omaframe"},
+                              {"arg", "7"}}},
+                 Action::Chooser),
+             QString("Ctrl+Print"));
+    QCOMPARE(Shortcuts::defaultKey(Action::Chooser), QString("Ctrl+Print"));
+    QVERIFY(Shortcuts::command(Action::Chooser, "/bin/true").endsWith(" --capture --chooser"));
+    QVERIFY(Shortcuts::luaLine(Action::Chooser, "/bin/true").contains("\"CTRL + PRINT\""));
+  }
+  void chooserShortcutSetup() {
+    using Shortcuts::Action;
+    const QString config = temp.filePath("hypr-chooser");
+    QVERIFY(QDir(config).removeRecursively());
+    QVERIFY(QDir().mkpath(config));
+    QFile startup(config + "/hyprland.lua");
+    QVERIFY(startup.open(QIODevice::WriteOnly));
+    startup.write("require('hypr.bindings')\n");
+    startup.close();
+    const QByteArray user = "-- User keys\n"
+                            "o.bind('PRINT', 'Screenshot', 'omarchy-cmd-screenshot')\n"
+                            "o.bind('ALT + PRINT', 'Screenrecording', 'omarchy-cmd-screenrecord')\n"
+                            "o.bind('SHIFT + PRINT', 'Screenshot', 'omarchy-cmd-screenshot window')\n";
+    QFile bindings(config + "/bindings.lua");
+    QVERIFY(bindings.open(QIODevice::WriteOnly));
+    bindings.write(user);
+    bindings.close();
+    QString error, backup;
+    QVERIFY(Shortcuts::install(config, "/bin/true", {Action::Chooser}, &error, &backup));
+    QVERIFY(QFileInfo::exists(backup));
+    QFile saved(backup);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    QCOMPARE(saved.readAll(), user);
+    QVERIFY(bindings.open(QIODevice::ReadOnly));
+    const QByteArray all = bindings.readAll();
+    bindings.close();
+    // The user's bindings, Print, Alt+Print and Shift+Print included, are
+    // kept byte for byte ahead of the marked block.
+    QVERIFY(all.startsWith(user));
+    const QByteArray block = all.mid(user.size());
+    QVERIFY(block.contains("-- omaframe:shortcuts:start"));
+    QVERIFY(block.contains("-- omaframe:shortcuts:end"));
+    QVERIFY(block.contains("\"CTRL + PRINT\""));
+    QVERIFY(block.contains("Screenshot and choose a finish with Omaframe"));
+    QVERIFY(block.contains("--capture --chooser"));
+    QVERIFY(!block.contains("\"PRINT\""));
+    QVERIFY(!block.contains("SHIFT + PRINT"));
+    QVERIFY(!block.contains("ALT + PRINT"));
+    // Regenerating for another action keeps the chooser key.
+    QVERIFY(Shortcuts::install(config, "/bin/true", {Action::Pause}, &error));
+    QVERIFY(bindings.open(QIODevice::ReadOnly));
+    QVERIFY(bindings.readAll().contains("--capture --chooser"));
+    bindings.close();
+    // A taken key is refused, and the file is not touched.
+    QVERIFY(bindings.open(QIODevice::WriteOnly));
+    const QByteArray taken = user + "o.bind('CTRL + PRINT', 'Pick color', 'hyprpicker -a')\n";
+    bindings.write(taken);
+    bindings.close();
+    backup.clear();
+    QVERIFY(!Shortcuts::install(config, "/bin/true", {Action::Chooser}, &error, &backup));
+    QVERIFY(error.contains("Ctrl+Print"));
+    QVERIFY(backup.isEmpty());
+    QVERIFY(bindings.open(QIODevice::ReadOnly));
+    QCOMPARE(bindings.readAll(), taken);
+    bindings.close();
+  }
+  void skipChooserSettingLeavesBindingsAlone() {
+    QTemporaryDir config;
+    QVERIFY(config.isValid());
+    const bool hadPrevious = qEnvironmentVariableIsSet("XDG_CONFIG_HOME");
+    const QByteArray previous = qgetenv("XDG_CONFIG_HOME");
+    const auto restore = qScopeGuard([&] {
+      if (hadPrevious) qputenv("XDG_CONFIG_HOME", previous);
+      else qunsetenv("XDG_CONFIG_HOME");
+    });
+    qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
+    const QString hypr = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/hypr";
+    QVERIFY(hypr.startsWith(config.path()));
+    QVERIFY(QDir().mkpath(hypr));
+    const QByteArray user = "o.bind('PRINT', 'Screenshot with Omaframe', 'omaframe --capture')\n";
+    QFile bindings(hypr + "/bindings.lua");
+    QVERIFY(bindings.open(QIODevice::WriteOnly));
+    bindings.write(user);
+    bindings.close();
+    const QDateTime modified = QFileInfo(bindings).lastModified();
+    {
+      ImageStore store;
+      Studio studio(&store, false);
+      studio.setSkipChooser(true);
+      QVERIFY(studio.skipChooser());
+      studio.setSkipChooser(false);
+      QVERIFY(!studio.skipChooser());
+      studio.setSkipChooser(true);
+    }
+    QCOMPARE(QDir(hypr).entryList(QDir::Files), QStringList{"bindings.lua"});
+    QVERIFY(bindings.open(QIODevice::ReadOnly));
+    QCOMPARE(bindings.readAll(), user);
+    bindings.close();
+    QCOMPARE(QFileInfo(bindings).lastModified(), modified);
   }
   void selectionDelayRules() {
     AudioLevels audioLevels;

@@ -15,8 +15,10 @@ public:
   bool pending() const { return !m_command.isEmpty(); }
   bool saving() const { return m_saving; }
   void setDirty(bool dirty);
+  // `chooser` is a CaptureRequest override name: empty, "direct" or
+  // "chooser". It belongs to this request only.
   Q_INVOKABLE void request(const QString &command, const QUrl &file = {},
-                           int delaySeconds = -1);
+                           int delaySeconds = -1, const QString &chooser = {});
   Q_INVOKABLE void cancel();
   Q_INVOKABLE void discard();
   Q_INVOKABLE void save();
@@ -26,7 +28,8 @@ signals:
   void changed();
   void confirmationRequested();
   void saveRequested();
-  void proceed(const QString &command, const QUrl &file, int delaySeconds);
+  void proceed(const QString &command, const QUrl &file, int delaySeconds,
+               const QString &chooser);
 
 private:
   void continueRequest();
@@ -34,4 +37,5 @@ private:
   QString m_command;
   QUrl m_file;
   int m_delaySeconds = -1;
+  QString m_chooser;
 };

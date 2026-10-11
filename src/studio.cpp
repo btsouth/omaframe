@@ -36,6 +36,7 @@
 #include <QWindow>
 #include <QtConcurrent>
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -378,6 +379,15 @@ void Studio::setAutoSaveScreenshots(bool value) {
   if (value == autoSaveScreenshots())
     return;
   QSettings().setValue("autoSaveScreenshots", value);
+  emit changed();
+}
+bool Studio::skipChooser() const {
+  return QSettings().value("screenshot/skipChooser", false).toBool();
+}
+void Studio::setSkipChooser(bool value) {
+  if (value == skipChooser())
+    return;
+  QSettings().setValue("screenshot/skipChooser", value);
   emit changed();
 }
 void Studio::setKeepOriginals(bool value) {
@@ -893,6 +903,7 @@ void Studio::accept() {
     m_status = "This canvas would exceed 80 megapixels. Use a smaller border "
                "or a different aspect ratio.";
     emit changed();
+    showChooserIfDirectFailed();
     return;
   }
   m_busy = true;
@@ -932,6 +943,8 @@ void Studio::accept() {
             // saved and copied, including a failed original backup.
             if (m_quickMode && m_quickState == "done")
               emit dismissRequested();
+            else
+              showChooserIfDirectFailed();
           });
   watcher->setFuture(QtConcurrent::run([source = m_original, edits = m_marks.edits(),
                                         options = m_options,
@@ -1258,9 +1271,7 @@ void Studio::acquireCapture(bool region, int monitor, bool repeat,
                               false);
                     m_sourceMonitor = frame.key();
                     m_sourceArea = repeat ? lastArea : QRectF(0, 0, 1, 1);
-                    m_quickState = "choosing";
-                    emit changed();
-                    emit chooserRequested();
+                    selected();
                   }
                 });
         watcher->setFuture(QtConcurrent::run([requested, screens, region,
@@ -1379,8 +1390,33 @@ void Studio::finishSelection(const QString &monitor, double x1, double y1,
   loadImage(result, whole ? "Display capture" : "Region capture", false);
   m_sourceMonitor = monitor;
   m_sourceArea = m_lastArea;
+  selected();
+}
+void Studio::selected() {
   m_quickState = "choosing";
+  m_direct = CaptureRequest::skipsChooser(skipChooser(), m_chooserOverride);
+  if (!m_direct) {
+    emit changed();
+    emit chooserRequested();
+    return;
+  }
+  // Raw for this screenshot only. The chooser keeps the remembered finish,
+  // so it is not persisted.
+  constexpr int raw = 8;
+  m_options.style = raw;
+  m_directRaw = true;
   emit changed();
+  chooseFinish(raw);
+}
+void Studio::restoreRememberedStyle() {
+  if (!std::exchange(m_directRaw, false))
+    return;
+  m_options.style = std::clamp(QSettings().value("style", 0).toInt(), 0, 8);
+}
+void Studio::showChooserIfDirectFailed() {
+  if (!m_direct || (m_quickState != "failed" && m_quickState != "copy-failed"))
+    return;
+  m_direct = false;
   emit chooserRequested();
 }
 void Studio::scrollInstead(const QString &monitor) {
@@ -1632,6 +1668,8 @@ void Studio::copyQuick() {
     emit changed();
     if (error.isEmpty())
       emit dismissRequested();
+    else
+      showChooserIfDirectFailed();
   });
   const bool notificationPreview = notifications() &&
                                   !QStandardPaths::findExecutable("notify-send").isEmpty();

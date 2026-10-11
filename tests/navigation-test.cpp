@@ -95,6 +95,33 @@ private slots:
     QCOMPARE(proceed.count(), 1);
     QCOMPARE(proceed.first().at(0).toString(), QString("history"));
   }
+  void chooserOverrideTravelsWithItsRequest() {
+    Navigation nav;
+    QSignalSpy proceed(&nav, &Navigation::proceed);
+    nav.request("capture", {}, -1, "direct");
+    QCOMPARE(proceed.count(), 1);
+    QCOMPARE(proceed.first().at(3).toString(), QString("direct"));
+    nav.setDirty(true);
+    // Held then cancelled: the next request does not inherit it.
+    nav.request("capture", {}, -1, "direct");
+    nav.cancel();
+    nav.request("capture");
+    nav.discard();
+    QCOMPARE(proceed.count(), 2);
+    QCOMPARE(proceed.last().at(3).toString(), QString());
+    // Held then confirmed, by discarding or by saving: it is kept.
+    nav.request("screen", {}, -1, "chooser");
+    nav.discard();
+    QCOMPARE(proceed.count(), 3);
+    QCOMPARE(proceed.last().at(0).toString(), QString("screen"));
+    QCOMPARE(proceed.last().at(3).toString(), QString("chooser"));
+    nav.request("capture", {}, 5, "direct");
+    nav.save();
+    nav.saveSucceeded();
+    QCOMPARE(proceed.count(), 4);
+    QCOMPARE(proceed.last().at(2).toInt(), 5);
+    QCOMPARE(proceed.last().at(3).toString(), QString("direct"));
+  }
   void failedSaveCanBeCancelled() {
     Navigation nav;
     nav.setDirty(true);
