@@ -526,35 +526,37 @@ void Video::makeThumbnails() {
              "-q:v", "5", framePath(i)});
         running.push_back(std::move(ffmpeg));
       }
+      // A seek that runs late is dropped; its neighbours stand in for it.
       const QDeadlineTimer deadline(10000);
-      bool late = false;
       for (int k = 0; k < int(running.size()); ++k) {
         const auto &ffmpeg = running[k];
-        if (!ffmpeg->waitForFinished(
-                int(std::max<qint64>(1, deadline.remainingTime())))) {
-          late = true;
+        const bool done = ffmpeg->waitForFinished(
+            int(std::max<qint64>(1, deadline.remainingTime())));
+        if (!done) {
           ffmpeg->kill();
           ffmpeg->waitForFinished();
         }
-        frames << (ffmpeg->exitStatus() == QProcess::NormalExit &&
-                           ffmpeg->exitCode() == 0
-                       ? framePath(first + k)
+        const QString path = framePath(first + k);
+        frames << (done && ffmpeg->exitStatus() == QProcess::NormalExit &&
+                           ffmpeg->exitCode() == 0 && QFileInfo::exists(path)
+                       ? QUrl::fromLocalFile(path).toString()
                        : QString());
       }
-      if (late)
-        return QStringList();
     }
-    // A frame past the last keyframe can come back empty; repeat the last.
-    QStringList result;
-    for (const auto &path : frames) {
-      if (!path.isEmpty() && QFileInfo::exists(path))
-        result << QUrl::fromLocalFile(path).toString();
-      else if (!result.isEmpty())
-        result << result.last();
-      else
-        return QStringList();
+    // A frame past the last keyframe can come back empty. Each missing frame
+    // repeats the one before it, or the first that worked.
+    const auto found =
+        std::find_if(frames.begin(), frames.end(),
+                     [](const QString &frame) { return !frame.isEmpty(); });
+    if (found == frames.end())
+      return QStringList();
+    QString last = *found;
+    for (auto &frame : frames) {
+      if (frame.isEmpty())
+        frame = last;
+      last = frame;
     }
-    return result;
+    return frames;
   }));
 }
 // What a mark looks like on its own, leaving out when it shows.
