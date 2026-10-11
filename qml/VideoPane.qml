@@ -33,6 +33,11 @@ Item {
     property bool loadingEditState: true
     property bool editStateInitialized: false
     readonly property bool loaded: video.source.toString().length > 0
+    // Giving a player the source it already has stops it, and video's
+    // changed signal covers much more than its sources. These notify only
+    // when the source itself changes.
+    readonly property url playerSource: video.source
+    readonly property url cameraPlayerSource: video.cameraSource
     readonly property bool editable: loaded && !video.busy && !loadingEditState
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
     readonly property string signature: JSON.stringify([clipStart.toFixed(3), clipEnd.toFixed(3), muted, cuts.map(c => [c.start.toFixed(3), c.end.toFixed(3)]), video.marks.annotations, video.marks.cropBounds, video.cameraLayout])
@@ -413,10 +418,18 @@ Item {
     MediaPlayer {
         id: player
         objectName: "videoPlayer"
-        source: video.source
+        source: pane.playerSource
         videoOutput: output
         audioOutput: AudioOutput {
             muted: pane.muted
+        }
+        // A stopped player draws nothing. Pausing it where the editor put it
+        // shows that frame until playback starts.
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.LoadedMedia && playbackState === MediaPlayer.StoppedState) {
+                pause();
+                position = Math.max(0, pane.heldPosition);
+            }
         }
         onPositionChanged: function() {
             if (pane.restoreHeld())
@@ -830,7 +843,7 @@ Item {
                 clip: true
                 MediaPlayer {
                     id: cameraPlayer
-                    source: video.cameraSource
+                    source: pane.cameraPlayerSource
                     videoOutput: cameraOutput
                     onMediaStatusChanged: if (mediaStatus === MediaPlayer.LoadedMedia) position = player.position
                 }
@@ -1383,6 +1396,34 @@ Item {
                                 }
                             }
                         }
+                    }
+                    // A light band sweeps the strip while its frames are made.
+                    Rectangle {
+                        id: sweep
+                        visible: video.thumbnailsLoading
+                        width: parent.width * 0.3
+                        height: parent.height
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0; color: "transparent" }
+                            GradientStop { position: 0.5; color: theme.alpha(theme.text, 0.07) }
+                            GradientStop { position: 1; color: "transparent" }
+                        }
+                        NumberAnimation on x {
+                            running: sweep.visible && pane.visible
+                            from: -sweep.width
+                            to: track.width
+                            duration: 1200
+                            loops: Animation.Infinite
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        visible: video.thumbnailsLoading
+                        text: "Loading filmstrip…"
+                        color: theme.muted
+                        font.pixelSize: 11
                     }
                 }
                 MouseArea {

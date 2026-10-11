@@ -3,6 +3,7 @@
 #include "studio.hpp"
 #include <QDataStream>
 #include <QDateTime>
+#include <QDeadlineTimer>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
@@ -15,12 +16,14 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QThread>
 #include <QUuid>
 #include <QtConcurrent>
 #include <QVector>
 #include <algorithm>
 #include <cmath>
 #include <csignal>
+#include <vector>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 
@@ -485,9 +488,11 @@ void Video::open(const QUrl &url) {
 void Video::makeThumbnails() {
   const int generation = ++m_generation;
   m_thumbnails.clear();
+  m_thumbnailsLoading = false;
   m_thumbnailDir = std::make_unique<QTemporaryDir>();
   if (!m_thumbnailDir->isValid())
     return;
+  m_thumbnailsLoading = true;
   auto *watcher = new QFutureWatcher<QStringList>(this);
   connect(watcher, &QFutureWatcher<QStringList>::finished, this,
           [this, watcher, generation] {
@@ -495,61 +500,54 @@ void Video::makeThumbnails() {
             if (generation != m_generation)
               return;
             m_thumbnails = watcher->result();
+            m_thumbnailsLoading = false;
             emit changed();
           });
   watcher->setFuture(QtConcurrent::run([dir = m_thumbnailDir->path(),
                                         file = m_source.toLocalFile(),
                                         duration = m_duration] {
-    QStringList result;
-    // For short clips, decode once instead of starting and seeking FFmpeg
-    // sixteen times. Long clips keep bounded seeks rather than a full decode.
-    if (duration <= 90) {
-      const QString fps = QString::number(ThumbnailCount / duration, 'f', 8);
-      const QString first = QString::number(duration / (2 * ThumbnailCount), 'f', 6);
-      QProcess batch;
-      batch.start("ffmpeg",
-                  {"-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-                   "-i", file, "-an", "-vf",
-                   "fps=fps=" + fps + ":start_time=" + first + ",scale=-2:120",
-                   "-frames:v", QString::number(ThumbnailCount), "-q:v", "5",
-                   "-start_number", "0", dir + "/%02d.jpg"});
-      const bool complete = batch.waitForFinished(15000) &&
-                            batch.exitStatus() == QProcess::NormalExit &&
-                            batch.exitCode() == 0;
-      if (batch.state() != QProcess::NotRunning) {
-        batch.kill();
-        batch.waitForFinished();
+    // Each frame is a short seek of its own. A single decode of the whole
+    // clip is slower for high-bitrate recordings, so run several seeks at
+    // once instead, in waves the machine can take.
+    const int wave = std::clamp(QThread::idealThreadCount() / 2, 2, 8);
+    auto framePath = [&](int i) {
+      return QString("%1/%2.jpg").arg(dir).arg(i, 2, 10, QChar('0'));
+    };
+    QStringList frames;
+    for (int first = 0; first < ThumbnailCount; first += wave) {
+      std::vector<std::unique_ptr<QProcess>> running;
+      for (int i = first; i < std::min(first + wave, ThumbnailCount); ++i) {
+        auto ffmpeg = std::make_unique<QProcess>();
+        ffmpeg->start(
+            "ffmpeg",
+            {"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss",
+             QString::number(duration * (i + 0.5) / ThumbnailCount, 'f', 3),
+             "-i", file, "-frames:v", "1", "-an", "-vf", "scale=-2:120",
+             "-q:v", "5", framePath(i)});
+        running.push_back(std::move(ffmpeg));
       }
-      if (complete) {
-        for (int i = 0; i < ThumbnailCount; ++i) {
-          const QString path =
-              QString("%1/%2.jpg").arg(dir).arg(i, 2, 10, QChar('0'));
-          if (!QFileInfo::exists(path))
-            break;
-          result << QUrl::fromLocalFile(path).toString();
+      const QDeadlineTimer deadline(10000);
+      bool late = false;
+      for (int k = 0; k < int(running.size()); ++k) {
+        const auto &ffmpeg = running[k];
+        if (!ffmpeg->waitForFinished(
+                int(std::max<qint64>(1, deadline.remainingTime())))) {
+          late = true;
+          ffmpeg->kill();
+          ffmpeg->waitForFinished();
         }
-        if (result.size() == ThumbnailCount)
-          return result;
-        result.clear();
+        frames << (ffmpeg->exitStatus() == QProcess::NormalExit &&
+                           ffmpeg->exitCode() == 0
+                       ? framePath(first + k)
+                       : QString());
       }
-    }
-    for (int i = 0; i < ThumbnailCount; ++i) {
-      const QString path =
-          QString("%1/%2.jpg").arg(dir).arg(i, 2, 10, QChar('0'));
-      QProcess ffmpeg;
-      ffmpeg.start(
-          "ffmpeg",
-          {"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss",
-           QString::number(duration * (i + 0.5) / ThumbnailCount, 'f', 3),
-           "-i", file, "-frames:v", "1", "-an", "-vf", "scale=-2:120", "-q:v",
-           "5", path});
-      if (!ffmpeg.waitForFinished(5000)) {
-        ffmpeg.kill();
-        ffmpeg.waitForFinished();
+      if (late)
         return QStringList();
-      }
-      // A frame past the last keyframe can come back empty; repeat the last.
-      if (ffmpeg.exitCode() == 0 && QFileInfo::exists(path))
+    }
+    // A frame past the last keyframe can come back empty; repeat the last.
+    QStringList result;
+    for (const auto &path : frames) {
+      if (!path.isEmpty() && QFileInfo::exists(path))
         result << QUrl::fromLocalFile(path).toString();
       else if (!result.isEmpty())
         result << result.last();
