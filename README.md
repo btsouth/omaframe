@@ -37,6 +37,8 @@ Version 0.11.0 pins screenshots to your screen and opens a screenshot again
 when you click its notification. See [the release notes](docs/release-notes-0.11.0.md).
 Version 0.11.1 starts again on Omarchy stable and rc
 ([release notes](docs/release-notes-0.11.1.md)).
+Version 0.11.2 shows a video's first frame as soon as it opens and loads the
+filmstrip faster ([release notes](docs/release-notes-0.11.2.md)).
 
 ## Take a screenshot
 
