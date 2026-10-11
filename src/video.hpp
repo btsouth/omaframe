@@ -53,6 +53,8 @@ class Video : public QObject {
   Q_PROPERTY(int audioTracks READ audioTracks NOTIFY changed)
   /** Evenly spaced frames for the timeline, as file URLs; empty until ready. */
   Q_PROPERTY(QStringList thumbnails READ thumbnails NOTIFY changed)
+  /** True while the timeline frames are being made. */
+  Q_PROPERTY(bool thumbnailsLoading READ thumbnailsLoading NOTIFY changed)
   /** The saved clip's file name and a short "9.0 s · 8.1 MB" summary. */
   Q_PROPERTY(QString savedName READ savedName NOTIFY changed)
   Q_PROPERTY(QString savedSummary READ savedSummary NOTIFY changed)
@@ -92,6 +94,7 @@ public:
   double progress() const { return m_progress; }
   int audioTracks() const { return m_audioTracks; }
   QStringList thumbnails() const { return m_thumbnails; }
+  bool thumbnailsLoading() const { return m_thumbnailsLoading; }
   QString savedName() const;
   QString savedSummary() const { return m_savedSummary; }
   QString gifPath() const { return m_gifSaved; }
@@ -191,6 +194,7 @@ private:
   QStringList m_thumbnails;
   std::unique_ptr<QTemporaryDir> m_thumbnailDir;
   int m_generation = 0;
+  bool m_thumbnailsLoading = false;
   QString m_name, m_dimensions, m_status = "Open a recording to get started.",
                                 m_directory, m_saved, m_temporary, m_final,
                                 m_error;

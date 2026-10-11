@@ -271,6 +271,28 @@ private slots:
     QVERIFY(QMetaObject::invokeMethod(scene.pane.get(), "toggleSound"));
     QVERIFY(!scene.video.editState().value("muted").toBool());
   }
+  void openedVideoStaysPausedOnItsFrame() {
+    PaneScene scene(temp);
+    QTRY_VERIFY2(scene.component.isReady(),
+                 qPrintable(scene.component.errorString()));
+    QVERIFY2(scene.create(), qPrintable(scene.component.errorString()));
+    scene.window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&scene.window));
+    scene.video.open(QUrl::fromLocalFile(plain));
+    auto *player = scene.pane->findChild<QObject *>("videoPlayer");
+    QVERIFY(player);
+    // A stopped player draws nothing, so an opened video waits paused.
+    QTRY_COMPARE_WITH_TIMEOUT(player->property("playbackState").toInt(),
+                              int(QMediaPlayer::PausedState), 12000);
+    // The filmstrip arriving is a change to the video, not to its source,
+    // and must not stop the player.
+    QTRY_COMPARE_WITH_TIMEOUT(scene.video.thumbnails().size(),
+                              Video::ThumbnailCount, 20000);
+    QVERIFY(!scene.video.thumbnailsLoading());
+    QTest::qWait(200);
+    QCOMPARE(player->property("playbackState").toInt(),
+             int(QMediaPlayer::PausedState));
+  }
   void markClipboardKeysJoinTheUndoStack() {
     PaneScene scene(temp);
     QTRY_VERIFY2(scene.component.isReady(),
