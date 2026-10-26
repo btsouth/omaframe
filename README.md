@@ -20,8 +20,8 @@ curl -fsSL https://pkgs.btso.dev/install.sh | bash -s -- omaframe
 ```
 
 It adds my [signed package repository](https://github.com/btsouth/pkgs), so
-Omaframe then updates with the rest of your system (`omarchy update` or
-`sudo pacman -Syu`). If you installed an earlier release by hand, run the same
+Omaframe then updates with the rest of your system (`omarchy update` on
+Omarchy, `sudo pacman -Syu` on plain Arch). If you installed an earlier release by hand, run the same
 command to start getting updates.
 
 If pacman says it cannot satisfy a dependency, your package lists are older
