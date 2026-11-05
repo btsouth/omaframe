@@ -4,6 +4,38 @@ This is a historical validation record. Results and open checks apply to the
 versions named below. Untested configurations are coverage limits, not pending
 owner tasks; see [the current release policy](../RELEASING.md).
 
+## Screenshot editor keyboard navigation, 2026-11-05
+
+This update supersedes the earlier editor Escape-to-chooser behavior recorded
+below. Escape still handles text entry, a drag, a selected mark, or an armed
+tool first. With none of those active, it now dismisses quick editing rather
+than opening the finish chooser. Full editing keeps its existing behavior:
+Escape leaves Edit for the inline Finish view without closing the studio.
+
+F explicitly opens finishes: the separate chooser in quick editing, or the
+inline Finish view in the full editor. The screenshot's edits and selected
+finish are preserved. The finish control's tooltip shows F. Typing an `f`
+in a label does not navigate, and F does not interrupt an active drag.
+
+Screenshot notifications still reopen directly into the floating quick
+editor, not the chooser. Escape and F have the same behavior there as in an
+editor reached from the chooser. Floating-window placement is unchanged.
+
+Built the app and `quick-copy-tests`, then ran:
+
+```sh
+ctest --test-dir build -R '^quick-copy$' --output-on-failure
+```
+
+The suite passed. Twelve new offscreen QML cases cover capture, notification
+snapshot reopening, and full editing, each with Escape, F, text-entry, and
+drag checks. They verify the Escape selection/tool ladder, finish/edit
+preservation, no unintended clipboard or output-file writes, and dismissal
+signals wired to hide the quick window as in the app controller. These are
+fixture checks, not a live notification-daemon or physical desktop test.
+
+## Original capture workflow, 2026-09-25
+
 Date: 2026-09-25. Build: 0.2.0 preview. Local, unpublished checkout.
 
 ## Behavior

@@ -139,14 +139,14 @@ ApplicationWindow {
         root.operationStatus = studio.status;
     }
     // Escape peels one layer at a time: typing, a drag, the selection, the
-    // tool, then Edit itself.
+    // tool, then Edit itself. Quick editing closes; F opens finishes.
     function escapeEditor() {
         studio.cancelPendingAccept();
         if (markCanvas.typing) markCanvas.commitText();
         else if (markCanvas.dragging) markCanvas.cancelDrag();
         else if (studio.marks.selectedAnnotation.type !== undefined) studio.marks.clearSelection();
         else if (root.tool !== "select") root.tool = "select";
-        else if (studio.quickMode) studio.showFinishes();
+        else if (studio.quickMode) studio.dismissQuick();
         else root.editing = false;
     }
     function showFinish() {
@@ -334,6 +334,11 @@ ApplicationWindow {
         sequence: "E"
         enabled: root.shortcutsAllowed && !root.videoMode && studio.hasImage && !root.editing && !root.working
         onActivated: root.editing = true
+    }
+    Shortcut {
+        sequence: "F"
+        enabled: root.shortcutsAllowed && !root.videoMode && studio.hasImage && root.editing
+        onActivated: root.showFinish()
     }
     Repeater {
         model: root.annotationTools
@@ -1071,7 +1076,7 @@ ApplicationWindow {
                                 quiet: !selected
                                 selected: !root.editing
                                 implicitHeight: 32
-                                hint: studio.quickMode ? "Back to the finish picker · Esc" : "Border and background"
+                                hint: studio.quickMode ? "Open the finish picker · F" : "Border and background · F"
                                 onClicked: root.showFinish()
                             }
                             StudioButton {
