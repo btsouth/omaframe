@@ -964,6 +964,152 @@ private slots:
                            "Paste into a chat, document or folder. Recordings are saved in %1.")
                        .arg(clips));
   }
+  void editorNavigationKeys_data() {
+    QTest::addColumn<QString>("origin");
+    QTest::addColumn<QString>("action");
+    for (const QString origin : {"capture", "notification", "full"})
+      for (const QString action : {"escape", "finishes", "text", "drag"})
+        QTest::newRow(qPrintable(origin + "-" + action)) << origin << action;
+  }
+  void editorNavigationKeys() {
+    QFETCH(QString, origin);
+    QFETCH(QString, action);
+    QQmlEngine engine;
+    auto *store = new ImageStore;
+    engine.addImageProvider("frames", store);
+    auto *videoStore = new ImageStore;
+    engine.addImageProvider("videomarks", videoStore);
+    Studio studio(store, false);
+    Video video;
+    video.setImageStore(videoStore);
+    Recorder recorder;
+    ShortcutSetup shortcuts;
+    Navigation navigation;
+    OmarchyTheme theme(nullptr, temp.filePath("theme"), temp.filePath("theme-config"), false);
+    HistoryImages historyImages;
+    CaptureHistoryModel history(&historyImages);
+    FilePicker filePicker([] { return QString(); }, [] { return QString(); });
+    engine.rootContext()->setContextProperty("studio", &studio);
+    engine.rootContext()->setContextProperty("video", &video);
+    engine.rootContext()->setContextProperty("recorder", &recorder);
+    engine.rootContext()->setContextProperty("shortcuts", &shortcuts);
+    engine.rootContext()->setContextProperty("history", &history);
+    engine.rootContext()->setContextProperty("navigation", &navigation);
+    engine.rootContext()->setContextProperty("filePicker", &filePicker);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    engine.rootContext()->setContextProperty("captureAtStartup", true);
+    const bool quick = origin != "full";
+    if (quick) prepare(studio);
+    else {
+      const QString input = temp.filePath("editor-navigation.png");
+      QVERIFY(captureImage().save(input));
+      studio.open(QUrl::fromLocalFile(input));
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.busy() && !studio.rendering(), 5000);
+    studio.setStyle(3);
+    studio.marks()->edit("box", .1, .1, .4, .4);
+    if (origin == "notification") {
+      // Use the same editable snapshot and reopen path as the notification.
+      QSignalSpy copied(&studio, &Studio::dismissRequested);
+      studio.copyQuick();
+      QTRY_COMPARE_WITH_TIMEOUT(copied.count(), 1, 15000);
+      const auto snapshot = studio.snapshot();
+      studio.leaveQuickMode();
+      studio.closeImage();
+      QFile::remove(clipboard());
+      QVERIFY(studio.reopen(snapshot));
+      QCOMPARE(studio.quickState(), QString("editing"));
+    }
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
+    QTRY_VERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QQuickWindow> window(qobject_cast<QQuickWindow *>(component.create()));
+    QVERIFY2(window, qPrintable(component.errorString()));
+    if (quick) studio.openEditor();
+    else window->setProperty("editing", true);
+    window->show();
+    window->requestActivate();
+    QVERIFY(QTest::qWaitForWindowExposed(window.get()));
+    QTRY_VERIFY(window->isActive());
+    QTRY_VERIFY_WITH_TIMEOUT(!studio.rendering(), 5000);
+    QSignalSpy dismissed(&studio, &Studio::dismissRequested);
+    QSignalSpy chooser(&studio, &Studio::chooserRequested);
+    // main.cpp owns window visibility for these quick-task signals.
+    connect(&studio, &Studio::dismissRequested, window.get(), &QWindow::hide);
+    connect(&studio, &Studio::chooserRequested, window.get(), &QWindow::hide);
+    const auto edits = studio.marks()->edits();
+    if (action == "finishes") {
+      QTest::keyClick(window.get(), Qt::Key_F);
+      if (quick) {
+        QCOMPARE(chooser.count(), 1);
+        QCOMPARE(studio.quickState(), QString("choosing"));
+        QVERIFY(!window->isVisible());
+      } else {
+        QVERIFY(!window->property("editing").toBool());
+        QVERIFY(window->isVisible());
+        QCOMPARE(chooser.count(), 0);
+      }
+      QCOMPARE(studio.marks()->edits(), edits);
+      QCOMPARE(studio.style(), 3);
+    } else if (action == "escape") {
+      // First clear the selected mark, then disarm the tool, then leave Edit.
+      studio.marks()->select(0);
+      QTest::keyClick(window.get(), Qt::Key_Escape);
+      QVERIFY(studio.marks()->selectedAnnotation().isEmpty());
+      QVERIFY(window->property("editing").toBool());
+      QCOMPARE(dismissed.count(), 0);
+      QTest::keyClick(window.get(), Qt::Key_A);
+      QCOMPARE(window->property("tool").toString(), QString("arrow"));
+      QTest::keyClick(window.get(), Qt::Key_Escape);
+      QCOMPARE(window->property("tool").toString(), QString("select"));
+      QVERIFY(window->property("editing").toBool());
+      QCOMPARE(dismissed.count(), 0);
+      QTest::keyClick(window.get(), Qt::Key_Escape);
+      QCOMPARE(dismissed.count(), quick ? 1 : 0);
+      if (quick) {
+        QCOMPARE(studio.quickState(), QString("cancelled"));
+        QVERIFY(!window->isVisible());
+      } else {
+        QVERIFY(!window->property("editing").toBool());
+        QVERIFY(window->isVisible());
+      }
+      QCOMPARE(studio.marks()->edits(), edits);
+    } else {
+      QQuickItem *canvas = nullptr;
+      for (auto *item : window->findChildren<QQuickItem *>())
+        if (QByteArray(item->metaObject()->className()).startsWith("MarkCanvas"))
+          canvas = item;
+      QVERIFY(canvas);
+      const QPoint start = canvas->mapToScene(QPointF(canvas->width() * .6,
+                                                     canvas->height() * .6)).toPoint();
+      if (action == "text") {
+        QTest::keyClick(window.get(), Qt::Key_T);
+        QTest::mouseClick(window.get(), Qt::LeftButton, Qt::NoModifier, start);
+        QTRY_VERIFY(canvas->property("typing").toBool());
+        QTest::keyClick(window.get(), Qt::Key_F);
+        QCOMPARE(window->activeFocusItem()->property("text").toString(), QString("f"));
+        QTest::keyClick(window.get(), Qt::Key_Escape);
+        QVERIFY(!canvas->property("typing").toBool());
+        QCOMPARE(studio.marks()->edits().last().text, QString("f"));
+      } else {
+        QTest::keyClick(window.get(), Qt::Key_B);
+        QTest::mousePress(window.get(), Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(window.get(), start + QPoint(30, 20));
+        QVERIFY(canvas->property("dragging").toBool());
+        QTest::keyClick(window.get(), Qt::Key_F);
+        QTest::keyClick(window.get(), Qt::Key_Escape);
+        QTest::mouseRelease(window.get(), Qt::LeftButton, Qt::NoModifier,
+                            start + QPoint(30, 20));
+        QVERIFY(!canvas->property("dragging").toBool());
+        QCOMPARE(studio.marks()->edits(), edits);
+      }
+      QVERIFY(window->property("editing").toBool());
+      QVERIFY(window->isVisible());
+    }
+    QCOMPARE(dismissed.count(), action == "escape" && quick ? 1 : 0);
+    if (action != "finishes") QCOMPARE(chooser.count(), 0);
+    QVERIFY(!QFileInfo::exists(clipboard()));
+    QVERIFY(!QDir(temp.filePath("output")).exists());
+  }
   void editorClipboardKeysKeepTheScreenshotOpen_data() {
     QTest::addColumn<bool>("autoSave");
     QTest::addColumn<bool>("ctrlS");
